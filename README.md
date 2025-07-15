@@ -1,29 +1,166 @@
-# Telegram NLP Summarizer
+# Telegram News Summarizer
 
-A Python app that summarizes daily messages from specified Telegram channels and groups with an NLP focus.
+Автоматический сервис для суммаризации новостей из Telegram каналов, специализирующийся на дата-сайенс и NLP тематике.
 
-It filters out non‑NLP messages using an OpenAI‑compatible API and posts the summarized results to your own Telegram channel. The app also attempts to detect reposts and duplicates.
+## Возможности
 
-## Setup
-1. Copy `.env.example` to `.env` and fill in the required values.
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. Run the summarizer:
-   ```bash
-   python summarizer.py
-   ```
+- 📊 Автоматический сбор сообщений из указанных Telegram каналов
+- 🤖 Фильтрация сообщений по тематике (NLP/ML) с помощью OpenAI
+- 🔍 Удаление дубликатов на основе ссылок и семантического анализа
+- 📝 Генерация краткого дайджеста с помощью GPT-3.5-turbo
+- 📤 Автоматическая отправка дайджеста в целевой канал
 
-## Environment Variables
-- `TELEGRAM_API_ID` and `TELEGRAM_API_HASH`: Telegram API credentials.
-- `TELEGRAM_BOT_TOKEN`: Bot token used to send messages.
-- `TARGET_CHANNEL`: Channel username or ID where summaries will be posted.
-- `OPENAI_API_KEY`: API key for the OpenAI‑compatible service.
-- `SOURCE_CHANNELS`: Comma‑separated list of channels/groups to summarize.
+## Установка
 
-## Features
-- Fetches messages from configured channels for the last 24 hours.
-- Filters messages to keep only those related to NLP.
-- Detects duplicates through link matching and LLM checks.
-- Sends a daily summary to your target channel.
+1. Клонируйте репозиторий:
+```bash
+git clone <repository-url>
+cd tg_summarizer
+```
+
+2. Установите зависимости:
+```bash
+pip install -r requirements.txt
+```
+
+3. Создайте файл `.env` с необходимыми переменными окружения:
+```bash
+cp .env.example .env
+```
+
+## Настройка
+
+### 1. Получение Telegram API credentials
+
+1. Перейдите на https://my.telegram.org/
+2. Войдите в свой аккаунт
+3. Перейдите в "API development tools"
+4. Создайте новое приложение и получите `API_ID` и `API_HASH`
+
+### 2. Создание Telegram бота
+
+1. Найдите @BotFather в Telegram
+2. Отправьте команду `/newbot`
+3. Следуйте инструкциям и получите `BOT_TOKEN`
+
+### 3. Настройка каналов
+
+1. Добавьте бота в целевой канал как администратора
+2. Добавьте бота в исходные каналы (или убедитесь, что каналы публичные)
+3. Получите username каналов (например, `@channel_name`)
+
+### 4. Получение OpenAI API ключа
+
+1. Зарегистрируйтесь на https://platform.openai.com/
+2. Создайте API ключ в разделе "API Keys"
+
+### 5. Настройка .env файла
+
+Отредактируйте файл `.env`:
+
+```env
+# Telegram API credentials
+TELEGRAM_API_ID=12345678
+TELEGRAM_API_HASH=your_api_hash_here
+TELEGRAM_BOT_TOKEN=1234567890:ABCdefGHIjklMNOpqrsTUVwxyz
+
+# Channel configuration
+TARGET_CHANNEL=@your_target_channel
+SOURCE_CHANNELS=@nlp_channel,@ml_news,@ai_research
+
+# OpenAI API key
+OPENAI_API_KEY=sk-your_openai_api_key_here
+```
+
+## Использование
+
+### Тестирование подключения
+
+Перед запуском основного скрипта рекомендуется протестировать подключение:
+
+```bash
+python test_connection.py
+```
+
+Этот скрипт проверит:
+- Наличие всех переменных окружения
+- Подключение к Telegram API
+- Доступ к целевым и исходным каналам
+
+### Запуск основного скрипта
+
+```bash
+python summarizer.py
+```
+
+Скрипт выполнит следующие действия:
+1. Соберет сообщения из исходных каналов за последние 24 часа
+2. Отфильтрует сообщения по тематике NLP/ML
+3. Удалит дубликаты
+4. Сгенерирует краткий дайджест
+5. Отправит дайджест в целевой канал
+
+## Автоматизация
+
+### Использование готового скрипта
+
+В проекте есть готовый скрипт `run_daily.sh`:
+
+```bash
+# Запуск вручную
+./run_daily.sh
+
+# Добавить в crontab для запуска каждый день в 9:00
+0 9 * * * /path/to/tg_summarizer/run_daily.sh >> /path/to/tg_summarizer/logs/summarizer.log 2>&1
+```
+
+### Ручная настройка cron
+
+```bash
+# Открыть crontab для редактирования
+crontab -e
+
+# Добавить строку для запуска каждый день в 9:00
+0 9 * * * cd /path/to/tg_summarizer && python summarizer.py
+
+# Или для запуска каждый час
+0 * * * * cd /path/to/tg_summarizer && python summarizer.py
+```
+
+## Структура проекта
+
+```
+tg_summarizer/
+├── summarizer.py      # Основной скрипт
+├── requirements.txt   # Зависимости Python
+├── README.md         # Документация
+└── .env              # Переменные окружения (создать самостоятельно)
+```
+
+## Требования
+
+- Python 3.8+
+- Telegram API credentials
+- OpenAI API ключ
+- Доступ к исходным каналам
+- Права администратора в целевом канале
+
+## Устранение неполадок
+
+### Ошибка "Missing required environment variables"
+Убедитесь, что файл `.env` создан и содержит все необходимые переменные.
+
+### Ошибка "Cannot find implementation or library stub for module named 'telethon'"
+Установите зависимости: `pip install -r requirements.txt`
+
+### Ошибка доступа к каналам
+Убедитесь, что:
+- Бот добавлен в каналы
+- Каналы публичные или бот имеет доступ
+- Username каналов указан правильно (с символом @)
+
+### Ошибки OpenAI API
+Проверьте:
+- Правильность API ключа
+- Достаточность баланса на аккаунте OpenAI
+- Статус API сервиса OpenAI
