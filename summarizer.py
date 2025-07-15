@@ -106,9 +106,10 @@ async def are_messages_duplicate(msg_a: MessageInfo, msg_b: MessageInfo) -> bool
 
 
 async def is_nlp_related(text: str) -> bool:
-    """Use the LLM to decide if a message is NLP related."""
+    """Use the LLM to decide if a message is NLP related and not advertising."""
     system_prompt = (
-        "Вы классификатор. Ответьте да, если текст касается NLP или машинного обучения. "
+        "Вы классификатор. Ответьте да, если текст касается NLP или машинного обучения И НЕ является рекламой. "
+        "Реклама включает: курсы, платные программы обучения, рекламу русскоязычных LLM, коммерческие предложения. "
         "Иначе ответьте нет. Отвечайте только да или нет."
     )
     
