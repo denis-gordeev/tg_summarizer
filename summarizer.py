@@ -132,32 +132,26 @@ async def summarize_text(messages: List[MessageInfo]) -> str:
     if not result:
         return "Ошибка: Не удалось сгенерировать обобщение"
     
-    # Заменяем номера источников на Markdown ссылки прямо в тексте
+    # Заменяем номера источников на HTML-ссылки прямо в тексте
     import re
-    
-    # Паттерн для поиска множественных источников [1,2,3]
-    multiple_sources_pattern = r'\[(\d+(?:,\d+)*)\]'
-    
-    def replace_multiple_sources(match):
-        source_numbers = match.group(1).split(',')
+
+    def replace_all_sources_html(match):
+        content = match.group(1)  # содержимое внутри скобок
+        numbers = [num.strip() for num in content.split(',')]
         source_links = []
-        for num in source_numbers:
-            num = int(num.strip())
-            if 1 <= num <= len(messages):
-                source_links.append(f"[{num}]({messages[num-1].get_telegram_link()})")
-        return '[' + ', '.join(source_links) + ']'
-    
-    # Заменяем множественные источники
-    result = re.sub(multiple_sources_pattern, replace_multiple_sources, result)
-    
-    # Затем обрабатываем одиночные источники [1], [2], [3] (только те, что не были обработаны)
-    for i, msg in enumerate(messages, 1):
-        # Ищем только одиночные номера, которые еще не были заменены
-        single_pattern = rf'\[{i}\]'
-        if re.search(single_pattern, result):
-            markdown_link = f"[{i}]({msg.get_telegram_link()})"
-            result = re.sub(single_pattern, markdown_link, result)
-    
+        for num_str in numbers:
+            try:
+                num = int(num_str)
+                if 1 <= num <= len(messages):
+                    source_links.append(f'<a href="{messages[num-1].get_telegram_link()}">[{num}]</a>')
+            except ValueError:
+                continue
+        return ', '.join(source_links)
+
+    # Паттерн для поиска всех ссылок на источники [1], [1,2], [1,2,3] и т.д.
+    all_sources_pattern = r'\[(\d+(?:,\s*\d+)*)\]'
+    result = re.sub(all_sources_pattern, replace_all_sources_html, result)
+
     return result
 
 
@@ -234,7 +228,7 @@ async def main():
             print("No NLP messages found")
             return
         summary = await summarize_text(unique)
-        await user_client.send_message(TARGET_CHANNEL, summary)
+        await user_client.send_message(TARGET_CHANNEL, summary, parse_mode='html')
         print("Summary sent")
     finally:
         # Disconnect both clients
