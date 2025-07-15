@@ -108,17 +108,24 @@ async def are_messages_duplicate(msg_a: MessageInfo, msg_b: MessageInfo) -> bool
 async def is_nlp_related(text: str) -> bool:
     """Use the LLM to decide if a message is NLP related and not advertising."""
     system_prompt = (
-        "Вы классификатор. Ответьте да, если текст касается NLP или машинного обучения И НЕ является рекламой. "
-        "Реклама включает: курсы, платные программы обучения, рекламу русскоязычных LLM, коммерческие предложения. "
-        "Отдавайте предпочтение техническим статьям, новым подходам и исследованиям. "
-        "Иначе ответьте нет. Отвечайте только да или нет."
-        "Примеры рекламы, на которые нужно ответить нет: "
-        "Свежий курс от GIGASCHOOL и крупнейшей магистратуры по ИИ в России – AI Talent Hub"
-        "Я решил зайти в GigaChat, и не просто спросить «что мне делать», а включить Deep Research"
+        "Вы классификатор. Определите, является ли текст релевантным для NLP/ML дайджеста.\n\n"
+        "ПРИНИМАЙТЕ (ответьте 'да'):\n"
+        "- Научные статьи и исследования по NLP, ML, AI\n"
+        "- Новые модели, библиотеки, инструменты\n"
+        "- Технические обзоры и бенчмарки\n"
+        "- Академические конференции и воркшопы\n"
+        "- Открытые проекты и датасеты\n\n"
+        "ОТКЛОНЯЙТЕ (ответьте 'нет'):\n"
+        "- Курсы, обучение, платные программы\n"
+        "- Реклама русскоязычных LLM (GigaChat, YandexGPT)\n"
+        "- Коммерческие предложения и услуги\n"
+        "- Вебинары с продажами\n"
+        "- Мастер-классы с сертификатами\n\n"
+        "Отвечайте только 'да' или 'нет'."
     )
     
-    answer = await call_openai(system_prompt, text, max_tokens=1)
-    return answer.lower().startswith('y')
+    answer = await call_openai(system_prompt, text, max_tokens=5)
+    return answer.lower().strip().startswith('да')
 
 
 async def summarize_text(messages: List[MessageInfo]) -> str:
@@ -136,7 +143,7 @@ async def summarize_text(messages: List[MessageInfo]) -> str:
         "<b>🚀 Новые Возможности и Ресурсы для Исследователей</b>"
     )
     
-    result = await call_openai(system_prompt, messages_text, max_tokens=400)
+    result = await call_openai(system_prompt, messages_text, max_tokens=16000)
     if not result:
         return "Ошибка: Не удалось сгенерировать обобщение"
     
@@ -216,20 +223,17 @@ async def main():
     try:
         messages = await fetch_messages()
         print(f"Fetched {len(messages)} messages")
-        # For testing, include all messages (bypass NLP filter)
-        filtered = messages
-        print(f"Testing mode: including all {len(filtered)} messages (bypassing NLP filter)")
         
-        # Uncomment the following lines to re-enable NLP filtering:
-        # filtered = []
-        # for i, msg in enumerate(messages):
-        #     print(f"Checking message {i+1}/{len(messages)}...")
-        #     if await is_nlp_related(msg.text):
-        #         filtered.append(msg)
-        #         print(f"  ✓ Message {i+1} is NLP-related")
-        #     else:
-        #         print(f"  ✗ Message {i+1} is not NLP-related")
-        # print(f"{len(filtered)} messages after NLP filter")
+        # Apply NLP filtering to remove advertising
+        filtered = []
+        for i, msg in enumerate(messages):
+            print(f"Checking message {i+1}/{len(messages)}...")
+            if await is_nlp_related(msg.text):
+                filtered.append(msg)
+                print(f"  ✓ Message {i+1} is NLP-related: {msg.text[:100]}")
+            else:
+                print(f"  ✗ Message {i+1} is not NLP-related (likely advertising): {msg.text[:100]}")
+        print(f"{len(filtered)} messages after NLP filter")
         unique = await remove_duplicates(filtered)
         print(f"{len(unique)} messages after deduplication")
         if not unique:
