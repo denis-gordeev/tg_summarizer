@@ -3,6 +3,8 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 import re
+from dataclasses import dataclass
+from typing import List
 
 from dotenv import load_dotenv
 from telethon import TelegramClient
@@ -50,6 +52,22 @@ bot_client = TelegramClient('tg_summarizer_bot', API_ID, API_HASH)
 SIMILARITY_THRESHOLD = 0.9
 
 
+@dataclass
+class MessageInfo:
+    """Информация о сообщении Telegram"""
+    text: str
+    channel: str
+    message_id: int
+    date: datetime
+    link: str
+    
+    def get_telegram_link(self) -> str:
+        """Генерирует ссылку на оригинальное сообщение в Telegram"""
+        # Убираем @ из названия канала для формирования ссылки
+        channel_name = self.channel.lstrip('@')
+        return f"https://t.me/{channel_name}/{self.message_id}"
+
+
 async def call_openai(system_prompt: str, user_content: str, max_tokens: int = 300) -> str:
     """Универсальная функция для вызова OpenAI API."""
     try:
@@ -75,13 +93,13 @@ def extract_links(text: str) -> list[str]:
     return LINK_REGEX.findall(text)
 
 
-async def are_messages_duplicate(msg_a: str, msg_b: str) -> bool:
+async def are_messages_duplicate(msg_a: MessageInfo, msg_b: MessageInfo) -> bool:
     """Use the LLM to see if two messages cover the same topic."""
     system_prompt = (
         "Описывают ли следующие два сообщения Telegram одинаковый контент или статью?\n"
         "Ответьте да или нет."
     )
-    user_content = f"Message 1:\n{msg_a}\n\nMessage 2:\n{msg_b}"
+    user_content = f"Message 1:\n{msg_a.text}\n\nMessage 2:\n{msg_b.text}"
     
     answer = await call_openai(system_prompt, user_content, max_tokens=1)
     return answer.lower().startswith("y")
@@ -98,15 +116,48 @@ async def is_nlp_related(text: str) -> bool:
     return answer.lower().startswith('y')
 
 
-async def summarize_text(text: str) -> str:
-    """Call LLM to summarize the given text."""
+async def summarize_text(messages: List[MessageInfo]) -> str:
+    """Call LLM to summarize the given messages with links."""
+    # Подготавливаем текст для суммаризации
+    messages_text = "\n\n".join([msg.text for msg in messages])
+    
     system_prompt = (
-        "Обобщите следующие сообщения Telegram в краткий ежедневный дайджест, сфокусированный на NLP."
+        "Обобщите следующие сообщения Telegram в краткий ежедневный дайджест, сфокусированный на NLP. "
+        "Структурируйте дайджест по темам или категориям. Для каждого блока информации указывайте "
+        "номер источника в квадратных скобках [1], [2], [3] и т.д. Если несколько источников говорят "
+        "об одном и том же, указывайте все номера через запятую, например [1,3] или [2,4,5]."
     )
     
-    result = await call_openai(system_prompt, text, max_tokens=300)
+    result = await call_openai(system_prompt, messages_text, max_tokens=400)
     if not result:
         return "Ошибка: Не удалось сгенерировать обобщение"
+    
+    # Заменяем номера источников на Markdown ссылки прямо в тексте
+    import re
+    
+    # Паттерн для поиска множественных источников [1,2,3]
+    multiple_sources_pattern = r'\[(\d+(?:,\d+)*)\]'
+    
+    def replace_multiple_sources(match):
+        source_numbers = match.group(1).split(',')
+        source_links = []
+        for num in source_numbers:
+            num = int(num.strip())
+            if 1 <= num <= len(messages):
+                source_links.append(f"[{num}]({messages[num-1].get_telegram_link()})")
+        return '[' + ', '.join(source_links) + ']'
+    
+    # Заменяем множественные источники
+    result = re.sub(multiple_sources_pattern, replace_multiple_sources, result)
+    
+    # Затем обрабатываем одиночные источники [1], [2], [3] (только те, что не были обработаны)
+    for i, msg in enumerate(messages, 1):
+        # Ищем только одиночные номера, которые еще не были заменены
+        single_pattern = rf'\[{i}\]'
+        if re.search(single_pattern, result):
+            markdown_link = f"[{i}]({msg.get_telegram_link()})"
+            result = re.sub(single_pattern, markdown_link, result)
+    
     return result
 
 
@@ -121,22 +172,29 @@ async def fetch_messages():
             if msg.date < since:
                 break
             if msg.message:
-                channel_msgs.append(msg.message)
-                all_msgs.append(msg.message)
+                message_info = MessageInfo(
+                    text=msg.message,
+                    channel=channel,
+                    message_id=msg.id,
+                    date=msg.date,
+                    link=msg.get_web_preview() if hasattr(msg, 'get_web_preview') else ""
+                )
+                channel_msgs.append(message_info)
+                all_msgs.append(message_info)
         print(f"  Found {len(channel_msgs)} messages from {channel}")
     return all_msgs
 
 
-async def remove_duplicates(messages):
-    unique_msgs = []
+async def remove_duplicates(messages: List[MessageInfo]) -> List[MessageInfo]:
+    unique_msgs: List[MessageInfo] = []
     seen_links = set()
     for msg in messages:
-        links = extract_links(msg)
+        links = extract_links(msg.text)
         if any(link in seen_links for link in links):
             continue
         duplicate = False
         for u in unique_msgs:
-            if SequenceMatcher(None, msg, u).ratio() > SIMILARITY_THRESHOLD:
+            if SequenceMatcher(None, msg.text, u.text).ratio() > SIMILARITY_THRESHOLD:
                 duplicate = True
                 break
             if await are_messages_duplicate(msg, u):
@@ -164,7 +222,7 @@ async def main():
         # filtered = []
         # for i, msg in enumerate(messages):
         #     print(f"Checking message {i+1}/{len(messages)}...")
-        #     if await is_nlp_related(msg):
+        #     if await is_nlp_related(msg.text):
         #         filtered.append(msg)
         #         print(f"  ✓ Message {i+1} is NLP-related")
         #     else:
@@ -175,8 +233,7 @@ async def main():
         if not unique:
             print("No NLP messages found")
             return
-        big_text = "\n".join(unique)
-        summary = await summarize_text(big_text)
+        summary = await summarize_text(unique)
         await user_client.send_message(TARGET_CHANNEL, summary)
         print("Summary sent")
     finally:
