@@ -378,14 +378,23 @@ async def main():
         
         # Apply NLP filtering to remove advertising
         filtered = []
+        all_checked_messages = []  # Все сообщения, которые были проверены через is_nlp_related
+        
         for i, msg in enumerate(messages):
             print(f"Checking message {i+1}/{len(messages)}...")
+            # Добавляем сообщение в список проверенных независимо от результата
+            all_checked_messages.append(msg)
+            
             if await is_nlp_related(msg.text):
                 filtered.append(msg)
                 print(f"  ✓ Message {i+1} is NLP-related: {msg.text[:100]}; {msg.link}")
             else:
                 print(f"  ✗ Message {i+1} is not NLP-related (likely advertising): {msg.text[:100]}; {msg.link}")
         print(f"{len(filtered)} messages after NLP filter")
+        
+        # Сохраняем все проверенные сообщения в историю
+        save_summarization_history(all_checked_messages)
+        print(f"Saved {len(all_checked_messages)} checked messages to history")
         
         if not filtered:
             print("No new NLP-related messages found")
@@ -401,10 +410,6 @@ async def main():
         summary = await summarize_text(unique)
         await user_client.send_message(TARGET_CHANNEL, summary, parse_mode='html')
         print("Summary sent")
-        
-        # Сохраняем обработанные сообщения в историю
-        save_summarization_history(unique)
-        print(f"Saved {len(unique)} messages to history")
         
     finally:
         # Disconnect both clients
