@@ -116,6 +116,81 @@ def extract_links(text: str) -> list[str]:
     return LINK_REGEX.findall(text)
 
 
+def load_channel_abbreviations() -> dict:
+    """Загружает существующие аббревиатуры каналов из JSON файла."""
+    abbreviations_file = 'channel_abbreviations.json'
+    if not os.path.exists(abbreviations_file):
+        return {}
+    
+    try:
+        with open(abbreviations_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            return data.get('channel_abbreviations', {})
+    except Exception as e:
+        print(f"Ошибка при загрузке аббревиатур каналов: {e}")
+        return {}
+
+
+def save_channel_abbreviation(channel_name: str, abbreviation: str) -> None:
+    """Сохраняет новую аббревиатуру канала в JSON файл."""
+    abbreviations_file = 'channel_abbreviations.json'
+    
+    try:
+        # Загружаем существующие данные
+        if os.path.exists(abbreviations_file):
+            with open(abbreviations_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        else:
+            data = {'channel_abbreviations': {}, 'last_updated': ''}
+        
+        # Добавляем новую аббревиатуру
+        data['channel_abbreviations'][channel_name] = abbreviation
+        data['last_updated'] = datetime.now().isoformat()
+        
+        # Сохраняем обновленные данные
+        with open(abbreviations_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            
+    except Exception as e:
+        print(f"Ошибка при сохранении аббревиатуры канала: {e}")
+
+
+def create_channel_abbreviation(channel_name: str) -> str:
+    """Создает аббревиатуру из названия канала."""
+    # Сначала проверяем существующие аббревиатуры
+    existing_abbreviations = load_channel_abbreviations()
+    
+    if channel_name in existing_abbreviations:
+        return existing_abbreviations[channel_name]
+    
+    # Если аббревиатуры нет, создаем новую
+    clean_name = channel_name.lstrip('@')
+    words = re.split(r'[\s\-_]+', clean_name)
+    abbreviation = ''.join(word[0].upper() for word in words if word)
+    
+    # Если аббревиатура слишком длинная, берем только первые 3-4 буквы
+    if len(abbreviation) > 4:
+        abbreviation = abbreviation[:4]
+    
+    # Если аббревиатура пустая или слишком короткая, используем первые буквы названия
+    if len(abbreviation) < 2:
+        abbreviation = clean_name[:3].upper()
+    
+    # Проверяем, не конфликтует ли новая аббревиатура с существующими
+    existing_values = set(existing_abbreviations.values())
+    if abbreviation in existing_values:
+        # Если конфликт, добавляем цифру
+        counter = 1
+        while f"{abbreviation}{counter}" in existing_values:
+            counter += 1
+        abbreviation = f"{abbreviation}{counter}"
+    
+    # Сохраняем новую аббревиатуру
+    save_channel_abbreviation(channel_name, abbreviation)
+    
+    return abbreviation
+
+
 def load_summarization_history() -> Set[str]:
     """Загружает историю уже обработанных сообщений из файла."""
     if not os.path.exists(HISTORY_FILE):
@@ -204,6 +279,8 @@ async def is_nlp_related(text: str) -> bool:
         "- Новости про увольнения и ИИ-экономику\n:"
         "- Новости про GPU и железо\n:"
         "- Новости про вайбкодинг (vibe coding) и ии-агентов (часто просто агенты, agents)\n:"
+        "- Новости про LLM и их использование\n:"
+        "- Новости про опыт тренировки моделей машинного обучения\n:"
 
         "ОТКЛОНЯЙТЕ (ответьте 'нет'):\n"
         "- Курсы, обучение, платные программы\n"
@@ -269,13 +346,18 @@ async def summarize_text(messages: List[MessageInfo]) -> str:
                     links = extract_links(msg.text)
                     telegram_link = msg.get_telegram_link()
                     
+                    # Всегда создаем аббревиатуру канала
+                    channel_abbr = create_channel_abbreviation(msg.channel)
+                    
                     if links:
                         # Если есть внешние ссылки, добавляем и внешнюю ссылку, и ссылку на Telegram-пост
                         main_link = links[0]
-                        source_links.append(f'<a href="{main_link}">[{num}]</a> <a href="{telegram_link}">(TG)</a>')
+                        source_links.append(
+                            f'<a href="{main_link}">[{num}]</a> <a href="{telegram_link}">[{channel_abbr}]</a>'
+                        )
                     else:
-                        # Если внешних ссылок нет, используем только ссылку на Telegram-сообщение
-                        source_links.append(f'<a href="{telegram_link}">[{num}]</a>')
+                        # Если внешних ссылок нет, используем только ссылку на Telegram-сообщение с аббревиатурой
+                        source_links.append(f'<a href="{telegram_link}">[{channel_abbr}]</a>')
                         
             except ValueError:
                 continue
