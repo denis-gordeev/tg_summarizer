@@ -1,10 +1,11 @@
 import os
 import asyncio
+import json
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 import re
 from dataclasses import dataclass
-from typing import List
+from typing import List, Set
 
 from dotenv import load_dotenv
 from telethon import TelegramClient
@@ -50,6 +51,7 @@ user_client = TelegramClient('tg_summarizer_user', API_ID, API_HASH)
 bot_client = TelegramClient('tg_summarizer_bot', API_ID, API_HASH)
 
 SIMILARITY_THRESHOLD = 0.9
+HISTORY_FILE = 'summarization_history.json'
 
 
 @dataclass
@@ -66,6 +68,27 @@ class MessageInfo:
         # Убираем @ из названия канала для формирования ссылки
         channel_name = self.channel.lstrip('@')
         return f"https://t.me/{channel_name}/{self.message_id}"
+    
+    def to_dict(self) -> dict:
+        """Конвертирует объект в словарь для сохранения в JSON"""
+        return {
+            'text': self.text,
+            'channel': self.channel,
+            'message_id': self.message_id,
+            'date': self.date.isoformat(),
+            'link': self.link
+        }
+    
+    @classmethod
+    def from_dict(cls, data: dict) -> 'MessageInfo':
+        """Создает объект из словаря"""
+        return cls(
+            text=data['text'],
+            channel=data['channel'],
+            message_id=data['message_id'],
+            date=datetime.fromisoformat(data['date']),
+            link=data['link']
+        )
 
 
 async def call_openai(system_prompt: str, user_content: str, max_tokens: int = 300) -> str:
@@ -91,6 +114,62 @@ async def call_openai(system_prompt: str, user_content: str, max_tokens: int = 3
 def extract_links(text: str) -> list[str]:
     """Return all URLs from a string."""
     return LINK_REGEX.findall(text)
+
+
+def load_summarization_history() -> Set[str]:
+    """Загружает историю уже обработанных сообщений из файла."""
+    if not os.path.exists(HISTORY_FILE):
+        return set()
+    
+    try:
+        with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            # Создаем уникальные идентификаторы для каждого сообщения
+            processed_messages = set()
+            for msg_data in data.get('processed_messages', []):
+                msg = MessageInfo.from_dict(msg_data)
+                # Создаем уникальный идентификатор: канал + message_id + хеш текста
+                msg_id = f"{msg.channel}_{msg.message_id}_{hash(msg.text)}"
+                processed_messages.add(msg_id)
+            return processed_messages
+    except Exception as e:
+        print(f"Ошибка при загрузке истории: {e}")
+        return set()
+
+
+def save_summarization_history(messages: List[MessageInfo]) -> None:
+    """Сохраняет обработанные сообщения в историю."""
+    try:
+        # Загружаем существующую историю
+        existing_data = []
+        if os.path.exists(HISTORY_FILE):
+            with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                existing_data = data.get('processed_messages', [])
+        
+        # Добавляем новые сообщения
+        new_messages = [msg.to_dict() for msg in messages]
+        all_messages = existing_data + new_messages
+        
+        # Ограничиваем историю последними 1000 сообщениями
+        if len(all_messages) > 1000:
+            all_messages = all_messages[-1000:]
+        
+        # Сохраняем обновленную историю
+        with open(HISTORY_FILE, 'w', encoding='utf-8') as f:
+            json.dump({
+                'processed_messages': all_messages,
+                'last_updated': datetime.now().isoformat()
+            }, f, ensure_ascii=False, indent=2)
+            
+    except Exception as e:
+        print(f"Ошибка при сохранении истории: {e}")
+
+
+def is_message_processed(msg: MessageInfo, processed_messages: Set[str]) -> bool:
+    """Проверяет, было ли сообщение уже обработано ранее."""
+    msg_id = f"{msg.channel}_{msg.message_id}_{hash(msg.text)}"
+    return msg_id in processed_messages
 
 
 async def are_messages_duplicate(msg_a: MessageInfo, msg_b: MessageInfo) -> bool:
@@ -174,6 +253,11 @@ async def fetch_messages():
     """Fetch messages from source channels in the last 24 hours."""
     since = datetime.now(timezone.utc) - timedelta(days=1)
     all_msgs = []
+    
+    # Загружаем историю обработанных сообщений
+    processed_messages = load_summarization_history()
+    print(f"Загружено {len(processed_messages)} уже обработанных сообщений из истории")
+    
     for channel in SOURCE_CHANNELS:
         print(f"Fetching messages from {channel}...")
         channel_msgs = []
@@ -188,9 +272,15 @@ async def fetch_messages():
                     date=msg.date,
                     link=msg.get_web_preview() if hasattr(msg, 'get_web_preview') else ""
                 )
-                channel_msgs.append(message_info)
-                all_msgs.append(message_info)
-        print(f"  Found {len(channel_msgs)} messages from {channel}")
+                
+                # Проверяем, не было ли сообщение уже обработано
+                if not is_message_processed(message_info, processed_messages):
+                    channel_msgs.append(message_info)
+                    all_msgs.append(message_info)
+                else:
+                    print(f"  Пропускаем уже обработанное сообщение {msg.id} из {channel}")
+                    
+        print(f"  Found {len(channel_msgs)} новых сообщений from {channel}")
     return all_msgs
 
 
@@ -222,7 +312,11 @@ async def main():
     
     try:
         messages = await fetch_messages()
-        print(f"Fetched {len(messages)} messages")
+        print(f"Fetched {len(messages)} new messages")
+        
+        if not messages:
+            print("No new messages found")
+            return
         
         # Apply NLP filtering to remove advertising
         filtered = []
@@ -234,14 +328,26 @@ async def main():
             else:
                 print(f"  ✗ Message {i+1} is not NLP-related (likely advertising): {msg.text[:100]}")
         print(f"{len(filtered)} messages after NLP filter")
+        
+        if not filtered:
+            print("No new NLP-related messages found")
+            return
+            
         unique = await remove_duplicates(filtered)
         print(f"{len(unique)} messages after deduplication")
+        
         if not unique:
-            print("No NLP messages found")
+            print("No unique NLP messages found")
             return
+            
         summary = await summarize_text(unique)
         await user_client.send_message(TARGET_CHANNEL, summary, parse_mode='html')
         print("Summary sent")
+        
+        # Сохраняем обработанные сообщения в историю
+        save_summarization_history(unique)
+        print(f"Saved {len(unique)} messages to history")
+        
     finally:
         # Disconnect both clients
         await user_client.disconnect()
