@@ -193,13 +193,22 @@ async def is_nlp_related(text: str) -> bool:
         "- Новые модели, библиотеки, инструменты\n"
         "- Технические обзоры и бенчмарки\n"
         "- Академические конференции и воркшопы\n"
-        "- Открытые проекты и датасеты\n\n"
+        "- Открытые проекты и датасеты\n"
+        "- Информация о карьере и вакансиях\n"
+        "- Информация о пет-проектах\n"
+        "- Тексты по ии и bigtech компании\n"
+        "- Любые новости про Сэма Альтмана (Sam Altman), "
+        "OpenAI, Anthropic, Google, Meta, Microsoft, Nvidia, FAANG и т.д.\n"
+        "- Новости про покупку и продажу компаний\n:"
+        "- Новости про увольнения и ИИ-экономику\n:"
+
         "ОТКЛОНЯЙТЕ (ответьте 'нет'):\n"
         "- Курсы, обучение, платные программы\n"
         "- Реклама русскоязычных LLM (GigaChat, YandexGPT)\n"
         "- Коммерческие предложения и услуги\n"
         "- Вебинары с продажами\n"
-        "- Мастер-классы с сертификатами\n\n"
+        "- Мастер-классы с сертификатами\n"
+        "- Hiring days\n"
         "Отвечайте только 'да' или 'нет'."
     )
     
@@ -209,8 +218,17 @@ async def is_nlp_related(text: str) -> bool:
 
 async def summarize_text(messages: List[MessageInfo]) -> str:
     """Call LLM to summarize the given messages with links."""
-    # Подготавливаем текст для суммаризации
-    messages_text = "\n\n".join([msg.text for msg in messages])
+    # Подготавливаем текст для суммаризации с указанием номеров источников
+    messages_with_sources = []
+    for i, msg in enumerate(messages, 1):
+        # Извлекаем ссылки из текста сообщения
+        links = extract_links(msg.text)
+        source_info = f"[{i}] {msg.text}"
+        if links:
+            source_info += f" (Ссылки: {', '.join(links)})"
+        messages_with_sources.append(source_info)
+    
+    messages_text = "\n\n".join(messages_with_sources)
     
     system_prompt = (
         "Обобщите следующие сообщения Telegram в краткий ежедневный дайджест, сфокусированный на NLP. "
@@ -219,32 +237,45 @@ async def summarize_text(messages: List[MessageInfo]) -> str:
         "об одном и том же, то указывайте все. "
         "Для статей и новых подходов кратко опишите технические аспекты: архитектуру, методологию, результаты. "
         "Используйте жирный шрифт <b>текст</b> и смайлики для подзаголовков, например: "
-        "<b>🚀 Новые Возможности и Ресурсы для Исследователей</b>"
+        "<b>🚀 Новые Возможности и Ресурсы для Исследователей</b>. "
+        "ВАЖНО: НЕ создавайте собственные ссылки в тексте, используйте только номера источников [1], [2], [3] и т.д. "
+        "Ссылки будут добавлены автоматически."
     )
     
     result = await call_openai(system_prompt, messages_text, max_tokens=16000)
     if not result:
         return "Ошибка: Не удалось сгенерировать обобщение"
     
-    # Заменяем номера источников на HTML-ссылки прямо в тексте
-    import re
-
-    def replace_all_sources_html(match):
+    # Заменяем номера источников на HTML-ссылки
+    def replace_source_with_links(match):
         content = match.group(1)  # содержимое внутри скобок
         numbers = [num.strip() for num in content.split(',')]
         source_links = []
+        
         for num_str in numbers:
             try:
                 num = int(num_str)
                 if 1 <= num <= len(messages):
-                    source_links.append(f'<a href="{messages[num-1].get_telegram_link()}">[{num}]</a>')
+                    msg = messages[num-1]
+                    # Извлекаем ссылки из текста сообщения
+                    links = extract_links(msg.text)
+                    
+                    if links:
+                        # Если есть ссылки в сообщении, используем первую как основную
+                        main_link = links[0]
+                        source_links.append(f'<a href="{main_link}">[{num}]</a>')
+                    else:
+                        # Если ссылок нет, используем ссылку на Telegram-сообщение
+                        telegram_link = msg.get_telegram_link()
+                        source_links.append(f'<a href="{telegram_link}">[{num}]</a>')
+                        
             except ValueError:
                 continue
         return ', '.join(source_links)
 
     # Паттерн для поиска всех ссылок на источники [1], [1,2], [1,2,3] и т.д.
     all_sources_pattern = r'\[(\d+(?:,\s*\d+)*)\]'
-    result = re.sub(all_sources_pattern, replace_all_sources_html, result)
+    result = re.sub(all_sources_pattern, replace_source_with_links, result)
 
     return result
 
@@ -265,12 +296,16 @@ async def fetch_messages():
             if msg.date < since:
                 break
             if msg.message:
+                # Извлекаем ссылки из текста сообщения
+                links = extract_links(msg.message)
+                main_link = links[0] if links else ""
+                
                 message_info = MessageInfo(
                     text=msg.message,
                     channel=channel,
                     message_id=msg.id,
                     date=msg.date,
-                    link=msg.get_web_preview() if hasattr(msg, 'get_web_preview') else ""
+                    link=main_link
                 )
                 
                 # Проверяем, не было ли сообщение уже обработано
@@ -287,21 +322,41 @@ async def fetch_messages():
 async def remove_duplicates(messages: List[MessageInfo]) -> List[MessageInfo]:
     unique_msgs: List[MessageInfo] = []
     seen_links = set()
+    
     for msg in messages:
         links = extract_links(msg.text)
-        if any(link in seen_links for link in links):
+        
+        # Сначала проверяем по ссылкам - если ссылка уже была, пропускаем
+        if links and any(link in seen_links for link in links):
+            print(f"  Пропускаем дубликат по ссылке: {links[0]}")
             continue
+        
+        # Проверяем дубликаты по тексту
         duplicate = False
         for u in unique_msgs:
             if SequenceMatcher(None, msg.text, u.text).ratio() > SIMILARITY_THRESHOLD:
+                print(f"  Пропускаем дубликат по тексту: {msg.text[:50]}...")
                 duplicate = True
                 break
-            if await are_messages_duplicate(msg, u):
-                duplicate = True
-                break
+        
+        # Если не нашли дубликат по тексту, проверяем через LLM
+        if not duplicate:
+            for u in unique_msgs:
+                try:
+                    if await are_messages_duplicate(msg, u):
+                        print(f"  Пропускаем дубликат по LLM: {msg.text[:50]}...")
+                        duplicate = True
+                        break
+                except Exception as e:
+                    print(f"  Ошибка при проверке дубликата через LLM: {e}")
+                    # В случае ошибки LLM, считаем сообщения разными
+                    continue
+        
         if not duplicate:
             unique_msgs.append(msg)
             seen_links.update(links)
+            print(f"  Добавляем уникальное сообщение: {msg.text[:50]}...")
+    
     return unique_msgs
 
 
@@ -324,9 +379,9 @@ async def main():
             print(f"Checking message {i+1}/{len(messages)}...")
             if await is_nlp_related(msg.text):
                 filtered.append(msg)
-                print(f"  ✓ Message {i+1} is NLP-related: {msg.text[:100]}")
+                print(f"  ✓ Message {i+1} is NLP-related: {msg.text[:100]}; {msg.link}")
             else:
-                print(f"  ✗ Message {i+1} is not NLP-related (likely advertising): {msg.text[:100]}")
+                print(f"  ✗ Message {i+1} is not NLP-related (likely advertising): {msg.text[:100]}; {msg.link}")
         print(f"{len(filtered)} messages after NLP filter")
         
         if not filtered:
