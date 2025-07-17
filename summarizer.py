@@ -52,6 +52,9 @@ bot_client = TelegramClient('tg_summarizer_bot', API_ID, API_HASH)
 
 SIMILARITY_THRESHOLD = 0.9
 HISTORY_FILE = 'summarization_history.json'
+SUMMARIES_HISTORY_FILE = 'summaries_history.json'
+# Флаг для отключения проверки покрытия в предыдущих саммари
+ENABLE_SUMMARIES_DEDUPLICATION = True
 
 
 @dataclass
@@ -89,6 +92,42 @@ class MessageInfo:
             date=datetime.fromisoformat(data['date']),
             link=data['link']
         )
+
+
+@dataclass
+class SummaryInfo:
+    """Информация о созданном саммари"""
+    content: str
+    date: datetime
+    message_count: int
+    channels: List[str]
+    
+    def to_dict(self) -> dict:
+        """Конвертирует объект в словарь для сохранения в JSON"""
+        return {
+            'content': self.content,
+            'date': self.date.isoformat(),
+            'message_count': self.message_count,
+            'channels': self.channels
+        }
+    
+    @classmethod
+    def from_dict(cls, data: dict) -> 'SummaryInfo':
+        """Создает объект из словаря"""
+        return cls(
+            content=data['content'],
+            date=datetime.fromisoformat(data['date']),
+            message_count=data['message_count'],
+            channels=data['channels']
+        )
+
+
+def count_characters(text: str) -> int:
+    """Подсчитывает количество символов в тексте, исключая HTML-теги."""
+    # Удаляем HTML-теги для корректного подсчета символов
+    import re
+    clean_text = re.sub(r'<[^>]+>', '', text)
+    return len(clean_text)
 
 
 async def call_openai(system_prompt: str, user_content: str, max_tokens: int = 300) -> str:
@@ -241,6 +280,76 @@ def save_summarization_history(messages: List[MessageInfo]) -> None:
         print(f"Ошибка при сохранении истории: {e}")
 
 
+def load_summaries_history() -> List[SummaryInfo]:
+    """Загружает историю созданных саммари из файла."""
+    if not os.path.exists(SUMMARIES_HISTORY_FILE):
+        return []
+    
+    try:
+        with open(SUMMARIES_HISTORY_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            summaries = []
+            for summary_data in data.get('summaries', []):
+                summaries.append(SummaryInfo.from_dict(summary_data))
+            return summaries
+    except Exception as e:
+        print(f"Ошибка при загрузке истории саммари: {e}")
+        return []
+
+
+def save_summary_to_history(summary: SummaryInfo) -> None:
+    """Сохраняет новое саммари в историю."""
+    try:
+        # Загружаем существующую историю
+        existing_summaries = []
+        if os.path.exists(SUMMARIES_HISTORY_FILE):
+            with open(SUMMARIES_HISTORY_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                existing_summaries = data.get('summaries', [])
+        
+        # Добавляем новое саммари
+        new_summary = summary.to_dict()
+        all_summaries = existing_summaries + [new_summary]
+        
+        # Ограничиваем историю последними 50 саммари
+        if len(all_summaries) > 50:
+            all_summaries = all_summaries[-50:]
+        
+        # Сохраняем обновленную историю
+        with open(SUMMARIES_HISTORY_FILE, 'w', encoding='utf-8') as f:
+            json.dump({
+                'summaries': all_summaries,
+                'last_updated': datetime.now().isoformat()
+            }, f, ensure_ascii=False, indent=2)
+            
+    except Exception as e:
+        print(f"Ошибка при сохранении истории саммари: {e}")
+
+
+def get_recent_summaries_context(days: int = 7) -> str:
+    """Возвращает контекст последних саммари для дедупликации."""
+    summaries = load_summaries_history()
+    if not summaries:
+        return ""
+    
+    # Фильтруем саммари за последние N дней
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
+    recent_summaries = [s for s in summaries if s.date >= cutoff_date]
+    
+    if not recent_summaries:
+        return ""
+    
+    # Создаем контекст из последних 3 саммари
+    context_parts = []
+    for i, summary in enumerate(recent_summaries[-3:], 1):
+        # Очищаем HTML теги для лучшего сравнения
+        clean_content = re.sub(r'<[^>]+>', '', summary.content)
+        # Берем первые 500 символов для контекста
+        context_parts.append(f"Саммари {i} ({summary.date.strftime('%Y-%m-%d')}):\n{clean_content[:500]}...")
+    
+    return "\n\n".join(context_parts)
+
+
 def is_message_processed(msg: MessageInfo, processed_messages: Set[str]) -> bool:
     """Проверяет, было ли сообщение уже обработано ранее."""
     msg_id = f"{msg.channel}_{msg.message_id}_{hash(msg.text)}"
@@ -259,6 +368,36 @@ async def are_messages_duplicate(msg_a: MessageInfo, msg_b: MessageInfo) -> bool
     return answer.lower().startswith("y")
 
 
+async def is_message_covered_in_summaries(msg: MessageInfo) -> bool:
+    """Проверяет, была ли тема сообщения уже освещена в предыдущих саммари."""
+    recent_context = get_recent_summaries_context(days=7)
+    if not recent_context:
+        return False
+    
+    system_prompt = (
+        "Определите, была ли тема из сообщения Telegram уже освещена в предыдущих саммари.\n"
+        "Учитывайте как прямые упоминания, так и связанные темы.\n"
+        "Учитывай синонимичные сообщения, например, тексты \n"
+        "а) Бывший сотрудник OpenAI, который покинул стартап пару недель назад, написал огромный "
+        "блог-пост о том, каково там работать \n"
+        "б) Потрясающее чтиво от инженера, который недавно покинул OpenAI. "
+        "Пишет про культуру, атмосферу, и как всё работает. \n"
+        "говорят об одном и том же, но написаны по-разному. \n"
+        "Смотри на внешние ссылки в сообщениях, если они ведут на один и тот же ресурс, то с высокой вероятностью "
+        "это одна и та же тема. \n"
+        "Ответьте 'да' если тема уже была освещена, 'нет' если это новая информация."
+    )
+    
+    user_content = f"Предыдущие саммари:\n{recent_context}\n\nНовое сообщение:\n{msg.text}"
+    
+    try:
+        answer = await call_openai(system_prompt, user_content, max_tokens=5)
+        return answer.lower().strip().startswith('да')
+    except Exception as e:
+        print(f"Ошибка при проверке покрытия в саммари: {e}")
+        return False
+
+
 async def is_nlp_related(text: str) -> bool:
     """Use the LLM to decide if a message is NLP related and not advertising."""
     system_prompt = (
@@ -273,6 +412,8 @@ async def is_nlp_related(text: str) -> bool:
         "- Информация и советы о карьере и вакансиях\n"
         "- Информация о пет-проектах\n"
         "- Тексты по ии и bigtech компании\n"
+        "- Тексты про стартапы\n"
+        "- Тексты про ии-ассистентов и приложения (ChatGPT, Claude, Gemini, Grok, DeepSeek, KlingAi, Midjourney etc.)\n"
         "- Любые новости про Сэма Альтмана (Sam Altman), "
         "OpenAI, Anthropic, Google, Meta, Microsoft, Nvidia, FAANG и т.д.\n"
         "- Новости про покупку, продажу компаний и поглощения\n:"
@@ -281,6 +422,7 @@ async def is_nlp_related(text: str) -> bool:
         "- Новости про вайбкодинг (vibe coding) и ии-агентов (часто просто агенты, agents)\n:"
         "- Новости про LLM и их использование\n:"
         "- Новости про опыт тренировки моделей машинного обучения\n:"
+        "- Мемы из мира ии и технологий\n:"
 
         "ОТКЛОНЯЙТЕ (ответьте 'нет'):\n"
         "- Курсы, обучение, платные программы\n"
@@ -289,6 +431,7 @@ async def is_nlp_related(text: str) -> bool:
         "- Вебинары с продажами\n"
         "- Мастер-классы с сертификатами\n"
         "- Hiring days\n"
+        "- В сообщении есть ссылки ведущие на ботов, при этом не указано перед ссылкой, что это ссылка на бота\n"
         "Отвечайте только 'да' или 'нет'."
     )
     
@@ -300,6 +443,8 @@ async def summarize_text(messages: List[MessageInfo]) -> str:
     """Call LLM to summarize the given messages with links."""
     # Подготавливаем текст для суммаризации с указанием номеров источников
     messages_with_sources = []
+    total_original_length = 0
+    
     for i, msg in enumerate(messages, 1):
         # Извлекаем ссылки из текста сообщения
         links = extract_links(msg.text)
@@ -307,8 +452,12 @@ async def summarize_text(messages: List[MessageInfo]) -> str:
         if links:
             source_info += f" (Ссылки: {', '.join(links)})"
         messages_with_sources.append(source_info)
+        total_original_length += count_characters(msg.text)
     
     messages_text = "\n\n".join(messages_with_sources)
+    
+    # Устанавливаем максимальную длину саммари
+    max_summary_length = min(total_original_length * 2, 16000)
     
     system_prompt = (
         "Обобщите следующие сообщения Telegram в краткий ежедневный дайджест, сфокусированный на NLP. "
@@ -323,24 +472,34 @@ async def summarize_text(messages: List[MessageInfo]) -> str:
         "ВАЖНО: Используйте стиль заголовков, который соответствует оригинальным сообщениям из Telegram-каналов. "
         "Анализируйте стиль исходных сообщений и создавайте заголовки в том же духе - используйте эмодзи, "
         "короткие и яркие формулировки, характерные для Telegram. НЕ используйте формальные академические заголовки. "
-        "ВАЖНО: В начале каждого заголовка добавляйте 1-3 эмодзи, которые креативно и метафорично "
+        "ВАЖНО: В начале каждого заголовка добавляйте 1-5 эмодзи, которые креативно и метафорично "
         "описывают суть новости. Используйте неожиданные, но понятные комбинации эмодзи. "
         "Эмодзи НЕ должны быть синонимичными. "
         "Примеры стиля: '<b>🧠💧 Переходы между AI-компаниями</b>', "
-        "'<b>🤖🎭 Новый подход к обучению языковых моделей</b>', "
-        "'<b>🔥🧊 Прорыв в компьютерном зрении</b>', "
-        "'<b>💡🌊 Инновации в NLP</b>', "
-        "'<b>🎯🎪 Новые результаты на Kaggle</b>', "
-        "'<b>💼🌪️ Рынок AI-вакансий</b>'. "
+        "'<b>🤖🎭👅 Новый подход к обучению языковых моделей</b>', "
+        "'<b>🫱👁️🫲 Прорыв в компьютерном зрении</b>', "
+        "'<b>💡👅 Инновации в NLP</b>', "
+        "'<b>🎯🪿📈 Новые результаты на Kaggle</b>', "
+        "'<b>💼🌪️📉 Рынок AI-вакансий</b>'. "
         "ВАЖНО: Используйте ТОЛЬКО HTML-теги <b>текст</b> для жирного шрифта, "
         "НЕ используйте **текст** или другие Markdown разметки. "
         "ВАЖНО: НЕ создавайте собственные ссылки в тексте, используйте только номера источников [1], [2], [3] и т.д. "
-        "Ссылки будут добавлены автоматически."
+        "Ссылки будут добавлены автоматически. "
+        f"КРИТИЧЕСКИ ВАЖНО: Максимальная длина саммари НЕ ДОЛЖНА превышать {max_summary_length} символов. "
+        "Для коротких сообщений создавайте развернутые саммари, "
+        "но строго соблюдайте лимит символов."
+        "denissexy - это канал про машинное обучение и искусственный интеллект"
     )
     
-    result = await call_openai(system_prompt, messages_text, max_tokens=16000)
+    # Вычисляем max_tokens на основе максимальной длины саммари (примерно 4 символа на токен)
+    max_tokens = 16000
+    
+    result = await call_openai(system_prompt, messages_text, max_tokens=max_tokens)
     if not result:
         return "Ошибка: Не удалось сгенерировать обобщение"
+    
+    print(f"Длина исходного текста: {total_original_length} символов")
+    print(f"Длина саммари: {count_characters(result)} символов")
     
     # Заменяем номера источников на HTML-ссылки
     def replace_source_with_links(match):
@@ -453,6 +612,17 @@ async def remove_duplicates(messages: List[MessageInfo]) -> List[MessageInfo]:
                     # В случае ошибки LLM, считаем сообщения разными
                     continue
         
+        # Проверяем, не была ли тема уже освещена в предыдущих саммари
+        if not duplicate and ENABLE_SUMMARIES_DEDUPLICATION:
+            try:
+                if await is_message_covered_in_summaries(msg):
+                    print(f"  Пропускаем сообщение, уже освещенное в саммари: {msg.text[:50]}...")
+                    duplicate = True
+            except Exception as e:
+                print(f"  Ошибка при проверке покрытия в саммари: {e}")
+                # В случае ошибки, считаем сообщение новым
+                pass
+        
         if not duplicate:
             unique_msgs.append(msg)
             seen_links.update(links)
@@ -508,6 +678,17 @@ async def main():
         summary = await summarize_text(unique)
         await user_client.send_message(TARGET_CHANNEL, summary, parse_mode='html')
         print("Summary sent")
+        
+        # Сохраняем саммари в историю
+        channels = list(set(msg.channel for msg in unique))
+        summary_info = SummaryInfo(
+            content=summary,
+            date=datetime.now(timezone.utc),
+            message_count=len(unique),
+            channels=channels
+        )
+        save_summary_to_history(summary_info)
+        print(f"Summary saved to history (channels: {channels})")
         
     finally:
         # Disconnect both clients
