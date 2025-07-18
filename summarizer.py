@@ -42,6 +42,10 @@ OPENAI_API_KEY = openai_api_key
 source_channels_str = os.getenv('SOURCE_CHANNELS', '')
 SOURCE_CHANNELS = [c.strip() for c in source_channels_str.split(',') if c.strip()]
 
+# Новые переменные для групп
+source_groups_str = os.getenv('SOURCE_GROUPS', '')
+SOURCE_GROUPS = [g.strip() for g in source_groups_str.split(',') if g.strip()]
+
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
 LINK_REGEX = re.compile(r"https?://\S+")
@@ -53,6 +57,13 @@ bot_client = TelegramClient('tg_summarizer_bot', API_ID, API_HASH)
 SIMILARITY_THRESHOLD = 0.9
 HISTORY_FILE = 'summarization_history.json'
 SUMMARIES_HISTORY_FILE = 'summaries_history.json'
+DISCOVERED_CHANNELS_FILE = 'discovered_channels.json'
+
+# Новые файлы для групп
+GROUP_HISTORY_FILE = 'group_summarization_history.json'
+GROUP_SUMMARIES_HISTORY_FILE = 'group_summaries_history.json'
+GROUP_LAST_RUN_FILE = 'group_last_run.json'
+
 # Флаг для отключения проверки покрытия в предыдущих саммари
 ENABLE_SUMMARIES_DEDUPLICATION = True
 
@@ -326,6 +337,205 @@ def save_summary_to_history(summary: SummaryInfo) -> None:
         print(f"Ошибка при сохранении истории саммари: {e}")
 
 
+def load_discovered_channels() -> List[str]:
+    """Загружает список обнаруженных каналов из файла."""
+    if not os.path.exists(DISCOVERED_CHANNELS_FILE):
+        return []
+    
+    try:
+        with open(DISCOVERED_CHANNELS_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            return data.get('discovered_channels', [])
+    except Exception as e:
+        print(f"Ошибка при загрузке обнаруженных каналов: {e}")
+        return []
+
+
+def save_discovered_channel(channel_name: str) -> None:
+    """Сохраняет новый обнаруженный канал в JSON файл."""
+    try:
+        # Загружаем существующие данные
+        if os.path.exists(DISCOVERED_CHANNELS_FILE):
+            with open(DISCOVERED_CHANNELS_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        else:
+            data = {'discovered_channels': [], 'last_updated': ''}
+        
+        # Проверяем, нет ли уже такого канала
+        if channel_name not in data['discovered_channels']:
+            data['discovered_channels'].append(channel_name)
+            data['last_updated'] = datetime.now().isoformat()
+            
+            # Сохраняем обновленные данные
+            with open(DISCOVERED_CHANNELS_FILE, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+                
+    except Exception as e:
+        print(f"Ошибка при сохранении обнаруженного канала: {e}")
+
+
+def load_group_summarization_history() -> Set[str]:
+    """Загружает историю уже обработанных сообщений из групп из файла."""
+    if not os.path.exists(GROUP_HISTORY_FILE):
+        return set()
+    
+    try:
+        with open(GROUP_HISTORY_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            # Создаем уникальные идентификаторы для каждого сообщения
+            processed_messages = set()
+            for msg_data in data.get('processed_messages', []):
+                msg = MessageInfo.from_dict(msg_data)
+                # Создаем уникальный идентификатор: канал + message_id + хеш текста
+                msg_id = f"{msg.channel}_{msg.message_id}_{hash(msg.text)}"
+                processed_messages.add(msg_id)
+            return processed_messages
+    except Exception as e:
+        print(f"Ошибка при загрузке истории групп: {e}")
+        return set()
+
+
+def save_group_summarization_history(messages: List[MessageInfo]) -> None:
+    """Сохраняет историю обработанных сообщений из групп в файл."""
+    try:
+        # Загружаем существующие данные
+        if os.path.exists(GROUP_HISTORY_FILE):
+            with open(GROUP_HISTORY_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        else:
+            data = {'processed_messages': [], 'last_updated': ''}
+        
+        # Добавляем новые сообщения
+        for msg in messages:
+            data['processed_messages'].append(msg.to_dict())
+        
+        # Ограничиваем историю последними 1000 сообщениями
+        if len(data['processed_messages']) > 1000:
+            data['processed_messages'] = data['processed_messages'][-1000:]
+        
+        data['last_updated'] = datetime.now().isoformat()
+        
+        # Сохраняем обновленные данные
+        with open(GROUP_HISTORY_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            
+    except Exception as e:
+        print(f"Ошибка при сохранении истории групп: {e}")
+
+
+def load_group_summaries_history() -> List[SummaryInfo]:
+    """Загружает историю созданных саммари из групп из файла."""
+    if not os.path.exists(GROUP_SUMMARIES_HISTORY_FILE):
+        return []
+    
+    try:
+        with open(GROUP_SUMMARIES_HISTORY_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            summaries = []
+            for summary_data in data.get('summaries', []):
+                summaries.append(SummaryInfo.from_dict(summary_data))
+            return summaries
+    except Exception as e:
+        print(f"Ошибка при загрузке истории саммари групп: {e}")
+        return []
+
+
+def save_group_summary_to_history(summary: SummaryInfo) -> None:
+    """Сохраняет саммари из групп в историю."""
+    try:
+        # Загружаем существующие данные
+        if os.path.exists(GROUP_SUMMARIES_HISTORY_FILE):
+            with open(GROUP_SUMMARIES_HISTORY_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        else:
+            data = {'summaries': [], 'last_updated': ''}
+        
+        # Добавляем новое саммари
+        data['summaries'].append(summary.to_dict())
+        
+        # Ограничиваем историю последними 100 саммари
+        if len(data['summaries']) > 100:
+            data['summaries'] = data['summaries'][-100:]
+        
+        data['last_updated'] = datetime.now().isoformat()
+        
+        # Сохраняем обновленные данные
+        with open(GROUP_SUMMARIES_HISTORY_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            
+    except Exception as e:
+        print(f"Ошибка при сохранении саммари групп в историю: {e}")
+
+
+def should_run_group_summarization() -> bool:
+    """Проверяет, нужно ли запускать суммаризацию групп (раз в сутки)."""
+    if not os.path.exists(GROUP_LAST_RUN_FILE):
+        return True
+    
+    try:
+        with open(GROUP_LAST_RUN_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            last_run_str = data.get('last_run', '')
+            if not last_run_str:
+                return True
+            
+            last_run = datetime.fromisoformat(last_run_str)
+            now = datetime.now(timezone.utc)
+            
+            # Проверяем, прошло ли больше 24 часов с последнего запуска
+            return (now - last_run).total_seconds() > 24 * 60 * 60
+            
+    except Exception as e:
+        print(f"Ошибка при проверке времени последнего запуска групп: {e}")
+        return True
+
+
+def update_group_last_run() -> None:
+    """Обновляет время последнего запуска суммаризации групп."""
+    try:
+        data = {
+            'last_run': datetime.now(timezone.utc).isoformat(),
+            'last_updated': datetime.now().isoformat()
+        }
+        
+        with open(GROUP_LAST_RUN_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            
+    except Exception as e:
+        print(f"Ошибка при обновлении времени последнего запуска групп: {e}")
+
+
+def get_recent_group_summaries_context(days: int = 7) -> str:
+    """Получает контекст последних саммари из групп для дедупликации."""
+    summaries = load_group_summaries_history()
+    if not summaries:
+        return ""
+    
+    # Фильтруем саммари за последние N дней
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
+    recent_summaries = [s for s in summaries if s.date >= cutoff_date]
+    
+    if not recent_summaries:
+        return ""
+    
+    # Объединяем содержимое саммари
+    context_parts = []
+    for summary in recent_summaries:
+        context_parts.append(f"Дата: {summary.date.strftime('%Y-%m-%d')}")
+        context_parts.append(f"Содержание: {summary.content}")
+        context_parts.append("---")
+    
+    return "\n".join(context_parts)
+
+
+def get_all_source_channels() -> List[str]:
+    """Возвращает объединенный список каналов из .env и обнаруженных каналов."""
+    discovered_channels = load_discovered_channels()
+    all_channels = SOURCE_CHANNELS + discovered_channels
+    print(f"Используем {len(SOURCE_CHANNELS)} каналов из .env и {len(discovered_channels)} обнаруженных каналов")
+    return all_channels
+
+
 def get_recent_summaries_context(days: int = 7) -> str:
     """Возвращает контекст последних саммари для дедупликации."""
     summaries = load_summaries_history()
@@ -370,31 +580,81 @@ async def are_messages_duplicate(msg_a: MessageInfo, msg_b: MessageInfo) -> bool
 
 async def is_message_covered_in_summaries(msg: MessageInfo) -> bool:
     """Проверяет, была ли тема сообщения уже освещена в предыдущих саммари."""
-    recent_context = get_recent_summaries_context(days=7)
-    if not recent_context:
+    if not ENABLE_SUMMARIES_DEDUPLICATION:
         return False
     
-    system_prompt = (
-        "Определите, была ли тема из сообщения Telegram уже освещена в предыдущих саммари.\n"
-        "Учитывайте как прямые упоминания, так и связанные темы.\n"
-        "Учитывай синонимичные сообщения, например, тексты \n"
-        "а) Бывший сотрудник OpenAI, который покинул стартап пару недель назад, написал огромный "
-        "блог-пост о том, каково там работать \n"
-        "б) Потрясающее чтиво от инженера, который недавно покинул OpenAI. "
-        "Пишет про культуру, атмосферу, и как всё работает. \n"
-        "говорят об одном и том же, но написаны по-разному. \n"
-        "Смотри на внешние ссылки в сообщениях, если они ведут на один и тот же ресурс, то с высокой вероятностью "
-        "это одна и та же тема. \n"
-        "Ответьте 'да' если тема уже была освещена, 'нет' если это новая информация."
-    )
+    recent_summaries = get_recent_summaries_context()
+    if not recent_summaries:
+        return False
     
-    user_content = f"Предыдущие саммари:\n{recent_context}\n\nНовое сообщение:\n{msg.text}"
-    
+    system_prompt = """Ты эксперт по анализу текстов. Твоя задача - определить, была ли тема из нового сообщения уже освещена в предыдущих дайджестах.
+
+Правила:
+1. Сравнивай ТЕМУ и ОСНОВНУЮ ИДЕЮ сообщения, а не точные формулировки
+2. Если тема уже была освещена в предыдущих дайджестах, отвечай "ДА"
+3. Если это новая тема, отвечай "НЕТ"
+4. Учитывай только существенную информацию, игнорируй мелкие детали
+
+Примеры:
+- "Новый алгоритм GPT-5" и "OpenAI анонсировал GPT-5" = ДА (та же тема)
+- "Новый алгоритм GPT-5" и "Новый алгоритм BERT" = НЕТ (разные темы)
+- "Цена акций NVIDIA выросла" и "NVIDIA показала хорошие результаты" = ДА (та же тема)
+
+Отвечай только "ДА" или "НЕТ"."""
+
+    user_content = f"""Предыдущие дайджесты:
+{recent_summaries}
+
+Новое сообщение:
+{msg.text}
+
+Была ли эта тема уже освещена в предыдущих дайджестах?"""
+
     try:
-        answer = await call_openai(system_prompt, user_content, max_tokens=5)
-        return answer.lower().strip().startswith('да')
+        result = await call_openai(system_prompt, user_content, max_tokens=10)
+        return result.strip().upper() == "ДА"
     except Exception as e:
         print(f"Ошибка при проверке покрытия в саммари: {e}")
+        return False
+
+
+async def is_message_covered_in_group_summaries(msg: MessageInfo) -> bool:
+    """Проверяет, была ли тема сообщения уже освещена в предыдущих саммари групп."""
+    if not ENABLE_SUMMARIES_DEDUPLICATION:
+        return False
+    
+    recent_summaries = get_recent_group_summaries_context()
+    if not recent_summaries:
+        return False
+    
+    system_prompt = """Ты эксперт по анализу текстов. Твоя задача - определить, была ли тема из нового сообщения уже освещена в предыдущих дайджестах групп.
+
+Правила:
+1. Сравнивай ТЕМУ и ОСНОВНУЮ ИДЕЮ сообщения, а не точные формулировки
+2. Если тема уже была освещена в предыдущих дайджестах групп, отвечай "ДА"
+3. Если это новая тема, отвечай "НЕТ"
+4. Учитывай только существенную информацию, игнорируй мелкие детали
+
+Примеры:
+- "Новый алгоритм GPT-5" и "OpenAI анонсировал GPT-5" = ДА (та же тема)
+- "Новый алгоритм GPT-5" и "Новый алгоритм BERT" = НЕТ (разные темы)
+- "Цена акций NVIDIA выросла" и "NVIDIA показала хорошие результаты" = ДА (та же тема)
+
+Отвечай только "ДА" или "НЕТ"."""
+
+    user_content = f"""Предыдущие дайджесты групп:
+{recent_summaries}
+
+Новое сообщение:
+{msg.text}
+
+Была ли эта тема уже освещена в предыдущих дайджестах групп?"""
+
+    try:
+        result = await call_openai(system_prompt, user_content, max_tokens=10)
+        return result.strip().upper() == "ДА"
+    except Exception as e:
+        print(f"Ошибка при проверке покрытия в саммари групп: {e}")
         return False
 
 
@@ -549,7 +809,10 @@ async def fetch_messages():
     processed_messages = load_summarization_history()
     print(f"Загружено {len(processed_messages)} уже обработанных сообщений из истории")
     
-    for channel in SOURCE_CHANNELS:
+    # Получаем объединенный список каналов
+    all_channels = get_all_source_channels()
+    
+    for channel in all_channels:
         print(f"Fetching messages from {channel}...")
         channel_msgs = []
         async for msg in user_client.iter_messages(channel, offset_date=None, min_id=0, reverse=False):
@@ -576,6 +839,48 @@ async def fetch_messages():
                     print(f"  Пропускаем уже обработанное сообщение {msg.id} из {channel}")
                     
         print(f"  Found {len(channel_msgs)} новых сообщений from {channel}")
+    return all_msgs
+
+
+async def fetch_group_messages():
+    """Fetch messages from source groups in the last 24 hours."""
+    since = datetime.now(timezone.utc) - timedelta(days=1)
+    all_msgs = []
+    
+    # Загружаем историю обработанных сообщений из групп
+    processed_messages = load_group_summarization_history()
+    print(f"Загружено {len(processed_messages)} уже обработанных сообщений из групп из истории")
+    
+    # Получаем список групп
+    all_groups = SOURCE_GROUPS
+    
+    for group in all_groups:
+        print(f"Fetching messages from group {group}...")
+        group_msgs = []
+        async for msg in user_client.iter_messages(group, offset_date=None, min_id=0, reverse=False):
+            if msg.date < since:
+                break
+            if msg.message:
+                # Извлекаем ссылки из текста сообщения
+                links = extract_links(msg.message)
+                main_link = links[0] if links else ""
+                
+                message_info = MessageInfo(
+                    text=msg.message,
+                    channel=group,
+                    message_id=msg.id,
+                    date=msg.date,
+                    link=main_link
+                )
+                
+                # Проверяем, не было ли сообщение уже обработано
+                if not is_message_processed(message_info, processed_messages):
+                    group_msgs.append(message_info)
+                    all_msgs.append(message_info)
+                else:
+                    print(f"  Пропускаем уже обработанное сообщение {msg.id} из группы {group}")
+                    
+        print(f"  Found {len(group_msgs)} новых сообщений from group {group}")
     return all_msgs
 
 
@@ -631,64 +936,189 @@ async def remove_duplicates(messages: List[MessageInfo]) -> List[MessageInfo]:
     return unique_msgs
 
 
+async def remove_group_duplicates(messages: List[MessageInfo]) -> List[MessageInfo]:
+    """Remove duplicates from group messages, checking against group summaries history."""
+    unique_msgs: List[MessageInfo] = []
+    seen_links = set()
+    
+    for msg in messages:
+        links = extract_links(msg.text)
+        
+        # Сначала проверяем по ссылкам - если ссылка уже была, пропускаем
+        if links and any(link in seen_links for link in links):
+            print(f"  Пропускаем дубликат по ссылке: {links[0]}")
+            continue
+        
+        # Проверяем дубликаты по тексту
+        duplicate = False
+        for u in unique_msgs:
+            if SequenceMatcher(None, msg.text, u.text).ratio() > SIMILARITY_THRESHOLD:
+                print(f"  Пропускаем дубликат по тексту: {msg.text[:50]}...")
+                duplicate = True
+                break
+        
+        # Если не нашли дубликат по тексту, проверяем через LLM
+        if not duplicate:
+            for u in unique_msgs:
+                try:
+                    if await are_messages_duplicate(msg, u):
+                        print(f"  Пропускаем дубликат по LLM: {msg.text[:50]}...")
+                        duplicate = True
+                        break
+                except Exception as e:
+                    print(f"  Ошибка при проверке дубликата через LLM: {e}")
+                    # В случае ошибки LLM, считаем сообщения разными
+                    continue
+        
+        # Проверяем, не была ли тема уже освещена в предыдущих саммари групп
+        if not duplicate and ENABLE_SUMMARIES_DEDUPLICATION:
+            try:
+                if await is_message_covered_in_group_summaries(msg):
+                    print(f"  Пропускаем сообщение, уже освещенное в саммари групп: {msg.text[:50]}...")
+                    duplicate = True
+            except Exception as e:
+                print(f"  Ошибка при проверке покрытия в саммари групп: {e}")
+                # В случае ошибки, считаем сообщение новым
+                pass
+        
+        if not duplicate:
+            unique_msgs.append(msg)
+            seen_links.update(links)
+            print(f"  Добавляем уникальное сообщение из группы: {msg.text[:50]}...")
+    
+    return unique_msgs
+
+
 async def main():
     # Start both clients
     await user_client.start()
     await bot_client.start(bot_token=BOT_TOKEN)
     
     try:
+        # Обработка каналов (как обычно)
+        print("=== Обработка каналов ===")
         messages = await fetch_messages()
-        print(f"Fetched {len(messages)} new messages")
+        print(f"Fetched {len(messages)} new messages from channels")
         
-        if not messages:
-            print("No new messages found")
-            return
-        
-        # Apply NLP filtering to remove advertising
-        filtered = []
-        all_checked_messages = []  # Все сообщения, которые были проверены через is_nlp_related
-        
-        for i, msg in enumerate(messages):
-            print(f"Checking message {i+1}/{len(messages)}...")
-            # Добавляем сообщение в список проверенных независимо от результата
-            all_checked_messages.append(msg)
+        if messages:
+            # Apply NLP filtering to remove advertising
+            filtered = []
+            all_checked_messages = []  # Все сообщения, которые были проверены через is_nlp_related
+            discovered_channels = set()  # Каналы, которые репостнули и прошли проверку
             
-            if await is_nlp_related(msg.text):
-                filtered.append(msg)
-                print(f"  ✓ Message {i+1} is NLP-related: {msg.text[:100]}; {msg.link}")
+            for i, msg in enumerate(messages):
+                print(f"Checking message {i+1}/{len(messages)}...")
+                # Добавляем сообщение в список проверенных независимо от результата
+                all_checked_messages.append(msg)
+                
+                if await is_nlp_related(msg.text):
+                    filtered.append(msg)
+                    # Если канал не из основного списка SOURCE_CHANNELS, добавляем его в обнаруженные
+                    if msg.channel not in SOURCE_CHANNELS:
+                        discovered_channels.add(msg.channel)
+                    print(f"  ✓ Message {i+1} is NLP-related: {msg.text[:100]}; {msg.link}")
+                else:
+                    print(f"  ✗ Message {i+1} is not NLP-related (likely advertising): {msg.text[:100]}; {msg.link}")
+            print(f"{len(filtered)} messages after NLP filter")
+            
+            # Сохраняем все проверенные сообщения в историю
+            save_summarization_history(all_checked_messages)
+            print(f"Saved {len(all_checked_messages)} checked messages to history")
+            
+            # Сохраняем новые обнаруженные каналы
+            for channel in discovered_channels:
+                save_discovered_channel(channel)
+            if discovered_channels:
+                print(f"Discovered {len(discovered_channels)} new channels: {', '.join(discovered_channels)}")
+            
+            if filtered:
+                unique = await remove_duplicates(filtered)
+                print(f"{len(unique)} messages after deduplication")
+                
+                if unique:
+                    summary = await summarize_text(unique)
+                    await user_client.send_message(TARGET_CHANNEL, summary, parse_mode='html')
+                    print("Channel summary sent")
+                    
+                    # Сохраняем саммари в историю
+                    channels = list(set(msg.channel for msg in unique))
+                    summary_info = SummaryInfo(
+                        content=summary,
+                        date=datetime.now(timezone.utc),
+                        message_count=len(unique),
+                        channels=channels
+                    )
+                    save_summary_to_history(summary_info)
+                    print(f"Channel summary saved to history (channels: {channels})")
+                else:
+                    print("No unique NLP messages found in channels")
             else:
-                print(f"  ✗ Message {i+1} is not NLP-related (likely advertising): {msg.text[:100]}; {msg.link}")
-        print(f"{len(filtered)} messages after NLP filter")
+                print("No new NLP-related messages found in channels")
+        else:
+            print("No new messages found in channels")
         
-        # Сохраняем все проверенные сообщения в историю
-        save_summarization_history(all_checked_messages)
-        print(f"Saved {len(all_checked_messages)} checked messages to history")
-        
-        if not filtered:
-            print("No new NLP-related messages found")
-            return
+        # Обработка групп (раз в сутки)
+        print("\n=== Обработка групп ===")
+        if SOURCE_GROUPS and should_run_group_summarization():
+            print("Starting daily group summarization...")
             
-        unique = await remove_duplicates(filtered)
-        print(f"{len(unique)} messages after deduplication")
-        
-        if not unique:
-            print("No unique NLP messages found")
-            return
+            group_messages = await fetch_group_messages()
+            print(f"Fetched {len(group_messages)} new messages from groups")
             
-        summary = await summarize_text(unique)
-        await user_client.send_message(TARGET_CHANNEL, summary, parse_mode='html')
-        print("Summary sent")
-        
-        # Сохраняем саммари в историю
-        channels = list(set(msg.channel for msg in unique))
-        summary_info = SummaryInfo(
-            content=summary,
-            date=datetime.now(timezone.utc),
-            message_count=len(unique),
-            channels=channels
-        )
-        save_summary_to_history(summary_info)
-        print(f"Summary saved to history (channels: {channels})")
+            if group_messages:
+                # Apply NLP filtering to remove advertising
+                group_filtered = []
+                all_checked_group_messages = []
+                
+                for i, msg in enumerate(group_messages):
+                    print(f"Checking group message {i+1}/{len(group_messages)}...")
+                    all_checked_group_messages.append(msg)
+                    
+                    if await is_nlp_related(msg.text):
+                        group_filtered.append(msg)
+                        print(f"  ✓ Group message {i+1} is NLP-related: {msg.text[:100]}; {msg.link}")
+                    else:
+                        print(f"  ✗ Group message {i+1} is not NLP-related: {msg.text[:100]}; {msg.link}")
+                print(f"{len(group_filtered)} group messages after NLP filter")
+                
+                # Сохраняем все проверенные сообщения из групп в историю
+                save_group_summarization_history(all_checked_group_messages)
+                print(f"Saved {len(all_checked_group_messages)} checked group messages to history")
+                
+                if group_filtered:
+                    unique_group = await remove_group_duplicates(group_filtered)
+                    print(f"{len(unique_group)} group messages after deduplication")
+                    
+                    if unique_group:
+                        group_summary = await summarize_text(unique_group)
+                        await user_client.send_message(TARGET_CHANNEL, group_summary, parse_mode='html')
+                        print("Group summary sent")
+                        
+                        # Сохраняем саммари групп в историю
+                        groups = list(set(msg.channel for msg in unique_group))
+                        group_summary_info = SummaryInfo(
+                            content=group_summary,
+                            date=datetime.now(timezone.utc),
+                            message_count=len(unique_group),
+                            channels=groups
+                        )
+                        save_group_summary_to_history(group_summary_info)
+                        print(f"Group summary saved to history (groups: {groups})")
+                        
+                        # Обновляем время последнего запуска суммаризации групп
+                        update_group_last_run()
+                        print("Group summarization completed for today")
+                    else:
+                        print("No unique NLP messages found in groups")
+                else:
+                    print("No new NLP-related messages found in groups")
+            else:
+                print("No new messages found in groups")
+        else:
+            if SOURCE_GROUPS:
+                print("Group summarization skipped (already run today)")
+            else:
+                print("No groups configured for summarization")
         
     finally:
         # Disconnect both clients
