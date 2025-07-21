@@ -13,6 +13,7 @@ LOG_FILE="$LOG_DIR/summarizer_$(date +%Y%m%d).log"
 # Активируем conda environment (если используется)
 # source ~/miniconda3/etc/profile.d/conda.sh
 # conda activate base
+source .venv/bin/activate
 
 # Запускаем суммаризатор с логированием
 echo "$(date): Starting Telegram news summarization..." >> "$LOG_FILE"
