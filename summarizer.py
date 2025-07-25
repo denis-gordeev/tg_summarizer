@@ -3,12 +3,15 @@ import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
+import random
 import re
 from dataclasses import dataclass
 from typing import List, Set
 
 from dotenv import load_dotenv
 from telethon import TelegramClient
+from telethon.tl.functions.channels import GetChannelRecommendationsRequest
+from telethon.tl.types import InputChannel
 from openai import OpenAI
 
 load_dotenv()
@@ -40,7 +43,7 @@ if not openai_api_key:
 OPENAI_API_KEY = openai_api_key
 
 source_channels_str = os.getenv('SOURCE_CHANNELS', '')
-SOURCE_CHANNELS = [c.strip() for c in source_channels_str.split(',') if c.strip()]
+SOURCE_CHANNELS = set([c.strip() for c in source_channels_str.split(',') if c.strip()])
 
 # Новые переменные для групп
 source_groups_str = os.getenv('SOURCE_GROUPS', '')
@@ -351,6 +354,34 @@ def load_discovered_channels() -> List[str]:
         return []
 
 
+def load_similar_channels() -> List[str]:
+    """Загружает список похожих каналов из файла."""
+    if not os.path.exists(DISCOVERED_CHANNELS_FILE):
+        return []
+    
+    try:
+        with open(DISCOVERED_CHANNELS_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            return data.get('similar_channels', [])
+    except Exception as e:
+        print(f"Ошибка при загрузке похожих каналов: {e}")
+        return []
+
+
+def load_banned_channels() -> List[str]:
+    """Загружает список заблокированных каналов из файла."""
+    if not os.path.exists(DISCOVERED_CHANNELS_FILE):
+        return []
+    
+    try:
+        with open(DISCOVERED_CHANNELS_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            return data.get('banned_channels', [])
+    except Exception as e:
+        print(f"Ошибка при загрузке заблокированных каналов: {e}")
+        return []
+
+
 def save_discovered_channel(channel_name: str) -> None:
     """Сохраняет новый обнаруженный канал в JSON файл."""
     try:
@@ -359,7 +390,7 @@ def save_discovered_channel(channel_name: str) -> None:
             with open(DISCOVERED_CHANNELS_FILE, 'r', encoding='utf-8') as f:
                 data = json.load(f)
         else:
-            data = {'discovered_channels': [], 'last_updated': ''}
+            data = {'discovered_channels': [], 'similar_channels': [], 'last_updated': ''}
         
         # Проверяем, нет ли уже такого канала
         if channel_name not in data['discovered_channels']:
@@ -372,6 +403,167 @@ def save_discovered_channel(channel_name: str) -> None:
                 
     except Exception as e:
         print(f"Ошибка при сохранении обнаруженного канала: {e}")
+
+
+def save_similar_channel(channel_name: str) -> None:
+    """Сохраняет новый похожий канал в JSON файл."""
+    try:
+        # Загружаем существующие данные
+        if os.path.exists(DISCOVERED_CHANNELS_FILE):
+            with open(DISCOVERED_CHANNELS_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        else:
+            data = {'discovered_channels': [], 'similar_channels': [], 'banned_channels': [], 'last_updated': ''}
+        
+        # Проверяем, нет ли уже такого канала
+        if channel_name not in data['similar_channels']:
+            data['similar_channels'].append(channel_name)
+            data['last_updated'] = datetime.now().isoformat()
+            
+            # Сохраняем обновленные данные
+            with open(DISCOVERED_CHANNELS_FILE, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+                
+    except Exception as e:
+        print(f"Ошибка при сохранении похожего канала: {e}")
+
+
+def save_banned_channel(channel_name: str) -> None:
+    """Сохраняет новый заблокированный канал в JSON файл."""
+    try:
+        # Загружаем существующие данные
+        if os.path.exists(DISCOVERED_CHANNELS_FILE):
+            with open(DISCOVERED_CHANNELS_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        else:
+            data = {'discovered_channels': [], 'similar_channels': [], 'banned_channels': [], 'last_updated': ''}
+        
+        # Проверяем, нет ли уже такого канала
+        if channel_name not in data['banned_channels']:
+            data['banned_channels'].append(channel_name)
+            data['last_updated'] = datetime.now().isoformat()
+            
+            # Сохраняем обновленные данные
+            with open(DISCOVERED_CHANNELS_FILE, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+                
+    except Exception as e:
+        print(f"Ошибка при сохранении заблокированного канала: {e}")
+
+
+async def get_similar_channels_from_telegram(channel_username: str = None) -> List[str]:
+    """Получает список похожих каналов через Telegram API."""
+    try:
+        if not user_client.is_connected():
+            await user_client.start()
+        
+        # Если указан канал, получаем рекомендации для него
+        if channel_username:
+            # Убираем @ если есть
+            channel_username = channel_username.lstrip('@')
+            
+            # Получаем информацию о канале
+            try:
+                channel_entity = await user_client.get_entity(f"@{channel_username}")
+                channel_input = InputChannel(channel_entity.id, channel_entity.access_hash)
+                
+                # Получаем рекомендации
+                result = await user_client(GetChannelRecommendationsRequest(
+                    channel=channel_input
+                ))
+                
+                similar_channels = []
+                for chat in result.chats:
+                    if hasattr(chat, 'username') and chat.username:
+                        similar_channels.append(f"@{chat.username}")
+                
+                return similar_channels
+                
+            except Exception as e:
+                print(f"Ошибка при получении рекомендаций для канала {channel_username}: {e}")
+                return []
+        
+        # Если канал не указан, получаем глобальные рекомендации
+        else:
+            result = await user_client(GetChannelRecommendationsRequest())
+            
+            similar_channels = []
+            for chat in result.chats:
+                if hasattr(chat, 'username') and chat.username:
+                    similar_channels.append(f"@{chat.username}")
+            
+            return similar_channels
+            
+    except Exception as e:
+        print(f"Ошибка при получении похожих каналов: {e}")
+        return []
+
+
+async def discover_and_save_similar_channels(channel_username: str = None) -> None:
+    """Обнаруживает и сохраняет похожие каналы."""
+    try:
+        # Загружаем существующие каналы для проверки дубликатов
+        existing_discovered = set(load_discovered_channels())
+        existing_similar = set(load_similar_channels())
+        existing_banned = set(load_banned_channels())
+        
+        # Объединяем все существующие каналы
+        existing_channels = SOURCE_CHANNELS | existing_discovered | existing_similar | existing_banned
+        
+        if channel_username:
+            # Если указан конкретный канал, проверяем что он в SOURCE_CHANNELS
+            if channel_username not in SOURCE_CHANNELS:
+                print(f"Канал {channel_username} не найден в SOURCE_CHANNELS. "
+                      f"Поиск похожих каналов только для каналов из SOURCE_CHANNELS.")
+                return
+            
+            print(f"Получаем похожие каналы для {channel_username}...")
+            similar_channels = await get_similar_channels_from_telegram(channel_username)
+        else:
+            # Если канал не указан, ищем похожие для всех каналов из SOURCE_CHANNELS
+            print(f"Получаем похожие каналы для всех каналов из SOURCE_CHANNELS...")
+            all_similar_channels = set()
+            
+            for source_channel in SOURCE_CHANNELS:
+                print(f"  Ищем похожие для {source_channel}...")
+                similar_channels = await get_similar_channels_from_telegram(source_channel)
+                all_similar_channels.update(similar_channels)
+                # Небольшая пауза между запросами
+                await asyncio.sleep(1)
+            
+            similar_channels = list(all_similar_channels)
+        
+        if similar_channels:
+            # Фильтруем каналы, которые уже существуют
+            new_similar_channels = []
+            skipped_channels = []
+            
+            for channel in similar_channels:
+                if channel in existing_channels:
+                    skipped_channels.append(channel)
+                else:
+                    new_similar_channels.append(channel)
+            
+            if new_similar_channels:
+                print(f"Найдено {len(new_similar_channels)} новых уникальных похожих каналов:")
+                for channel in new_similar_channels:
+                    print(f"  - {channel}")
+                    save_similar_channel(channel)
+                print("Новые похожие каналы сохранены в discovered_channels.json")
+            else:
+                print("Все найденные каналы уже существуют в системе")
+            
+            if skipped_channels:
+                print(f"Пропущено {len(skipped_channels)} каналов (уже существуют):")
+                for channel in skipped_channels[:10]:  # Показываем только первые 10
+                    print(f"  - {channel}")
+                if len(skipped_channels) > 10:
+                    print(f"  ... и еще {len(skipped_channels) - 10} каналов")
+        else:
+            print("Похожих каналов не найдено")
+            
+    except Exception as e:
+        print(f"Ошибка при обнаружении похожих каналов: {e}")
 
 
 def load_group_summarization_history() -> Set[str]:
@@ -529,10 +721,20 @@ def get_recent_group_summaries_context(days: int = 7) -> str:
 
 
 def get_all_source_channels() -> List[str]:
-    """Возвращает объединенный список каналов из .env и обнаруженных каналов."""
-    discovered_channels = load_discovered_channels()
-    all_channels = SOURCE_CHANNELS + discovered_channels
-    print(f"Используем {len(SOURCE_CHANNELS)} каналов из .env и {len(discovered_channels)} обнаруженных каналов")
+    """Возвращает объединенный список каналов из .env, обнаруженных и похожих каналов."""
+    discovered_channels = set(load_discovered_channels())
+    similar_channels = set(load_similar_channels())
+    banned_channels = set(load_banned_channels())
+    
+    # Исключаем заблокированные каналы
+    all_channels_set = SOURCE_CHANNELS | discovered_channels | similar_channels
+    all_channels_set = all_channels_set - banned_channels
+    
+    all_channels = list(all_channels_set)
+    random.shuffle(all_channels)
+    print(f"Используем {len(SOURCE_CHANNELS)} каналов из .env, "
+          f"{len(discovered_channels)} обнаруженных, {len(similar_channels)} похожих каналов "
+          f"(исключено {len(banned_channels)} заблокированных)")
     return all_channels
 
 
@@ -674,7 +876,7 @@ async def is_nlp_related(text: str) -> bool:
         "- Тексты по ии и bigtech компании\n"
         "- Тексты про стартапы\n"
         "- Тексты про ии-ассистентов и приложения (ChatGPT, Claude, Gemini, Grok, DeepSeek, KlingAi, Midjourney etc.)\n"
-        "- Любые новости про Сэма Альтмана (Sam Altman), "
+        "- Любые новости про Сэма Альтмана (Sam Altman), Марка Цукерберга"
         "OpenAI, Anthropic, Google, Meta, Microsoft, Nvidia, FAANG и т.д.\n"
         "- Новости про покупку, продажу компаний и поглощения\n:"
         "- Новости про увольнения и ИИ-экономику\n:"
@@ -1106,6 +1308,10 @@ async def main():
     await bot_client.start(bot_token=BOT_TOKEN)
     
     try:
+        # Опционально: автоматическое обнаружение похожих каналов
+        # Раскомментируйте следующую строку для автоматического обнаружения
+        # await discover_and_save_similar_channels()
+        
         # Обработка каналов (как обычно)
         print("=== Обработка каналов ===")
         messages = await fetch_messages()
@@ -1129,7 +1335,8 @@ async def main():
                         discovered_channels.add(msg.channel)
                     print(f"  ✓ Message {i+1} is NLP-related: {msg.text[:100]}; {msg.link}")
                 else:
-                    print(f"  ✗ Message {i+1} is not NLP-related (likely advertising): {msg.text[:100]}; {msg.link}")
+                    print(f"  ✗ Message {i+1} is not NLP-related (likely advertising): {msg.text[:100]}; "
+                          f"{msg.channel}; {msg.link}")
             print(f"{len(filtered)} messages after NLP filter")
             
             # Сохраняем все проверенные сообщения в историю
