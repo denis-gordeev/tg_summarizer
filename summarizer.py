@@ -1355,7 +1355,7 @@ async def main():
                 
                 if unique:
                     summary = await summarize_text(unique)
-                    await user_client.send_message(TARGET_CHANNEL, summary, parse_mode='html')
+                    await bot_client.send_message(TARGET_CHANNEL, summary, parse_mode='html')
                     print("Channel summary sent")
                     
                     # Сохраняем саммари в историю
@@ -1409,7 +1409,7 @@ async def main():
                     
                     if unique_group:
                         group_summary = await summarize_group_text(unique_group)
-                        await user_client.send_message(TARGET_CHANNEL, group_summary, parse_mode='html')
+                        await bot_client.send_message(TARGET_CHANNEL, group_summary, parse_mode='html')
                         print("Group summary sent")
                         
                         # Сохраняем саммари групп в историю
