@@ -13,6 +13,7 @@ from telethon import TelegramClient
 from telethon.tl.functions.channels import GetChannelRecommendationsRequest
 from telethon.tl.types import InputChannel
 from openai import OpenAI
+import fire
 
 load_dotenv()
 
@@ -1302,7 +1303,21 @@ async def remove_group_duplicates(messages: List[MessageInfo]) -> List[MessageIn
     return unique_msgs
 
 
-async def main():
+async def run_summarizer(
+    send_message: bool = True,
+    save_changes: bool = True,
+    include_today_processed_groups: bool = True,
+    include_today_processed_messages: bool = True
+):
+    """
+    Запускает процесс суммаризации с настраиваемыми параметрами.
+    
+    Args:
+        send_message: Отправлять ли сообщения в целевой канал
+        save_changes: Сохранять ли изменения в файлы истории
+        include_today_processed_groups: Включать ли группы, уже обработанные сегодня
+        include_today_processed_messages: Включать ли сообщения, уже обработанные сегодня
+    """
     # Start both clients
     await user_client.start()
     await bot_client.start(bot_token=BOT_TOKEN)
@@ -1340,14 +1355,16 @@ async def main():
             print(f"{len(filtered)} messages after NLP filter")
             
             # Сохраняем все проверенные сообщения в историю
-            save_summarization_history(all_checked_messages)
-            print(f"Saved {len(all_checked_messages)} checked messages to history")
+            if save_changes:
+                save_summarization_history(all_checked_messages)
+                print(f"Saved {len(all_checked_messages)} checked messages to history")
             
             # Сохраняем новые обнаруженные каналы
-            for channel in discovered_channels:
-                save_discovered_channel(channel)
-            if discovered_channels:
-                print(f"Discovered {len(discovered_channels)} new channels: {', '.join(discovered_channels)}")
+            if save_changes:
+                for channel in discovered_channels:
+                    save_discovered_channel(channel)
+                if discovered_channels:
+                    print(f"Discovered {len(discovered_channels)} new channels: {', '.join(discovered_channels)}")
             
             if filtered:
                 unique = await remove_duplicates(filtered)
@@ -1355,19 +1372,21 @@ async def main():
                 
                 if unique:
                     summary = await summarize_text(unique)
-                    await bot_client.send_message(TARGET_CHANNEL, summary, parse_mode='html')
-                    print("Channel summary sent")
+                    if send_message:
+                        await bot_client.send_message(TARGET_CHANNEL, summary, parse_mode='html')
+                        print("Channel summary sent")
                     
                     # Сохраняем саммари в историю
-                    channels = list(set(msg.channel for msg in unique))
-                    summary_info = SummaryInfo(
-                        content=summary,
-                        date=datetime.now(timezone.utc),
-                        message_count=len(unique),
-                        channels=channels
-                    )
-                    save_summary_to_history(summary_info)
-                    print(f"Channel summary saved to history (channels: {channels})")
+                    if save_changes:
+                        channels = list(set(msg.channel for msg in unique))
+                        summary_info = SummaryInfo(
+                            content=summary,
+                            date=datetime.now(timezone.utc),
+                            message_count=len(unique),
+                            channels=channels
+                        )
+                        save_summary_to_history(summary_info)
+                        print(f"Channel summary saved to history (channels: {channels})")
                 else:
                     print("No unique NLP messages found in channels")
             else:
@@ -1377,7 +1396,11 @@ async def main():
         
         # Обработка групп (раз в сутки)
         print("\n=== Обработка групп ===")
-        if SOURCE_GROUPS and should_run_group_summarization():
+        should_run_groups = SOURCE_GROUPS and (
+            should_run_group_summarization() or include_today_processed_groups
+        )
+        
+        if should_run_groups:
             print("Starting daily group summarization...")
             
             group_messages = await fetch_group_messages()
@@ -1400,8 +1423,9 @@ async def main():
                 print(f"{len(group_filtered)} group messages after NLP filter")
                 
                 # Сохраняем все проверенные сообщения из групп в историю
-                save_group_summarization_history(all_checked_group_messages)
-                print(f"Saved {len(all_checked_group_messages)} checked group messages to history")
+                if save_changes:
+                    save_group_summarization_history(all_checked_group_messages)
+                    print(f"Saved {len(all_checked_group_messages)} checked group messages to history")
                 
                 if group_filtered:
                     unique_group = await remove_group_duplicates(group_filtered)
@@ -1409,23 +1433,25 @@ async def main():
                     
                     if unique_group:
                         group_summary = await summarize_group_text(unique_group)
-                        await bot_client.send_message(TARGET_CHANNEL, group_summary, parse_mode='html')
-                        print("Group summary sent")
+                        if send_message:
+                            await bot_client.send_message(TARGET_CHANNEL, group_summary, parse_mode='html')
+                            print("Group summary sent")
                         
                         # Сохраняем саммари групп в историю
-                        groups = list(set(msg.channel for msg in unique_group))
-                        group_summary_info = SummaryInfo(
-                            content=group_summary,
-                            date=datetime.now(timezone.utc),
-                            message_count=len(unique_group),
-                            channels=groups
-                        )
-                        save_group_summary_to_history(group_summary_info)
-                        print(f"Group summary saved to history (groups: {groups})")
-                        
-                        # Обновляем время последнего запуска суммаризации групп
-                        update_group_last_run()
-                        print("Group summarization completed for today")
+                        if save_changes:
+                            groups = list(set(msg.channel for msg in unique_group))
+                            group_summary_info = SummaryInfo(
+                                content=group_summary,
+                                date=datetime.now(timezone.utc),
+                                message_count=len(unique_group),
+                                channels=groups
+                            )
+                            save_group_summary_to_history(group_summary_info)
+                            print(f"Group summary saved to history (groups: {groups})")
+                            
+                            # Обновляем время последнего запуска суммаризации групп
+                            update_group_last_run()
+                            print("Group summarization completed for today")
                     else:
                         print("No unique NLP messages found in groups")
                 else:
@@ -1444,5 +1470,35 @@ async def main():
         await bot_client.disconnect()
 
 
+def main(
+    send_message: bool = True,
+    save_changes: bool = True,
+    include_today_processed_groups: bool = True,
+    include_today_processed_messages: bool = True
+):
+    """
+    Главная функция для запуска суммаризатора с параметрами командной строки.
+    
+    Args:
+        send_message: Отправлять ли сообщения в целевой канал (по умолчанию True)
+        save_changes: Сохранять ли изменения в файлы истории (по умолчанию True)
+        include_today_processed_groups: Включать ли группы, уже обработанные сегодня (по умолчанию True)
+        include_today_processed_messages: Включать ли сообщения, уже обработанные сегодня (по умолчанию True)
+    """
+    print(f"Запуск суммаризатора с параметрами:")
+    print(f"  - send_message: {send_message}")
+    print(f"  - save_changes: {save_changes}")
+    print(f"  - include_today_processed_groups: {include_today_processed_groups}")
+    print(f"  - include_today_processed_messages: {include_today_processed_messages}")
+    print()
+    
+    asyncio.run(run_summarizer(
+        send_message=send_message,
+        save_changes=save_changes,
+        include_today_processed_groups=include_today_processed_groups,
+        include_today_processed_messages=include_today_processed_messages
+    ))
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    fire.Fire(main)
