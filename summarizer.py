@@ -312,8 +312,17 @@ def load_summaries_history() -> List[SummaryInfo]:
         with open(SUMMARIES_HISTORY_FILE, 'r', encoding='utf-8') as f:
             data = json.load(f)
             summaries = []
-            for summary_data in data.get('summaries', []):
-                summaries.append(SummaryInfo.from_dict(summary_data))
+            
+            # Handle both old format (array) and new format (object with summaries key)
+            if isinstance(data, list):
+                # Old format: direct array of summary objects
+                for summary_data in data:
+                    summaries.append(SummaryInfo.from_dict(summary_data))
+            else:
+                # New format: object with summaries key
+                for summary_data in data.get('summaries', []):
+                    summaries.append(SummaryInfo.from_dict(summary_data))
+            
             return summaries
     except Exception as e:
         print(f"Ошибка при загрузке истории саммари: {e}")
@@ -683,12 +692,14 @@ def should_run_group_summarization() -> bool:
             last_run = datetime.fromisoformat(last_run_str)
             now = datetime.now(timezone.utc)
             
+            time_since_last_run = (now - last_run).total_seconds()
+            print(f"Last run: {last_run}; now: {now}; time since last run: {time_since_last_run}")
             # Проверяем, прошло ли больше 24 часов с последнего запуска
-            return (now - last_run).total_seconds() > 24 * 60 * 60
+            return time_since_last_run > 24 * 60 * 60
             
     except Exception as e:
         print(f"Ошибка при проверке времени последнего запуска групп: {e}")
-        return True
+        return False
 
 
 def update_group_last_run() -> None:
@@ -988,7 +999,7 @@ async def summarize_group_text(messages: List[MessageInfo]) -> str:
     return header + result
 
 
-async def fetch_messages():
+async def fetch_messages(include_today_processed_messages: bool = False):
     """Fetch messages from source channels in the last 24 hours."""
     since = datetime.now(timezone.utc) - timedelta(days=1)
     all_msgs = []
@@ -1019,8 +1030,8 @@ async def fetch_messages():
                     link=main_link
                 )
                 
-                # Проверяем, не было ли сообщение уже обработано
-                if not is_message_processed(message_info, processed_messages):
+                # Проверяем, не было ли сообщение уже обработано (если не игнорируем)
+                if include_today_processed_messages or not is_message_processed(message_info, processed_messages):
                     channel_msgs.append(message_info)
                     all_msgs.append(message_info)
                 else:
@@ -1030,7 +1041,7 @@ async def fetch_messages():
     return all_msgs
 
 
-async def fetch_group_messages():
+async def fetch_group_messages(include_today_processed_messages: bool = False):
     """Fetch messages from source groups in the last 24 hours."""
     since = datetime.now(timezone.utc) - timedelta(days=1)
     all_msgs = []
@@ -1061,8 +1072,8 @@ async def fetch_group_messages():
                     link=main_link
                 )
                 
-                # Проверяем, не было ли сообщение уже обработано
-                if not is_message_processed(message_info, processed_messages):
+                # Проверяем, не было ли сообщение уже обработано (если не игнорируем)
+                if include_today_processed_messages or not is_message_processed(message_info, processed_messages):
                     group_msgs.append(message_info)
                     all_msgs.append(message_info)
                 else:
@@ -1177,11 +1188,170 @@ async def remove_group_duplicates(messages: List[MessageInfo]) -> List[MessageIn
     return unique_msgs
 
 
+async def find_relevant_summary_for_update(msg: MessageInfo, is_group: bool = False) -> SummaryInfo:
+    """
+    Находит наиболее подходящее существующее саммари для обновления.
+    Возвращает None, если подходящее саммари не найдено.
+    """
+    if is_group:
+        summaries = load_group_summaries_history()
+    else:
+        summaries = load_summaries_history()
+    
+    if not summaries:
+        return None
+    
+    # Берем последние 3 саммари для поиска
+    recent_summaries = summaries[-3:]
+    
+    # Создаем контекст для поиска
+    summaries_text = ""
+    for i, summary in enumerate(recent_summaries, 1):
+        summaries_text += f"Саммари {i}:\n{summary.content}\n\n"
+    
+    user_content = f"""Существующие саммари:
+{summaries_text}
+
+Новое сообщение:
+{msg.text}
+
+В каком саммари (1, 2, 3) лучше всего добавить ссылку на это сообщение? 
+Если ни одно не подходит, ответьте "НЕТ".
+Отвечайте только номером (1, 2, 3) или "НЕТ"."""
+    
+    try:
+        system_prompt = ("Ты эксперт по анализу текстов. Определи, в какое существующее "
+                        "саммари лучше всего добавить ссылку на новое сообщение.")
+        result = await call_openai(system_prompt, user_content, max_tokens=5)
+        result = result.strip().upper()
+        
+        if result in ["1", "2", "3"]:
+            index = int(result) - 1
+            if 0 <= index < len(recent_summaries):
+                return recent_summaries[index]
+    except Exception as e:
+        print(f"Ошибка при поиске подходящего саммари: {e}")
+    
+    return None
+
+
+async def update_existing_summary(summary: SummaryInfo, new_message: MessageInfo, 
+                                is_group: bool = False) -> SummaryInfo:
+    """
+    Обновляет существующее саммари, добавляя блок "Другие ссылки:" с новой ссылкой.
+    """
+    # Создаем ссылку для нового сообщения
+    links = extract_links(new_message.text)
+    telegram_link = new_message.get_telegram_link()
+    channel_abbr = create_channel_abbreviation(new_message.channel)
+    
+    if links:
+        new_link = (f'<a href="{links[0]}">[новое]</a> '
+                   f'<a href="{telegram_link}">[{channel_abbr}]</a>')
+    else:
+        new_link = f'<a href="{telegram_link}">[{channel_abbr}]</a>'
+    
+    # Ищем подходящее место для вставки блока "Другие ссылки:"
+    # Обычно это в конце саммари или после последнего блока с ссылками
+    content = summary.content
+    
+    # Проверяем, есть ли уже блок "Другие ссылки:"
+    if "Другие ссылки:" in content:
+        # Если есть, добавляем новую ссылку к существующему блоку
+        lines = content.split('\n')
+        updated_lines = []
+        for line in lines:
+            if line.strip().startswith("Другие ссылки:"):
+                # Добавляем новую ссылку к существующему блоку
+                updated_lines.append(line + f", {new_link}")
+            else:
+                updated_lines.append(line)
+        updated_content = '\n'.join(updated_lines)
+    else:
+        # Если нет, добавляем новый блок в конец
+        updated_content = content + f"\n\nДругие ссылки: {new_link}"
+    
+    # Создаем обновленное саммари
+    updated_channels = (summary.channels + [new_message.channel] 
+                       if new_message.channel not in summary.channels 
+                       else summary.channels)
+    
+    updated_summary = SummaryInfo(
+        content=updated_content,
+        date=summary.date,
+        message_count=summary.message_count + 1,
+        channels=updated_channels
+    )
+    
+    return updated_summary
+
+
+async def save_updated_summary(original_summary: SummaryInfo, updated_summary: SummaryInfo, 
+                              is_group: bool = False) -> None:
+    """
+    Сохраняет обновленное саммари, заменяя оригинальное в истории.
+    """
+    if is_group:
+        summaries = load_group_summaries_history()
+        # Находим индекс оригинального саммари
+        for i, summary in enumerate(summaries):
+            if (summary.content == original_summary.content and 
+                summary.date == original_summary.date and 
+                summary.message_count == original_summary.message_count):
+                summaries[i] = updated_summary
+                break
+        
+        # Сохраняем обновленную историю
+        with open(GROUP_SUMMARIES_HISTORY_FILE, 'w', encoding='utf-8') as f:
+            json.dump([s.to_dict() for s in summaries], f, ensure_ascii=False, indent=2)
+    else:
+        summaries = load_summaries_history()
+        # Находим индекс оригинального саммари
+        for i, summary in enumerate(summaries):
+            if (summary.content == original_summary.content and 
+                summary.date == original_summary.date and 
+                summary.message_count == original_summary.message_count):
+                summaries[i] = updated_summary
+                break
+        
+        # Сохраняем обновленную историю в текущем формате (массив)
+        with open(SUMMARIES_HISTORY_FILE, 'w', encoding='utf-8') as f:
+            json.dump([s.to_dict() for s in summaries], f, ensure_ascii=False, indent=2)
+
+
+async def process_covered_message(msg: MessageInfo, is_group: bool = False) -> bool:
+    """
+    Обрабатывает сообщение, которое уже покрыто в существующих саммари.
+    Пытается найти подходящее саммари для обновления.
+    Возвращает True, если сообщение было успешно обработано.
+    """
+    print("Сообщение уже покрыто в существующих саммари, "
+          "ищем подходящее саммари для обновления...")
+    
+    # Ищем подходящее саммари для обновления
+    relevant_summary = await find_relevant_summary_for_update(msg, is_group)
+    
+    if relevant_summary:
+        print("Найдено подходящее саммари для обновления")
+        
+        # Обновляем саммари
+        updated_summary = await update_existing_summary(relevant_summary, msg, is_group)
+        
+        # Сохраняем обновленное саммари
+        await save_updated_summary(relevant_summary, updated_summary, is_group)
+        
+        print("Саммари успешно обновлено с новой ссылкой")
+        return True
+    else:
+        print("Подходящее саммари для обновления не найдено, пропускаем сообщение")
+        return False
+
+
 async def run_summarizer(
     send_message: bool = True,
     save_changes: bool = True,
-    include_today_processed_groups: bool = True,
-    include_today_processed_messages: bool = True
+    include_today_processed_groups: bool = False,
+    include_today_processed_messages: bool = False
 ):
     """
     Запускает процесс суммаризации с настраиваемыми параметрами.
@@ -1203,7 +1373,7 @@ async def run_summarizer(
         
         # Обработка каналов (как обычно)
         print("=== Обработка каналов ===")
-        messages = await fetch_messages()
+        messages = await fetch_messages(include_today_processed_messages)
         print(f"Fetched {len(messages)} new messages from channels")
         
         if messages:
@@ -1244,6 +1414,13 @@ async def run_summarizer(
                 unique = await remove_duplicates(filtered)
                 print(f"{len(unique)} messages after deduplication")
                 
+                for msg in unique:
+                    if ENABLE_SUMMARIES_DEDUPLICATION:
+                        if await is_message_covered_in_summaries(msg):
+                            await process_covered_message(msg)
+                        elif await is_message_covered_in_group_summaries(msg):
+                            await process_covered_message(msg, is_group=True)
+                
                 if unique:
                     summary = await summarize_text(unique)
                     if send_message:
@@ -1274,69 +1451,77 @@ async def run_summarizer(
             should_run_group_summarization() or include_today_processed_groups
         )
         
-        if should_run_groups:
-            print("Starting daily group summarization...")
-            
-            group_messages = await fetch_group_messages()
-            print(f"Fetched {len(group_messages)} new messages from groups")
-            
-            if group_messages:
-                # Apply NLP filtering to remove advertising
-                group_filtered = []
-                all_checked_group_messages = []
-                
-                for i, msg in enumerate(group_messages):
-                    print(f"Checking group message {i+1}/{len(group_messages)}...")
-                    all_checked_group_messages.append(msg)
-                    
-                    if await is_nlp_related(msg.text):
-                        group_filtered.append(msg)
-                        print(f"  ✓ Group message {i+1} is NLP-related: {msg.text[:100]}; {msg.link}")
-                    else:
-                        print(f"  ✗ Group message {i+1} is not NLP-related: {msg.text[:100]}; {msg.link}")
-                print(f"{len(group_filtered)} group messages after NLP filter")
-                
-                # Сохраняем все проверенные сообщения из групп в историю
-                if save_changes:
-                    save_group_summarization_history(all_checked_group_messages)
-                    print(f"Saved {len(all_checked_group_messages)} checked group messages to history")
-                
-                if group_filtered:
-                    unique_group = await remove_group_duplicates(group_filtered)
-                    print(f"{len(unique_group)} group messages after deduplication")
-                    
-                    if unique_group:
-                        group_summary = await summarize_group_text(unique_group)
-                        if send_message:
-                            await bot_client.send_message(TARGET_CHANNEL, group_summary, parse_mode='html')
-                            print("Group summary sent")
-                        
-                        # Сохраняем саммари групп в историю
-                        if save_changes:
-                            groups = list(set(msg.channel for msg in unique_group))
-                            group_summary_info = SummaryInfo(
-                                content=group_summary,
-                                date=datetime.now(timezone.utc),
-                                message_count=len(unique_group),
-                                channels=groups
-                            )
-                            save_group_summary_to_history(group_summary_info)
-                            print(f"Group summary saved to history (groups: {groups})")
-                            
-                            # Обновляем время последнего запуска суммаризации групп
-                            update_group_last_run()
-                            print("Group summarization completed for today")
-                    else:
-                        print("No unique NLP messages found in groups")
-                else:
-                    print("No new NLP-related messages found in groups")
-            else:
-                print("No new messages found in groups")
-        else:
+        print(f"Should run groups: {should_run_groups}")
+        if not should_run_groups:
             if SOURCE_GROUPS:
                 print("Group summarization skipped (already run today)")
             else:
                 print("No groups configured for summarization")
+            return
+        print("Starting daily group summarization...")
+        
+        group_messages = await fetch_group_messages(include_today_processed_messages)
+        print(f"Fetched {len(group_messages)} new messages from groups")
+        
+        if group_messages:
+            # Apply NLP filtering to remove advertising
+            group_filtered = []
+            all_checked_group_messages = []
+            
+            for i, msg in enumerate(group_messages):
+                print(f"Checking group message {i+1}/{len(group_messages)}...")
+                all_checked_group_messages.append(msg)
+                
+                if await is_nlp_related(msg.text):
+                    group_filtered.append(msg)
+                    print(f"  ✓ Group message {i+1} is NLP-related: {msg.text[:100]}; {msg.link}")
+                else:
+                    print(f"  ✗ Group message {i+1} is not NLP-related: {msg.text[:100]}; {msg.link}")
+            print(f"{len(group_filtered)} group messages after NLP filter")
+            
+            # Сохраняем все проверенные сообщения из групп в историю
+            if save_changes:
+                save_group_summarization_history(all_checked_group_messages)
+                print(f"Saved {len(all_checked_group_messages)} checked group messages to history")
+            
+            if group_filtered:
+                unique_group = await remove_group_duplicates(group_filtered)
+                print(f"{len(unique_group)} group messages after deduplication")
+                
+                for msg in unique_group:
+                    if ENABLE_SUMMARIES_DEDUPLICATION:
+                        if await is_message_covered_in_summaries(msg):
+                            await process_covered_message(msg)
+                        elif await is_message_covered_in_group_summaries(msg):
+                            await process_covered_message(msg, is_group=True)
+                
+                if unique_group:
+                    group_summary = await summarize_group_text(unique_group)
+                    if send_message:
+                        await bot_client.send_message(TARGET_CHANNEL, group_summary, parse_mode='html')
+                        print("Group summary sent")
+                    
+                    # Сохраняем саммари групп в историю
+                    if save_changes:
+                        groups = list(set(msg.channel for msg in unique_group))
+                        group_summary_info = SummaryInfo(
+                            content=group_summary,
+                            date=datetime.now(timezone.utc),
+                            message_count=len(unique_group),
+                            channels=groups
+                        )
+                        save_group_summary_to_history(group_summary_info)
+                        print(f"Group summary saved to history (groups: {groups})")
+                        
+                        # Обновляем время последнего запуска суммаризации групп
+                        update_group_last_run()
+                        print("Group summarization completed for today")
+                else:
+                    print("No unique NLP messages found in groups")
+            else:
+                print("No new NLP-related messages found in groups")
+        else:
+            print("No new messages found in groups")
         
     finally:
         # Disconnect both clients
@@ -1347,8 +1532,8 @@ async def run_summarizer(
 def main(
     send_message: bool = True,
     save_changes: bool = True,
-    include_today_processed_groups: bool = True,
-    include_today_processed_messages: bool = True
+    include_today_processed_groups: bool = False,
+    include_today_processed_messages: bool = False
 ):
     """
     Главная функция для запуска суммаризатора с параметрами командной строки.
