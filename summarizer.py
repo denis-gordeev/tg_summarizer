@@ -56,6 +56,8 @@ SOURCE_CHANNELS = set([c.strip() for c in source_channels_str.split(',') if c.st
 
 # Новые переменные для групп
 source_groups_str = os.getenv('SOURCE_GROUPS', '')
+ABBREVIATIONS_FILE = 'channel_abbreviations.json'
+
 SOURCE_GROUPS = [g.strip() for g in source_groups_str.split(',') if g.strip()]
 
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
@@ -180,7 +182,7 @@ def extract_links(text: str) -> list[str]:
 
 def load_channel_abbreviations() -> dict:
     """Загружает существующие аббревиатуры каналов из JSON файла."""
-    abbreviations_file = 'channel_abbreviations.json'
+    abbreviations_file = ABBREVIATIONS_FILE
     if not os.path.exists(abbreviations_file):
         return {}
     
@@ -195,24 +197,15 @@ def load_channel_abbreviations() -> dict:
 
 def save_channel_abbreviation(channel_name: str, abbreviation: str) -> None:
     """Сохраняет новую аббревиатуру канала в JSON файл."""
-    abbreviations_file = 'channel_abbreviations.json'
-    
+    abbreviations_file = ABBREVIATIONS_FILE
     try:
-        # Загружаем существующие данные
-        if os.path.exists(abbreviations_file):
-            with open(abbreviations_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-        else:
-            data = {'channel_abbreviations': {}, 'last_updated': ''}
-        
-        # Добавляем новую аббревиатуру
-        data['channel_abbreviations'][channel_name] = abbreviation
-        data['last_updated'] = datetime.now().isoformat()
+        abbreviations = load_channel_abbreviations()
+        abbreviations[channel_name] = abbreviation
+        data = {"channel_abbreviations": abbreviations, "last_updated": datetime.now().isoformat()}
         
         # Сохраняем обновленные данные
         with open(abbreviations_file, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-            
     except Exception as e:
         print(f"Ошибка при сохранении аббревиатуры канала: {e}")
 
@@ -333,12 +326,7 @@ def save_summary_to_history(summary: SummaryInfo) -> None:
     """Сохраняет новое саммари в историю."""
     try:
         # Загружаем существующую историю
-        existing_summaries = []
-        if os.path.exists(SUMMARIES_HISTORY_FILE):
-            with open(SUMMARIES_HISTORY_FILE, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                existing_summaries = data.get('summaries', [])
-        
+        existing_summaries = load_summaries_history()
         # Добавляем новое саммари
         new_summary = summary.to_dict()
         all_summaries = existing_summaries + [new_summary]
@@ -1236,7 +1224,7 @@ async def find_relevant_summary_for_update(msg: MessageInfo, is_group: bool = Fa
 
 
 async def update_existing_summary(summary: SummaryInfo, new_message: MessageInfo, 
-                                is_group: bool = False) -> SummaryInfo:
+                                 is_group: bool = False) -> SummaryInfo:
     """
     Обновляет существующее саммари, добавляя блок "Другие ссылки:" с новой ссылкой.
     """
@@ -1287,7 +1275,7 @@ async def update_existing_summary(summary: SummaryInfo, new_message: MessageInfo
 
 
 async def save_updated_summary(original_summary: SummaryInfo, updated_summary: SummaryInfo, 
-                              is_group: bool = False) -> None:
+                               is_group: bool = False) -> None:
     """
     Сохраняет обновленное саммари, заменяя оригинальное в истории.
     """
