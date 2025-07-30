@@ -20,7 +20,8 @@ from prompts import (
     GROUP_SUMMARY_COVERAGE_CHECK_PROMPT,
     NLP_RELEVANCE_PROMPT,
     CHANNEL_SUMMARY_PROMPT,
-    GROUP_SUMMARY_PROMPT
+    GROUP_SUMMARY_PROMPT,
+    FIND_RELEVANT_SUMMARY_PROMPT
 )
 
 load_dotenv()
@@ -1208,9 +1209,7 @@ async def find_relevant_summary_for_update(msg: MessageInfo, is_group: bool = Fa
 Отвечайте только номером (1, 2, 3) или "НЕТ"."""
     
     try:
-        system_prompt = ("Ты эксперт по анализу текстов. Определи, в какое существующее "
-                        "саммари лучше всего добавить ссылку на новое сообщение.")
-        result = await call_openai(system_prompt, user_content, max_tokens=5)
+        result = await call_openai(FIND_RELEVANT_SUMMARY_PROMPT, user_content, max_tokens=5)
         result = result.strip().upper()
         
         if result in ["1", "2", "3"]:
