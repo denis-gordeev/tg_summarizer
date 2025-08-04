@@ -205,7 +205,7 @@ def save_group_summary_to_history(summary: SummaryInfo) -> None:
 def should_run_group_summarization() -> bool:
     """Проверяет, нужно ли запускать суммаризацию групп (раз в сутки)."""
     if not os.path.exists(GROUP_LAST_RUN_FILE):
-        return True
+        return False
     
     try:
         with open(GROUP_LAST_RUN_FILE, 'r', encoding='utf-8') as f:
