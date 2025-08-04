@@ -1,12 +1,14 @@
 import os
 import json
+import asyncio
 from datetime import datetime, timezone, timedelta
 from typing import List, Set
 from models import MessageInfo, SummaryInfo
 from config import (
     HISTORY_FILE, SUMMARIES_HISTORY_FILE, GROUP_HISTORY_FILE,
-    GROUP_SUMMARIES_HISTORY_FILE, GROUP_LAST_RUN_FILE
+    GROUP_SUMMARIES_HISTORY_FILE, GROUP_LAST_RUN_FILE, TARGET_CHANNEL
 )
+# Импорт будет сделан внутри функций для избежания циклического импорта
 
 
 def load_summarization_history() -> Set[str]:
@@ -82,7 +84,151 @@ def load_summaries_history() -> List[SummaryInfo]:
             return summaries
     except Exception as e:
         print(f"Ошибка при загрузке истории саммари: {e}")
+        print("Пытаемся восстановить историю из канала...")
+        return restore_summaries_from_channel_sync()
+
+
+async def restore_summaries_from_channel() -> List[SummaryInfo]:
+    """Восстанавливает историю саммари из канала, читая сообщения за последнюю неделю."""
+    try:
+        from telegram_client import user_client, start_clients
+        
+        # Запускаем клиент если не запущен
+        if not user_client.is_connected():
+            await start_clients()
+        
+        # Получаем сообщения за последнюю неделю
+        since = datetime.now(timezone.utc) - timedelta(days=7)
+        summaries = []
+        
+        print(f"Читаем сообщения из канала {TARGET_CHANNEL} "
+              f"за последнюю неделю...")
+        
+        async for msg in user_client.iter_messages(
+            TARGET_CHANNEL, offset_date=None, min_id=0, reverse=False
+        ):
+            if msg.date < since:
+                break
+            
+            if msg.message and msg.message.strip():
+                # Все сообщения в канале - это саммари
+                # Извлекаем каналы из ссылок и аббревиатур в сообщении
+                from utils import extract_all_channels
+                channels = extract_all_channels(msg.message)
+                
+                # Создаем SummaryInfo из сообщения
+                summary_info = SummaryInfo(
+                    content=msg.message,
+                    date=msg.date,
+                    message_count=0,  # Не можем определить количество исходных сообщений
+                    channels=channels  # Извлекаем каналы из ссылок и аббревиатур
+                )
+                summaries.append(summary_info)
+        
+        print(f"Восстановлено {len(summaries)} саммари из канала")
+        
+        # Сохраняем восстановленную историю
+        if summaries:
+            # Создаем новый файл с восстановленными данными
+            all_summaries = [summary.to_dict() for summary in summaries]
+            
+            with open(SUMMARIES_HISTORY_FILE, 'w', encoding='utf-8') as f:
+                json.dump({
+                    'summaries': all_summaries,
+                    'last_updated': datetime.now().isoformat()
+                }, f, ensure_ascii=False, indent=2)
+        
+        return summaries
+        
+    except Exception as e:
+        print(f"Ошибка при восстановлении истории из канала: {e}")
         return []
+
+
+def restore_summaries_from_channel_sync() -> List[SummaryInfo]:
+    """Синхронная обертка для восстановления истории саммари из канала."""
+    try:
+        # Проверяем, есть ли уже запущенный event loop
+        try:
+            asyncio.get_running_loop()
+            # Если loop уже запущен, создаем новую задачу
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(asyncio.run, restore_summaries_from_channel())
+                return future.result()
+        except RuntimeError:
+            # Если нет активного event loop, создаем новый
+            return asyncio.run(restore_summaries_from_channel())
+    except Exception as e:
+        print(f"Ошибка при синхронном восстановлении: {e}")
+        return []
+
+
+async def restore_group_summaries_from_channel() -> List[SummaryInfo]:
+    """Восстанавливает историю групповых саммари из канала."""
+    try:
+        from telegram_client import user_client, start_clients
+        
+        # Запускаем клиент если не запущен
+        if not user_client.is_connected():
+            await start_clients()
+        
+        # Получаем сообщения за последнюю неделю
+        since = datetime.now(timezone.utc) - timedelta(days=7)
+        summaries = []
+        
+        print(f"Читаем групповые саммари из канала {TARGET_CHANNEL} "
+              f"за последнюю неделю...")
+        
+        async for msg in user_client.iter_messages(
+            TARGET_CHANNEL, offset_date=None, min_id=0, reverse=False
+        ):
+            if msg.date < since:
+                break
+            
+            if msg.message and msg.message.strip():
+                # Все сообщения в канале - это саммари
+                # Извлекаем каналы из ссылок и аббревиатур в сообщении
+                from utils import extract_all_channels
+                channels = extract_all_channels(msg.message)
+                
+                # Создаем SummaryInfo из сообщения
+                summary_info = SummaryInfo(
+                    content=msg.message,
+                    date=msg.date,
+                    message_count=0,  # Не можем определить количество исходных сообщений
+                    channels=channels  # Извлекаем каналы из ссылок и аббревиатур
+                )
+                summaries.append(summary_info)
+        
+        print(f"Восстановлено {len(summaries)} групповых саммари из канала")
+        
+        # Сохраняем восстановленную историю
+        if summaries:
+            # Создаем новый файл с восстановленными данными
+            all_summaries = [summary.to_dict() for summary in summaries]
+            
+            with open(GROUP_SUMMARIES_HISTORY_FILE, 'w', encoding='utf-8') as f:
+                json.dump({
+                    'summaries': all_summaries,
+                    'last_updated': datetime.now().isoformat()
+                }, f, ensure_ascii=False, indent=2)
+        
+        return summaries
+        
+    except Exception as e:
+        print(f"Ошибка при восстановлении истории групповых саммари из канала: {e}")
+        return []
+
+
+def restore_group_summaries_from_channel_sync() -> List[SummaryInfo]:
+    """Синхронная обертка для восстановления истории групповых саммари из канала."""
+    try:
+        loop = asyncio.get_event_loop()
+        return loop.run_until_complete(restore_group_summaries_from_channel())
+    except RuntimeError:
+        # Если нет активного event loop, создаем новый
+        return asyncio.run(restore_group_summaries_from_channel())
 
 
 def save_summary_to_history(summary: SummaryInfo) -> None:
@@ -172,7 +318,8 @@ def load_group_summaries_history() -> List[SummaryInfo]:
             return summaries
     except Exception as e:
         print(f"Ошибка при загрузке истории саммари групп: {e}")
-        return []
+        print("Пытаемся восстановить историю групповых саммари из канала...")
+        return restore_group_summaries_from_channel_sync()
 
 
 def save_group_summary_to_history(summary: SummaryInfo) -> None:
