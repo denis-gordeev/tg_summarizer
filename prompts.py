@@ -1,16 +1,24 @@
-"""
-Prompts for the Telegram summarizer bot.
-This file contains all the system prompts used by the LLM functions.
-"""
+import json
+import os
 
-# Prompt for checking if two messages are duplicates
-DUPLICATE_CHECK_PROMPT = """
+
+class PromptManager:
+    """
+    Manages loading and accessing prompts for the summarizer.
+
+    It first loads default prompts defined in the class, and then overrides them
+    with any custom prompts defined in an external `prompts.json` file.
+
+    Prompts can be accessed as attributes, e.g., `prompts.DUPLICATE_CHECK_PROMPT`.
+    """
+
+    def __init__(self, prompts_file="prompts.json"):
+        self._defaults = {
+            "DUPLICATE_CHECK_PROMPT": """
 Описывают ли следующие два сообщения Telegram одинаковый контент или статью?
 Ответьте да или нет.
-"""
-
-# Prompt for checking if a message topic was already covered in previous summaries
-SUMMARY_COVERAGE_CHECK_PROMPT = """
+""",
+            "SUMMARY_COVERAGE_CHECK_PROMPT": """
 Ты эксперт по анализу текстов. Твоя задача - определить, была ли тема из нового сообщения уже освещена в предыдущих дайджестах.
 
     Правила:
@@ -23,12 +31,11 @@ SUMMARY_COVERAGE_CHECK_PROMPT = """
     - "Новый алгоритм GPT-5" и "OpenAI анонсировал GPT-5" = ДА (та же тема)
     - "Новый алгоритм GPT-5" и "Новый алгоритм BERT" = НЕТ (разные темы)
     - "Цена акций NVIDIA выросла" и "NVIDIA показала хорошие результаты" = ДА (та же тема)
+    - "Ян Лекун обсудил различия между научными исследованиями и инженерией" и "Ян Лекун поддержал термин «рисерчер», оспаривая мнение Илонa Маска" = ДА (та же тема)
 
     Отвечай только "ДА" или "НЕТ".
-"""
-
-# Prompt for checking if a message topic was already covered in previous group summaries
-GROUP_SUMMARY_COVERAGE_CHECK_PROMPT = """
+""",
+            "GROUP_SUMMARY_COVERAGE_CHECK_PROMPT": """
 Ты эксперт по анализу текстов. Твоя задача - определить, была ли тема из нового сообщения уже освещена в предыдущих дайджестах групп.
 
 Правила:
@@ -43,10 +50,8 @@ GROUP_SUMMARY_COVERAGE_CHECK_PROMPT = """
 - "Цена акций NVIDIA выросла" и "NVIDIA показала хорошие результаты" = ДА (та же тема)
 
 Отвечай только "ДА" или "НЕТ".
-"""
-
-# Prompt for NLP relevance classification
-NLP_RELEVANCE_PROMPT = """
+""",
+            "NLP_RELEVANCE_PROMPT": """
 Вы классификатор. Определите, является ли текст релевантным для NLP/ML/AI/programming/Python дайджеста.
 
 ПРИНИМАЙТЕ (ответьте 'да'):
@@ -60,7 +65,7 @@ NLP_RELEVANCE_PROMPT = """
 - Информация о пет-проектах
 - Тексты по ии и bigtech компании
 - Тексты про стартапы
-- Тексты про ии-ассистентов и приложения (ChatGPT, Claude, Gemini, Grok, DeepSeek, KlingAi, Midjourney etc.)
+- Тексты про ии-ассистентов и приложения (ChatGPT, GPT, Claude, Gemini, Grok, DeepSeek, KlingAi, Midjourney etc.)
 - Любые новости про Сэма Альтмана (Sam Altman), Марка Цукерберга
 OpenAI, Anthropic, Google, Meta, Microsoft, Nvidia, FAANG и т.д.
 - Новости про покупку, продажу компаний и поглощения
@@ -83,10 +88,8 @@ OpenAI, Anthropic, Google, Meta, Microsoft, Nvidia, FAANG и т.д.
 - В сообщении есть ссылки ведущие на ботов, при этом не указано перед ссылкой, что это ссылка на бота
 - Сообщение содержит ссылку на бота (например, @ChattyEnglishBot)
 Отвечайте только 'да' или 'нет'.
-"""
-
-# Base prompt for channel summarization
-CHANNEL_SUMMARY_PROMPT = """
+""",
+            "CHANNEL_SUMMARY_PROMPT": """
 Обобщите следующие сообщения Telegram в краткий ежедневный дайджест, сфокусированный на NLP.
 Структурируйте дайджест по темам или категориям. Для каждого блока информации указывайте
 номер источника в квадратных скобках [1], [2], [3] и т.д. Если несколько источников говорят
@@ -118,10 +121,8 @@ CHANNEL_SUMMARY_PROMPT = """
 Для коротких сообщений создавайте развернутые саммари,
 но строго соблюдайте лимит символов.
 denissexy - это канал про машинное обучение и искусственный интеллект
-"""
-
-# Base prompt for group summarization
-GROUP_SUMMARY_PROMPT = """
+""",
+            "GROUP_SUMMARY_PROMPT": """
 Обобщите следующие сообщения из Telegram-группы в краткий дайджест, сфокусированный на NLP.
 Структурируйте дайджест по темам или категориям. Для каждого блока информации указывайте
 номер источника в квадратных скобках [1], [2], [3] и т.д. Если несколько источников говорят
@@ -153,9 +154,29 @@ GROUP_SUMMARY_PROMPT = """
 Для коротких сообщений создавайте развернутые саммари,
 но строго соблюдайте лимит символов.
 Не добавляй в саммари вопросы пользователей, на которые нет ответа.
-"""
-
-# Prompt for finding relevant summary for update
-FIND_RELEVANT_SUMMARY_PROMPT = """
+""",
+            "FIND_RELEVANT_SUMMARY_PROMPT": """
 Ты эксперт по анализу текстов. Определи, в какое существующее саммари лучше всего добавить ссылку на новое сообщение.
-"""
+""",
+        }
+
+        self._prompts = self._defaults.copy()
+
+        file_path = os.path.join(os.path.dirname(__file__), prompts_file)
+        if os.path.exists(file_path):
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    custom_prompts = json.load(f)
+                    self._prompts.update(custom_prompts)
+            except (json.JSONDecodeError, IOError) as e:
+                print(f"Warning: Could not load or parse {prompts_file}: {e}")
+
+    def __getattr__(self, name):
+        """Allows accessing prompts as attributes."""
+        if name in self._prompts:
+            return self._prompts[name]
+        raise AttributeError(f"'PromptManager' object has no attribute '{name}'")
+
+
+# Singleton instance to be used across the application
+prompts = PromptManager()
