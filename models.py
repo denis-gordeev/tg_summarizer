@@ -1,0 +1,68 @@
+from dataclasses import dataclass
+from datetime import datetime
+from typing import List
+
+
+@dataclass
+class MessageInfo:
+    """Информация о сообщении Telegram"""
+    text: str
+    channel: str
+    message_id: int
+    date: datetime
+    link: str
+    
+    def get_telegram_link(self) -> str:
+        """Генерирует ссылку на оригинальное сообщение в Telegram"""
+        # Убираем @ из названия канала для формирования ссылки
+        channel_name = self.channel.lstrip('@')
+        return f"https://t.me/{channel_name}/{self.message_id}"
+    
+    def to_dict(self) -> dict:
+        """Конвертирует объект в словарь для сохранения в JSON"""
+        return {
+            'text': self.text,
+            'channel': self.channel,
+            'message_id': self.message_id,
+            'date': self.date.isoformat(),
+            'link': self.link
+        }
+    
+    @classmethod
+    def from_dict(cls, data: dict) -> 'MessageInfo':
+        """Создает объект из словаря"""
+        return cls(
+            text=data['text'],
+            channel=data['channel'],
+            message_id=data['message_id'],
+            date=datetime.fromisoformat(data['date']),
+            link=data['link']
+        )
+
+
+@dataclass
+class SummaryInfo:
+    """Информация о созданном саммари"""
+    content: str
+    date: datetime
+    message_count: int
+    channels: List[str]
+    
+    def to_dict(self) -> dict:
+        """Конвертирует объект в словарь для сохранения в JSON"""
+        return {
+            'content': self.content,
+            'date': self.date.isoformat(),
+            'message_count': self.message_count,
+            'channels': self.channels
+        }
+    
+    @classmethod
+    def from_dict(cls, data: dict) -> 'SummaryInfo':
+        """Создает объект из словаря"""
+        return cls(
+            content=data['content'],
+            date=datetime.fromisoformat(data['date']),
+            message_count=data['message_count'],
+            channels=data['channels']
+        ) 
