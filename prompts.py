@@ -12,7 +12,7 @@ class PromptManager:
     Prompts can be accessed as attributes, e.g., `prompts.DUPLICATE_CHECK_PROMPT`.
     """
 
-    def __init__(self, prompts_file="prompts.json"):
+    def __init__(self):
         self._defaults = {
             "DUPLICATE_CHECK_PROMPT": """
 Описывают ли следующие два сообщения Telegram одинаковый контент или статью?
@@ -164,6 +164,7 @@ denissexy - это канал про машинное обучение и иск
 
         self._prompts = self._defaults.copy()
 
+        prompts_file = os.getenv("PROMPTS_FILE", "prompts.json")
         file_path = os.path.join(os.path.dirname(__file__), prompts_file)
         if os.path.exists(file_path):
             try:
