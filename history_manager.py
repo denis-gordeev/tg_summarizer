@@ -138,7 +138,7 @@ async def restore_summaries_from_channel() -> List[SummaryInfo]:
                 summaries.append(summary_info)
 
         print(f"Восстановлено {len(summaries)} саммари из канала")
-
+        summaries = sorted(summaries, key=lambda x: x.date)
         # Сохраняем восстановленную историю
         if summaries:
             # Создаем новый файл с восстановленными данными
@@ -435,6 +435,7 @@ def get_recent_group_summaries_context(days: int = 7) -> str:
 def get_recent_summaries_context(days: int = 3) -> str:
     """Возвращает контекст последних саммари для дедупликации."""
     summaries = load_summaries_history()
+    summaries = sorted(summaries, key=lambda x: x.date)
     if not summaries:
         return ""
 
@@ -445,19 +446,7 @@ def get_recent_summaries_context(days: int = 3) -> str:
     if not recent_summaries:
         return ""
 
-    # Создаем контекст из последних 50 саммари
-    context_parts = []
-    for i, summary in enumerate(recent_summaries[-50:], 1):
-        # Очищаем HTML теги для лучшего сравнения
-        import re
-
-        clean_content = re.sub(r"<[^>]+>", "", summary.content)
-        # Берем первые 500 символов для контекста
-        context_parts.append(
-            f"Саммари {i} ({summary.date.strftime('%Y-%m-%d')}):\n{clean_content[:500]}..."
-        )
-
-    return "\n\n".join(context_parts)
+    return "\n\n".join([m.content for m in recent_summaries])
 
 
 async def find_relevant_summary_for_update(msg: MessageInfo, is_group: bool = False) -> SummaryInfo:
