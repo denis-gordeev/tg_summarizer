@@ -90,6 +90,9 @@ def load_summaries_history() -> List[SummaryInfo]:
                 for summary_data in data.get("summaries", []):
                     summaries.append(SummaryInfo.from_dict(summary_data))
 
+            if not summaries:
+                print("Пытаемся восстановить историю из канала...")
+                return restore_summaries_from_channel_sync()
             return summaries
     except Exception as e:
         print(f"Ошибка при загрузке истории саммари: {e}")
