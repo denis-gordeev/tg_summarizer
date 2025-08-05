@@ -53,6 +53,7 @@ class SummaryInfo:
     date: datetime
     message_count: int
     channels: List[str]
+    message_id: Optional[int] = None  # ID сообщения в целевом канале
     
     def to_dict(self) -> dict:
         """Конвертирует объект в словарь для сохранения в JSON"""
@@ -60,7 +61,8 @@ class SummaryInfo:
             'content': self.content,
             'date': self.date.isoformat(),
             'message_count': self.message_count,
-            'channels': self.channels
+            'channels': self.channels,
+            'message_id': self.message_id
         }
     
     @classmethod
@@ -70,5 +72,6 @@ class SummaryInfo:
             content=data['content'],
             date=datetime.fromisoformat(data['date']),
             message_count=data['message_count'],
-            channels=data['channels']
+            channels=data['channels'],
+            message_id=data.get('message_id')
         ) 

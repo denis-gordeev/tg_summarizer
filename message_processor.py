@@ -385,7 +385,7 @@ async def process_messages(
         update_group_last_run,
     )
     from channel_manager import save_discovered_channel
-    from telegram_client import send_message_to_target_channel
+    from telegram_client import send_message_to_target_channel_with_id
     from datetime import datetime, timezone
 
     print(f"Fetched {len(messages)} new messages from {'groups' if is_group else 'channels'}")
@@ -437,9 +437,10 @@ async def process_messages(
         return
 
     summary = await (summarize_group_text(unique) if is_group else summarize_text(unique))
+    message_id = None
     if send_message:
-        await send_message_to_target_channel(summary)
-        print(f"{'Group' if is_group else 'Channel'} summary sent")
+        message_id = await send_message_to_target_channel_with_id(summary)
+        print(f"{'Group' if is_group else 'Channel'} summary sent with ID: {message_id}")
 
     if save_changes:
         if is_group:
@@ -457,6 +458,7 @@ async def process_messages(
             date=datetime.now(timezone.utc),
             message_count=len(unique),
             channels=channels,
+            message_id=message_id,
         )
         if is_group:
             save_group_summary_to_history(summary_info)
@@ -489,8 +491,9 @@ async def process_covered_message(msg: MessageInfo, is_group: bool = False):
         print(f"  Найдено подходящее саммари для обновления")
         print("relevant_summary:", "=" * 100, "\n", relevant_summary, "\n", "=" * 100, "\n")
         updated_summary = await update_existing_summary(relevant_summary, msg, is_group)
+        print("updated_summary:", "=" * 100, "\n", updated_summary, "\n", "=" * 100, "\n")
         if updated_summary:
-            await save_updated_summary(updated_summary, is_group)
+            await save_updated_summary(relevant_summary, updated_summary, is_group)
             print(f"  Саммари обновлено с новым сообщением")
         else:
             print(f"  Не удалось обновить саммари")

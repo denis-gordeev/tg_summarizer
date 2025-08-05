@@ -93,6 +93,7 @@ def load_summaries_history() -> List[SummaryInfo]:
             if not summaries:
                 print("Пытаемся восстановить историю из канала...")
                 return restore_summaries_from_channel_sync()
+            summaries = sorted(summaries, key=lambda x: x.date)
             return summaries
     except Exception as e:
         print(f"Ошибка при загрузке истории саммари: {e}")
@@ -213,11 +214,13 @@ async def restore_group_summaries_from_channel() -> List[SummaryInfo]:
                     date=msg.date,
                     message_count=0,  # Не можем определить количество исходных сообщений
                     channels=channels,  # Извлекаем каналы из ссылок и аббревиатур
+                    message_id=msg.id,
                 )
                 summaries.append(summary_info)
 
         print(f"Восстановлено {len(summaries)} групповых саммари из канала")
 
+        summaries = sorted(summaries, key=lambda x: x.date)
         # Сохраняем восстановленную историю
         if summaries:
             # Создаем новый файл с восстановленными данными
@@ -463,7 +466,7 @@ async def find_relevant_summary_for_update(msg: MessageInfo, is_group: bool = Fa
         return None
 
     # Берем последние 3 саммари для поиска
-    recent_summaries = summaries[-3:]
+    recent_summaries = summaries[-50:]
 
     # Создаем контекст для поиска
     summaries_text = ""
@@ -484,7 +487,7 @@ async def find_relevant_summary_for_update(msg: MessageInfo, is_group: bool = Fa
         result = await call_openai(prompts.FIND_RELEVANT_SUMMARY_PROMPT, user_content, max_tokens=5)
         result = result.strip().upper()
 
-        if result in ["1", "2", "3"]:
+        if result.isdigit():
             index = int(result) - 1
             if 0 <= index < len(recent_summaries):
                 return recent_summaries[index]
@@ -549,67 +552,15 @@ async def update_existing_summary(
     return updated_summary
 
 
-async def update_existing_summary(
-    summary: SummaryInfo, new_message: MessageInfo, is_group: bool = False
-) -> SummaryInfo:
-    """
-    Обновляет существующее саммари, добавляя блок "Другие ссылки:" с новой ссылкой.
-    """
-    # Создаем ссылку для нового сообщения
-    links = extract_links(new_message.text)
-    telegram_link = new_message.get_telegram_link()
-    channel_abbr = create_channel_abbreviation(new_message.channel)
-
-    if links:
-        new_link = (
-            f'<a href="{links[0]}">[новое]</a> ' f'<a href="{telegram_link}">[{channel_abbr}]</a>'
-        )
-    else:
-        new_link = f'<a href="{telegram_link}">[{channel_abbr}]</a>'
-
-    # Ищем подходящее место для вставки блока "Другие ссылки:"
-    # Обычно это в конце саммари или после последнего блока с ссылками
-    content = summary.content
-
-    # Проверяем, есть ли уже блок "Другие ссылки:"
-    if "Другие ссылки:" in content:
-        # Если есть, добавляем новую ссылку к существующему блоку
-        lines = content.split("\n")
-        updated_lines = []
-        for line in lines:
-            if line.strip().startswith("Другие ссылки:"):
-                # Добавляем новую ссылку к существующему блоку
-                updated_lines.append(line + f", {new_link}")
-            else:
-                updated_lines.append(line)
-        updated_content = "\n".join(updated_lines)
-    else:
-        # Если нет, добавляем новый блок в конец
-        updated_content = content + f"\n\nДругие ссылки: {new_link}"
-
-    # Создаем обновленное саммари
-    updated_channels = (
-        summary.channels + [new_message.channel]
-        if new_message.channel not in summary.channels
-        else summary.channels
-    )
-
-    updated_summary = SummaryInfo(
-        content=updated_content,
-        date=summary.date,
-        message_count=summary.message_count + 1,
-        channels=updated_channels,
-    )
-
-    return updated_summary
-
-
 async def save_updated_summary(
     original_summary: SummaryInfo, updated_summary: SummaryInfo, is_group: bool = False
 ) -> None:
     """
     Сохраняет обновленное саммари, заменяя оригинальное в истории.
+    Также редактирует сообщение в канале, если есть message_id.
     """
+    from telegram_client import edit_message_in_target_channel
+    
     if is_group:
         summaries = load_group_summaries_history()
         # Находим индекс оригинального саммари
@@ -629,14 +580,19 @@ async def save_updated_summary(
         summaries = load_summaries_history()
         # Находим индекс оригинального саммари
         for i, summary in enumerate(summaries):
-            if (
-                summary.content == original_summary.content
-                and summary.date == original_summary.date
-                and summary.message_count == original_summary.message_count
-            ):
+            if summary.content == original_summary.content:
                 summaries[i] = updated_summary
+                print("updated_summary:", "=" * 100, "\n", updated_summary, "\n", "=" * 100, "\n")
                 break
 
         # Сохраняем обновленную историю в текущем формате (массив)
         with open(SUMMARIES_HISTORY_FILE, "w", encoding="utf-8") as f:
             json.dump([s.to_dict() for s in summaries], f, ensure_ascii=False, indent=2)
+    
+    # Редактируем сообщение в канале, если есть message_id
+    if original_summary.message_id:
+        try:
+            await edit_message_in_target_channel(original_summary.message_id, updated_summary.content)
+            print(f"Сообщение {original_summary.message_id} обновлено в канале")
+        except Exception as e:
+            print(f"Ошибка при редактировании сообщения {original_summary.message_id}: {e}")

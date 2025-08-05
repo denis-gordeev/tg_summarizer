@@ -1,7 +1,7 @@
 import asyncio
 import random
 from datetime import datetime, timedelta, timezone
-from typing import List
+from typing import List, Optional
 
 from telethon import TelegramClient
 from telethon.tl.functions.channels import GetChannelRecommendationsRequest
@@ -18,7 +18,7 @@ user_client = TelegramClient("tg_summarizer_user", API_ID, API_HASH)
 bot_client = TelegramClient("tg_summarizer_bot", API_ID, API_HASH)
 
 
-async def get_similar_channels_from_telegram(channel_username: str = None) -> List[str]:
+async def get_similar_channels_from_telegram(channel_username: Optional[str] = None) -> List[str]:
     """Получает список похожих каналов через Telegram API."""
     try:
         if not user_client.is_connected():
@@ -166,6 +166,30 @@ async def send_message_to_target_channel(message: str) -> None:
         print("Message sent to target channel")
     except Exception as e:
         print(f"Error sending message to target channel: {e}")
+
+
+async def edit_message_in_target_channel(message_id: int, new_message: str) -> None:
+    """Редактирует сообщение в целевом канале."""
+    from config import TARGET_CHANNEL
+
+    try:
+        await bot_client.edit_message(TARGET_CHANNEL, message_id, new_message, parse_mode="html")
+        print(f"Message {message_id} edited in target channel")
+    except Exception as e:
+        print(f"Error editing message {message_id} in target channel: {e}")
+
+
+async def send_message_to_target_channel_with_id(message: str) -> Optional[int]:
+    """Отправляет сообщение в целевой канал и возвращает message_id."""
+    from config import TARGET_CHANNEL
+
+    try:
+        sent_message = await bot_client.send_message(TARGET_CHANNEL, message, parse_mode="html")
+        print(f"Message sent to target channel with ID: {sent_message.id}")
+        return sent_message.id
+    except Exception as e:
+        print(f"Error sending message to target channel: {e}")
+        return None
 
 
 async def start_clients() -> None:
