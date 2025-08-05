@@ -135,6 +135,7 @@ async def restore_summaries_from_channel() -> List[SummaryInfo]:
                     date=msg.date,
                     message_count=0,  # Не можем определить количество исходных сообщений
                     channels=channels,  # Извлекаем каналы из ссылок и аббревиатур
+                    message_id=msg.id,
                 )
                 summaries.append(summary_info)
 
