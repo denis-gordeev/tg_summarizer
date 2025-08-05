@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 
 
 @dataclass
@@ -11,6 +11,8 @@ class MessageInfo:
     message_id: int
     date: datetime
     link: str
+    is_nlp_related: Optional[bool] = None
+    is_covered_in_summaries: Optional[bool] = None
     
     def get_telegram_link(self) -> str:
         """Генерирует ссылку на оригинальное сообщение в Telegram"""
@@ -25,7 +27,9 @@ class MessageInfo:
             'channel': self.channel,
             'message_id': self.message_id,
             'date': self.date.isoformat(),
-            'link': self.link
+            'link': self.link,
+            'is_nlp_related': self.is_nlp_related,
+            'is_covered_in_summaries': self.is_covered_in_summaries
         }
     
     @classmethod
@@ -36,7 +40,9 @@ class MessageInfo:
             channel=data['channel'],
             message_id=data['message_id'],
             date=datetime.fromisoformat(data['date']),
-            link=data['link']
+            link=data['link'],
+            is_nlp_related=data.get('is_nlp_related'),
+            is_covered_in_summaries=data.get('is_covered_in_summaries')
         )
 
 
