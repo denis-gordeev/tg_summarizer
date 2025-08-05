@@ -278,6 +278,7 @@ async def summarize_text(messages: List[MessageInfo]) -> str:
     # Паттерн для поиска всех ссылок на источники [1], [1,2], [1,2,3] и т.д.
     all_sources_pattern = r'\[(\d+(?:,\s*\d+)*)\]'
     result = re.sub(all_sources_pattern, replace_source_with_links, result)
+    print("result:", "="*100, "\n", result, "\n", "="*100, "\n")
 
     return result
 
@@ -355,7 +356,9 @@ async def summarize_group_text(messages: List[MessageInfo]) -> str:
     community_name = ', '.join(group_names)
     header = f"<b>👥 Обзор сообщества {community_name}</b>\n\n"
     
-    return header + result
+    result = header + result
+    print("group_result:", "="*100, "\n", result, "\n", "="*100, "\n")
+    return result
 
 
 async def process_messages(messages: List[MessageInfo], save_changes: bool, send_message: bool, is_group: bool = False):
@@ -455,12 +458,14 @@ async def process_covered_message(msg: MessageInfo, is_group: bool = False):
     print(f"  Проверяем возможность обновления саммари для: {msg.text[:50]}...")
     
     # Ищем подходящее саммари для обновления
-    relevant_summary = find_relevant_summary_for_update(msg, is_group)
+    relevant_summary = await find_relevant_summary_for_update(msg, is_group)
     if relevant_summary:
         print(f"  Найдено подходящее саммари для обновления")
+        print("relevant_summary:", "="*100, "\n", relevant_summary, "\n", "="*100, "\n")
         updated_summary = await update_existing_summary(relevant_summary, msg, is_group)
+        print("updated_summary:", "="*100, "\n", updated_summary, "\n", "="*100, "\n")
         if updated_summary:
-            save_updated_summary(updated_summary, is_group)
+            await save_updated_summary(updated_summary, is_group)
             print(f"  Саммари обновлено с новым сообщением")
         else:
             print(f"  Не удалось обновить саммари")
