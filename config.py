@@ -22,7 +22,9 @@ BOT_TOKEN = bot_token
 target_channel = os.getenv('TARGET_CHANNEL')
 if not target_channel:
     raise ValueError("TARGET_CHANNEL environment variable is required")
-TARGET_CHANNEL = target_channel
+TARGET_CHANNEL: int | str = target_channel
+if isinstance(TARGET_CHANNEL, str) and TARGET_CHANNEL.startswith("-"):
+    TARGET_CHANNEL = int(TARGET_CHANNEL)
 
 openai_api_key = os.getenv('OPENAI_API_KEY')
 if not openai_api_key:
@@ -37,13 +39,13 @@ source_groups_str = os.getenv('SOURCE_GROUPS', '')
 SOURCE_GROUPS = [g.strip() for g in source_groups_str.split(',') if g.strip()]
 
 # File paths
-ABBREVIATIONS_FILE = 'channel_abbreviations.json'
-HISTORY_FILE = 'summarization_history.json'
-SUMMARIES_HISTORY_FILE = 'summaries_history.json'
-DISCOVERED_CHANNELS_FILE = 'discovered_channels.json'
-GROUP_HISTORY_FILE = 'group_summarization_history.json'
-GROUP_SUMMARIES_HISTORY_FILE = 'group_summaries_history.json'
-GROUP_LAST_RUN_FILE = 'group_last_run.json'
+ABBREVIATIONS_FILE = os.getenv('ABBREVIATIONS_FILE', 'channel_abbreviations.json')
+HISTORY_FILE = os.getenv('HISTORY_FILE', 'summarization_history.json')
+SUMMARIES_HISTORY_FILE = os.getenv('SUMMARIES_HISTORY_FILE', 'summaries_history.json')
+DISCOVERED_CHANNELS_FILE = os.getenv('DISCOVERED_CHANNELS_FILE', 'discovered_channels.json')
+GROUP_HISTORY_FILE = os.getenv('GROUP_HISTORY_FILE', 'group_summarization_history.json')
+GROUP_SUMMARIES_HISTORY_FILE = os.getenv('GROUP_SUMMARIES_HISTORY_FILE', 'group_summaries_history.json')
+GROUP_LAST_RUN_FILE = os.getenv('GROUP_LAST_RUN_FILE', 'group_last_run.json')
 
 # Constants
 SIMILARITY_THRESHOLD = 0.9
