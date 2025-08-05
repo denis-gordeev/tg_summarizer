@@ -127,11 +127,11 @@ async def restore_summaries_from_channel() -> List[SummaryInfo]:
                 # Извлекаем каналы из ссылок и аббревиатур в сообщении
                 from utils import extract_all_channels
 
-                channels = extract_all_channels(msg.message)
+                channels = extract_all_channels(msg.text)
 
                 # Создаем SummaryInfo из сообщения
                 summary_info = SummaryInfo(
-                    content=msg.message,
+                    content=msg.text,
                     date=msg.date,
                     message_count=0,  # Не можем определить количество исходных сообщений
                     channels=channels,  # Извлекаем каналы из ссылок и аббревиатур

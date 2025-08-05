@@ -15,6 +15,8 @@ from utils import extract_links
 
 # Create separate clients for user (reading) and bot (sending)
 user_client = TelegramClient("tg_summarizer_user", API_ID, API_HASH)
+user_client.parse_mode = "html"
+
 bot_client = TelegramClient("tg_summarizer_bot", API_ID, API_HASH)
 
 
