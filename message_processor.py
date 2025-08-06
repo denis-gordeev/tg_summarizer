@@ -432,7 +432,7 @@ async def process_messages(
         for msg in all_checked_messages
         if msg.is_nlp_related and not msg.is_covered_in_summaries
     ]
-    
+    summary = None
     if unique:
         summary = await (summarize_group_text(unique) if is_group else summarize_text(unique))
         message_id = None
@@ -451,21 +451,22 @@ async def process_messages(
             if discovered_channels:
                 print(f"Discovered {len(discovered_channels)} new channels: {discovered_channels}")
         channels = list(set(msg.channel for msg in unique))
-        summary_info = SummaryInfo(
-            content=summary,
-            date=datetime.now(timezone.utc),
-            message_count=len(unique),
-            channels=channels,
-            message_id=message_id,
-        )
-        if is_group:
-            save_group_summary_to_history(summary_info)
-            print(f"Group summary saved to history (groups: {channels})")
-            update_group_last_run()
-            print("Group summarization completed for today")
-        else:
-            save_summary_to_history(summary_info)
-            print(f"Channel summary saved to history (channels: {channels})")
+        if summary:
+            summary_info = SummaryInfo(
+                content=summary,
+                date=datetime.now(timezone.utc),
+                message_count=len(unique),
+                channels=channels,
+                message_id=message_id,
+            )
+            if is_group:
+                save_group_summary_to_history(summary_info)
+                print(f"Group summary saved to history (groups: {channels})")
+                update_group_last_run()
+                print("Group summarization completed for today")
+            else:
+                save_summary_to_history(summary_info)
+                print(f"Channel summary saved to history (channels: {channels})")
 
 
 async def process_covered_message(msg: MessageInfo, is_group: bool = False):
