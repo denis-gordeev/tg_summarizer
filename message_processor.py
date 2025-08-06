@@ -432,15 +432,13 @@ async def process_messages(
         for msg in all_checked_messages
         if msg.is_nlp_related and not msg.is_covered_in_summaries
     ]
-    if not unique:
-        print(f"No new NLP-related messages found in {'groups' if is_group else 'channels'}")
-        return
-
-    summary = await (summarize_group_text(unique) if is_group else summarize_text(unique))
-    message_id = None
-    if send_message:
-        message_id = await send_message_to_target_channel_with_id(summary)
-        print(f"{'Group' if is_group else 'Channel'} summary sent with ID: {message_id}")
+    
+    if unique:
+        summary = await (summarize_group_text(unique) if is_group else summarize_text(unique))
+        message_id = None
+        if send_message:
+            message_id = await send_message_to_target_channel_with_id(summary)
+            print(f"{'Group' if is_group else 'Channel'} summary sent with ID: {message_id}")
 
     if save_changes:
         if is_group:
