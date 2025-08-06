@@ -337,8 +337,12 @@ def load_group_summaries_history() -> List[SummaryInfo]:
         with open(GROUP_SUMMARIES_HISTORY_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
             summaries = []
-            for summary_data in data.get("summaries", []):
-                summaries.append(SummaryInfo.from_dict(summary_data))
+            if isinstance(data, list):
+                for summary_data in data:
+                    summaries.append(SummaryInfo.from_dict(summary_data))
+            else:
+                for summary_data in data.get("summaries", []):
+                    summaries.append(SummaryInfo.from_dict(summary_data))
             return summaries
     except Exception as e:
         print(f"Ошибка при загрузке истории саммари групп: {e}")
