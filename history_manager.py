@@ -1,4 +1,5 @@
 import asyncio
+import concurrent.futures
 import json
 import os
 from datetime import datetime, timedelta, timezone
@@ -162,23 +163,20 @@ async def restore_summaries_from_channel() -> List[SummaryInfo]:
 
 
 def restore_summaries_from_channel_sync() -> List[SummaryInfo]:
-    """Синхронная обертка для восстановления истории саммари из канала."""
+    """Синхронная обёртка для restore_summaries_from_channel."""
     try:
-        # Проверяем, есть ли уже запущенный event loop
-        try:
-            asyncio.get_running_loop()
-            # Если loop уже запущен, создаем новую задачу
-            import concurrent.futures
-
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(asyncio.run, restore_summaries_from_channel())
-                return future.result()
-        except RuntimeError:
-            # Если нет активного event loop, создаем новый
-            return asyncio.run(restore_summaries_from_channel())
-    except Exception as e:
-        print(f"Ошибка при синхронном восстановлении: {e}")
-        return []
+        # Попытка получить запущенный loop
+        asyncio.get_running_loop()
+    except RuntimeError:
+        # Если нет – запускаем прямо
+        return asyncio.run(restore_summaries_from_channel())
+    else:
+        # Если есть – делегируем asyncio.run в новый поток
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            # здесь лямбда создаёт и ждёт корутину внутри потока
+            return executor.submit(
+                lambda: asyncio.run(restore_summaries_from_channel())
+            ).result()
 
 
 async def restore_group_summaries_from_channel() -> List[SummaryInfo]:
@@ -247,7 +245,8 @@ def restore_group_summaries_from_channel_sync() -> List[SummaryInfo]:
     try:
         loop = asyncio.get_event_loop()
         return loop.run_until_complete(restore_group_summaries_from_channel())
-    except RuntimeError:
+    except RuntimeError as ex:
+        print(f"Ошибка при восстановлении истории групповых саммари из канала: {ex}")
         # Если нет активного event loop, создаем новый
         return asyncio.run(restore_group_summaries_from_channel())
 

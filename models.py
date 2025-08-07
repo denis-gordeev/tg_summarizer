@@ -12,6 +12,7 @@ class MessageInfo:
     date: datetime
     link: str
     is_nlp_related: Optional[bool] = None
+    is_nlp_related_reason: Optional[str] = None
     is_covered_in_summaries: Optional[bool] = None
     
     def get_telegram_link(self) -> str:
@@ -29,7 +30,8 @@ class MessageInfo:
             'date': self.date.isoformat(),
             'link': self.link,
             'is_nlp_related': self.is_nlp_related,
-            'is_covered_in_summaries': self.is_covered_in_summaries
+            'is_covered_in_summaries': self.is_covered_in_summaries,
+            'is_nlp_related_reason': self.is_nlp_related_reason
         }
     
     @classmethod

@@ -106,12 +106,12 @@ async def is_message_covered_in_group_summaries(msg: MessageInfo) -> bool:
         return False
 
 
-async def is_nlp_related(text: str) -> bool:
+async def is_nlp_related(text: str) -> (bool, str):
     """Use the LLM to decide if a message is NLP related and not advertising."""
     if len(text) < 100:
-        return False
+        return False, "too_short"
     answer = await call_openai(prompts.NLP_RELEVANCE_PROMPT, text, max_tokens=5)
-    return answer.lower().strip().startswith("да")
+    return answer.lower().strip().startswith("да"), answer
 
 
 async def remove_duplicates(messages: List[MessageInfo]) -> List[MessageInfo]:
@@ -405,18 +405,17 @@ async def process_messages(
         all_checked_messages.append(msg)
 
         # Проверяем, является ли сообщение NLP-релевантным
-        msg.is_nlp_related = await is_nlp_related(msg.text)
+        msg.is_nlp_related, msg.is_nlp_related_reason = await is_nlp_related(msg.text)
+
+        is_nlp_related_message = "✅" if msg.is_nlp_related else "❌"
+        is_nlp_related_message += (
+            f" {msg.text} {msg.channel} {msg.message_id} \nReason: {msg.is_nlp_related_reason}"
+        )
+        print(is_nlp_related_message)
 
         if msg.is_nlp_related:
             if not is_group and msg.channel not in SOURCE_CHANNELS:
                 discovered_channels.add(msg.channel)
-            print(f"\t✓ Message {i+1} is NLP-related: {msg.text[:100]}; {msg.link}")
-        else:
-            print(
-                f"\t✗ Message {i+1} is not NLP-related (likely advertising): "
-                f"{msg.text[:100]}; {msg.channel}; {msg.link}"
-            )
-
         if ENABLE_SUMMARIES_DEDUPLICATION and msg.is_nlp_related:
             msg.is_covered_in_summaries = False
             if is_group:
