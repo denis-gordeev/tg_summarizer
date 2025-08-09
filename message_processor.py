@@ -110,7 +110,7 @@ async def is_nlp_related(text: str) -> (bool, str):
     """Use the LLM to decide if a message is NLP related and not advertising."""
     if len(text) < 100:
         return False, "too_short"
-    answer = await call_openai(prompts.NLP_RELEVANCE_PROMPT, text, max_tokens=5)
+    answer = await call_openai(prompts.NLP_RELEVANCE_PROMPT, text, max_tokens=30)
     return answer.lower().strip().startswith("да"), answer
 
 

@@ -1,30 +1,32 @@
 import asyncio
 import random
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from typing import List, Optional, Any
 
-from telethon import TelegramClient
-from telethon.tl.functions.channels import GetChannelRecommendationsRequest
-from telethon.tl.types import InputChannel
+from telethon import TelegramClient  # type: ignore[reportMissingTypeStubs]
+from telethon.tl.functions.channels import (  # type: ignore[reportMissingTypeStubs]
+    GetChannelRecommendationsRequest,
+)
+from telethon.tl.types import InputChannel  # type: ignore[reportMissingTypeStubs]
 
-from config import API_HASH, API_ID, BOT_TOKEN, SOURCE_CHANNELS, SOURCE_GROUPS
+from config import API_HASH, API_ID, BOT_TOKEN, SOURCE_GROUPS
 from history_manager import load_group_summarization_history, load_summarization_history
 from message_processor import get_all_source_channels, is_message_processed
 from models import MessageInfo
 from utils import extract_links
 
-# Create separate clients for user (reading) and bot (sending)
-user_client = TelegramClient("tg_summarizer_user", API_ID, API_HASH)
-user_client.parse_mode = "html"
-
-bot_client = TelegramClient("tg_summarizer_bot", API_ID, API_HASH)
+# Clients are created lazily inside the active event loop
+user_client: Any = None
+bot_client: Any = None
+clients_loop: Optional[asyncio.AbstractEventLoop] = None
 
 
 async def get_similar_channels_from_telegram(channel_username: Optional[str] = None) -> List[str]:
     """Получает список похожих каналов через Telegram API."""
     try:
-        if not user_client.is_connected():
-            await user_client.start()
+        global user_client
+        if user_client is None or not user_client.is_connected():
+            await start_clients()
 
         # Если указан канал, получаем рекомендации для него
         if channel_username:
@@ -79,6 +81,11 @@ async def fetch_messages(include_today_processed_messages: bool = False) -> List
     all_channels = get_all_source_channels()
     random.shuffle(all_channels)
 
+    # Ensure user client is running
+    global user_client
+    if user_client is None or not user_client.is_connected():
+        await start_clients()
+
     for channel in all_channels:
         print(f"Fetching messages from {channel}...")
         channel_msgs = []
@@ -125,6 +132,11 @@ async def fetch_group_messages(include_today_processed_messages: bool = False) -
     # Получаем список групп
     all_groups = SOURCE_GROUPS
 
+    # Ensure user client is running
+    global user_client
+    if user_client is None or not user_client.is_connected():
+        await start_clients()
+
     for group in all_groups:
         print(f"Fetching messages from group {group}...")
         group_msgs = []
@@ -164,6 +176,9 @@ async def send_message_to_target_channel(message: str) -> None:
     from config import TARGET_CHANNEL
 
     try:
+        global bot_client
+        if bot_client is None or not bot_client.is_connected():
+            await start_clients()
         await bot_client.send_message(TARGET_CHANNEL, message, parse_mode="html")
         print("Message sent to target channel")
     except Exception as e:
@@ -175,7 +190,12 @@ async def edit_message_in_target_channel(message_id: int, new_message: str) -> N
     from config import TARGET_CHANNEL
 
     try:
-        await bot_client.edit_message(TARGET_CHANNEL, message_id, new_message, parse_mode="html")
+        global bot_client
+        if bot_client is None or not bot_client.is_connected():
+            await start_clients()
+        await bot_client.edit_message(
+            TARGET_CHANNEL, message_id, new_message, parse_mode="html"
+        )
         print(f"Message {message_id} edited in target channel")
     except Exception as e:
         print(f"Error editing message {message_id} in target channel: {e}")
@@ -186,7 +206,12 @@ async def send_message_to_target_channel_with_id(message: str) -> Optional[int]:
     from config import TARGET_CHANNEL
 
     try:
-        sent_message = await bot_client.send_message(TARGET_CHANNEL, message, parse_mode="html")
+        global bot_client
+        if bot_client is None or not bot_client.is_connected():
+            await start_clients()
+        sent_message = await bot_client.send_message(
+            TARGET_CHANNEL, message, parse_mode="html"
+        )
         print(f"Message sent to target channel with ID: {sent_message.id}")
         return sent_message.id
     except Exception as e:
@@ -196,11 +221,24 @@ async def send_message_to_target_channel_with_id(message: str) -> Optional[int]:
 
 async def start_clients() -> None:
     """Запускает клиенты Telegram."""
-    await user_client.start()
-    await bot_client.start(bot_token=BOT_TOKEN)
+    global user_client, bot_client, clients_loop
+    clients_loop = asyncio.get_running_loop()
+    if user_client is None:
+        user_client = TelegramClient("tg_summarizer_user", API_ID, API_HASH)
+        user_client.parse_mode = "html"
+    if bot_client is None:
+        bot_client = TelegramClient("tg_summarizer_bot", API_ID, API_HASH)
+    if not user_client.is_connected():
+        await user_client.start()
+    if not bot_client.is_connected():
+        await bot_client.start(bot_token=BOT_TOKEN)
 
 
 async def stop_clients() -> None:
     """Останавливает клиенты Telegram."""
-    await user_client.disconnect()
-    await bot_client.disconnect()
+    global user_client, bot_client, clients_loop
+    if user_client is not None and user_client.is_connected():
+        await user_client.disconnect()
+    if bot_client is not None and bot_client.is_connected():
+        await bot_client.disconnect()
+    clients_loop = None

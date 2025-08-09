@@ -1,10 +1,9 @@
 import asyncio
-import concurrent.futures
 import json
 import os
 from datetime import datetime, timedelta, timezone
-from typing import List, Set
-
+from typing import List, Set, Optional
+ 
 from channel_manager import create_channel_abbreviation
 from config import (
     GROUP_HISTORY_FILE,
@@ -16,7 +15,7 @@ from config import (
 )
 from models import MessageInfo, SummaryInfo
 from prompts import prompts
-from utils import call_openai, extract_channels_from_abbreviations, extract_links
+from utils import call_openai, extract_links
 
 
 def load_summarization_history() -> Set[str]:
@@ -105,11 +104,10 @@ def load_summaries_history() -> List[SummaryInfo]:
 async def restore_summaries_from_channel() -> List[SummaryInfo]:
     """Восстанавливает историю саммари из канала, читая сообщения за последнюю неделю."""
     try:
-        from telegram_client import start_clients, user_client
-
+        import telegram_client as tg
         # Запускаем клиент если не запущен
-        if not user_client.is_connected():
-            await start_clients()
+        if tg.user_client is None or not tg.user_client.is_connected():
+            await tg.start_clients()
 
         # Получаем сообщения за последнюю неделю
         since = datetime.now(timezone.utc) - timedelta(days=7)
@@ -117,7 +115,7 @@ async def restore_summaries_from_channel() -> List[SummaryInfo]:
 
         print(f"Читаем сообщения из канала {TARGET_CHANNEL} " f"за последнюю неделю...")
 
-        async for msg in user_client.iter_messages(
+        async for msg in tg.user_client.iter_messages(
             TARGET_CHANNEL, offset_date=None, min_id=0, reverse=False
         ):
             if msg.date < since:
@@ -164,29 +162,42 @@ async def restore_summaries_from_channel() -> List[SummaryInfo]:
 
 def restore_summaries_from_channel_sync() -> List[SummaryInfo]:
     """Синхронная обёртка для restore_summaries_from_channel."""
+    import telegram_client as tg
+    # Если клиент уже подключён к своему циклу, выполняем корутину в нём
+    tg_loop = getattr(tg, "clients_loop", None)
     try:
-        # Попытка получить запущенный loop
         asyncio.get_running_loop()
+        # Мы внутри уже запущенного цикла
+        if tg_loop and tg_loop.is_running():
+            # Планируем выполнение в цикле клиентов
+            future = asyncio.run_coroutine_threadsafe(
+                restore_summaries_from_channel(), tg_loop
+            )
+            return future.result()
+        # Нет выделенного цикла клиентов – возвращаем пустой список, чтобы не рушить текущий цикл
+        print("Восстановление истории: клиенты не запущены в отдельном цикле")
+        return []
     except RuntimeError:
-        # Если нет – запускаем прямо
+        # Текущий поток без event loop
+        if tg_loop and tg_loop.is_running():
+            future = asyncio.run_coroutine_threadsafe(
+                restore_summaries_from_channel(), tg_loop
+            )
+            return future.result()
+        # Клиенты не запущены – безопасно создать новый цикл
         return asyncio.run(restore_summaries_from_channel())
-    else:
-        # Если есть – делегируем asyncio.run в новый поток
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            # здесь лямбда создаёт и ждёт корутину внутри потока
-            return executor.submit(
-                lambda: asyncio.run(restore_summaries_from_channel())
-            ).result()
+    except Exception as e:
+        print(f"Ошибка при восстановлении истории из канала: {e}")
+        return []
 
 
 async def restore_group_summaries_from_channel() -> List[SummaryInfo]:
     """Восстанавливает историю групповых саммари из канала."""
     try:
-        from telegram_client import start_clients, user_client
-
+        import telegram_client as tg
         # Запускаем клиент если не запущен
-        if not user_client.is_connected():
-            await start_clients()
+        if tg.user_client is None or not tg.user_client.is_connected():
+            await tg.start_clients()
 
         # Получаем сообщения за последнюю неделю
         since = datetime.now(timezone.utc) - timedelta(days=7)
@@ -194,7 +205,7 @@ async def restore_group_summaries_from_channel() -> List[SummaryInfo]:
 
         print(f"Читаем групповые саммари из канала {TARGET_CHANNEL} " f"за последнюю неделю...")
 
-        async for msg in user_client.iter_messages(
+        async for msg in tg.user_client.iter_messages(
             TARGET_CHANNEL, offset_date=None, min_id=0, reverse=False
         ):
             if msg.date < since:
@@ -242,13 +253,27 @@ async def restore_group_summaries_from_channel() -> List[SummaryInfo]:
 
 def restore_group_summaries_from_channel_sync() -> List[SummaryInfo]:
     """Синхронная обертка для восстановления истории групповых саммари из канала."""
+    import telegram_client as tg
+    tg_loop = getattr(tg, "clients_loop", None)
     try:
-        loop = asyncio.get_event_loop()
-        return loop.run_until_complete(restore_group_summaries_from_channel())
-    except RuntimeError as ex:
-        print(f"Ошибка при восстановлении истории групповых саммари из канала: {ex}")
-        # Если нет активного event loop, создаем новый
+        asyncio.get_running_loop()
+        if tg_loop and tg_loop.is_running():
+            future = asyncio.run_coroutine_threadsafe(
+                restore_group_summaries_from_channel(), tg_loop
+            )
+            return future.result()
+        print("Восстановление групповых саммари: клиенты не запущены в отдельном цикле")
+        return []
+    except RuntimeError:
+        if tg_loop and tg_loop.is_running():
+            future = asyncio.run_coroutine_threadsafe(
+                restore_group_summaries_from_channel(), tg_loop
+            )
+            return future.result()
         return asyncio.run(restore_group_summaries_from_channel())
+    except Exception as e:
+        print(f"Ошибка при восстановлении истории групповых саммари из канала: {e}")
+        return []
 
 
 def save_summary_to_history(summary: SummaryInfo) -> None:
@@ -389,10 +414,15 @@ def should_run_group_summarization() -> bool:
                 return True
 
             last_run = datetime.fromisoformat(last_run_str)
+            # Убеждаемся, что last_run имеет timezone info
+            if last_run.tzinfo is None:
+                last_run = last_run.replace(tzinfo=timezone.utc)
+            
             now = datetime.now(timezone.utc)
 
             time_since_last_run = (now - last_run).total_seconds()
-            print(f"Last run: {last_run}; now: {now}; time since last run: {time_since_last_run}")
+            print(f"Last run: {last_run}; now: {now}; "
+                  f"time since last run: {time_since_last_run}")
             # Проверяем, прошло ли больше 24 часов с последнего запуска
             return time_since_last_run > 24 * 60 * 60
 
@@ -456,7 +486,9 @@ def get_recent_summaries_context(days: int = 3) -> str:
     return "\n\n".join([m.content for m in recent_summaries])
 
 
-async def find_relevant_summary_for_update(msg: MessageInfo, is_group: bool = False) -> SummaryInfo:
+async def find_relevant_summary_for_update(
+    msg: MessageInfo, is_group: bool = False
+) -> Optional[SummaryInfo]:
     """
     Находит наиболее подходящее существующее саммари для обновления.
     Возвращает None, если подходящее саммари не найдено.
@@ -564,7 +596,7 @@ async def save_updated_summary(
     Также редактирует сообщение в канале, если есть message_id.
     """
     from telegram_client import edit_message_in_target_channel
-    
+
     if is_group:
         summaries = load_group_summaries_history()
         # Находим индекс оригинального саммари
@@ -586,7 +618,10 @@ async def save_updated_summary(
         for i, summary in enumerate(summaries):
             if summary.content == original_summary.content:
                 summaries[i] = updated_summary
-                print("updated_summary:", "=" * 100, "\n", updated_summary, "\n", "=" * 100, "\n")
+                print(
+                    "updated_summary:", "=" * 100, "\n", updated_summary,
+                    "\n", "=" * 100, "\n"
+                )
                 break
 
         # Сохраняем обновленную историю в текущем формате (массив)
@@ -596,7 +631,9 @@ async def save_updated_summary(
     # Редактируем сообщение в канале, если есть message_id
     if original_summary.message_id:
         try:
-            await edit_message_in_target_channel(original_summary.message_id, updated_summary.content)
+            await edit_message_in_target_channel(
+                original_summary.message_id, updated_summary.content
+            )
             print(f"Сообщение {original_summary.message_id} обновлено в канале")
         except Exception as e:
             print(f"Ошибка при редактировании сообщения {original_summary.message_id}: {e}")
