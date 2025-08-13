@@ -116,6 +116,10 @@ cd tg_summarizer
 ```bash
 pip install -r requirements.txt
 ```
+или
+```bash
+poetry install
+```
 
 3. Создайте файл `.env` с необходимыми переменными окружения:
 ```bash
