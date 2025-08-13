@@ -228,6 +228,66 @@ python summarizer.py
 6. Отправит дайджест в целевой канал групп
 7. Обновит время последнего запуска
 
+## Установка и запуск через Docker
+
+### Сборка образа
+
+```bash
+# В корне проекта
+docker build -t tg-summarizer:latest .
+```
+
+### Быстрый запуск (однократный)
+
+```bash
+docker run --rm -it \
+  --env-file .env \
+  -e TZ=Europe/Moscow \
+  tg-summarizer:latest
+```
+
+### Рекомендованный запуск (c сохранением истории и сессий)
+
+Важно: Telethon-сессии (`tg_summarizer_user.session`, `tg_summarizer_bot.session`) лучше создать заранее локально (первым запуском скрипта вне Docker) и смонтировать в контейнер. Также вынесем файлы истории в volume `/data`.
+
+```bash
+docker run -d --name tg-summarizer \
+  --env-file .env \
+  -e TZ=Europe/Moscow \
+  -e HISTORY_FILE=/data/summarization_history.json \
+  -e SUMMARIES_HISTORY_FILE=/data/summaries_history.json \
+  -e DISCOVERED_CHANNELS_FILE=/data/discovered_channels.json \
+  -e GROUP_HISTORY_FILE=/data/group_summarization_history.json \
+  -e GROUP_SUMMARIES_HISTORY_FILE=/data/group_summaries_history.json \
+  -e GROUP_LAST_RUN_FILE=/data/group_last_run.json \
+  -v tg_summarizer_data:/data \
+  -v $(pwd)/tg_summarizer_user.session:/app/tg_summarizer_user.session \
+  -v $(pwd)/tg_summarizer_bot.session:/app/tg_summarizer_bot.session \
+  tg-summarizer:latest
+```
+
+Опционально можно сохранить логи на хосте:
+
+```bash
+docker run -d --name tg-summarizer \
+  --env-file .env \
+  -v $(pwd)/logs:/app/logs \
+  tg-summarizer:latest
+```
+
+Минимальный набор переменных в `.env`:
+
+```env
+TELEGRAM_API_ID=...
+TELEGRAM_API_HASH=...
+TELEGRAM_BOT_TOKEN=...
+TARGET_CHANNEL=@your_target_channel
+OPENAI_API_KEY=...
+# Опционально
+SOURCE_CHANNELS=@a,@b
+SOURCE_GROUPS=@g1,@g2
+```
+
 ## Автоматизация
 
 ### Использование готового скрипта
