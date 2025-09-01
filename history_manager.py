@@ -91,6 +91,7 @@ def load_summaries_history() -> List[SummaryInfo]:
                     summaries.append(SummaryInfo.from_dict(summary_data))
 
             if not summaries:
+                print("No summaries found in history file")
                 print("Пытаемся восстановить историю из канала...")
                 return restore_summaries_from_channel_sync()
             summaries = sorted(summaries, key=lambda x: x.date)
@@ -107,10 +108,13 @@ async def restore_summaries_from_channel() -> List[SummaryInfo]:
         import telegram_client as tg
         # Запускаем клиент если не запущен
         if tg.user_client is None or not tg.user_client.is_connected():
+            print("Запускаем клиент")
             await tg.start_clients()
+            print("Запустили клиент")
 
         # Получаем сообщения за последнюю неделю
         since = datetime.now(timezone.utc) - timedelta(days=7)
+        print("since", since)
         summaries = []
 
         print(f"Читаем сообщения из канала {TARGET_CHANNEL} " f"за последнюю неделю...")
@@ -120,7 +124,7 @@ async def restore_summaries_from_channel() -> List[SummaryInfo]:
         ):
             if msg.date < since:
                 break
-
+            print("msg", msg)
             if msg.message and msg.message.strip():
                 # Все сообщения в канале - это саммари
                 # Извлекаем каналы из ссылок и аббревиатур в сообщении
@@ -163,27 +167,46 @@ async def restore_summaries_from_channel() -> List[SummaryInfo]:
 def restore_summaries_from_channel_sync() -> List[SummaryInfo]:
     """Синхронная обёртка для restore_summaries_from_channel."""
     import telegram_client as tg
+    print("tg", tg)
     # Если клиент уже подключён к своему циклу, выполняем корутину в нём
     tg_loop = getattr(tg, "clients_loop", None)
+    print("tg_loop", tg_loop)
     try:
-        asyncio.get_running_loop()
+        current_loop = asyncio.get_running_loop()
+        print("asyncio.get_running_loop()")
         # Мы внутри уже запущенного цикла
         if tg_loop and tg_loop.is_running():
-            # Планируем выполнение в цикле клиентов
+            # Если это тот же loop, блокируем восстановление, чтобы не повиснуть
+            if tg_loop is current_loop:
+                print("Восстановление истории: тот же event loop, пропускаем восстановление")
+                return []
+            print("Восстановление истории: клиенты запущены в отдельном цикле")
+            # Планируем выполнение в цикле клиентов (другой поток)
             future = asyncio.run_coroutine_threadsafe(
                 restore_summaries_from_channel(), tg_loop
             )
-            return future.result()
+            # Не ждём бесконечно — ограничим ожидание, чтобы не зависать в Lambda
+            try:
+                return future.result(timeout=float(os.getenv("RESTORE_TIMEOUT_SEC", "30")))
+            except Exception as wait_err:
+                print(f"Восстановление истории: таймаут/ошибка ожидания: {wait_err}")
+                return []
         # Нет выделенного цикла клиентов – возвращаем пустой список, чтобы не рушить текущий цикл
         print("Восстановление истории: клиенты не запущены в отдельном цикле")
         return []
     except RuntimeError:
+        print("restore_summaries_from_channel_sync RuntimeError")
         # Текущий поток без event loop
         if tg_loop and tg_loop.is_running():
+            print("Восстановление истории: клиенты запущены в отдельном цикле 2")
             future = asyncio.run_coroutine_threadsafe(
                 restore_summaries_from_channel(), tg_loop
             )
-            return future.result()
+            try:
+                return future.result(timeout=float(os.getenv("RESTORE_TIMEOUT_SEC", "30")))
+            except Exception as wait_err:
+                print(f"Восстановление истории: таймаут/ошибка ожидания: {wait_err}")
+                return []
         # Клиенты не запущены – безопасно создать новый цикл
         return asyncio.run(restore_summaries_from_channel())
     except Exception as e:

@@ -2,3 +2,4 @@ python-dotenv
 telethon
 openai
 fire
+boto3

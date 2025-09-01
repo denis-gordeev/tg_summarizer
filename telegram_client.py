@@ -222,7 +222,22 @@ async def send_message_to_target_channel_with_id(message: str) -> Optional[int]:
 async def start_clients() -> None:
     """Запускает клиенты Telegram."""
     global user_client, bot_client, clients_loop
-    clients_loop = asyncio.get_running_loop()
+    current_loop = asyncio.get_running_loop()
+
+    # If clients were created on a different loop (e.g., previous Lambda invoke), recreate them
+    if clients_loop is not None and clients_loop is not current_loop:
+        try:
+            if user_client is not None and user_client.is_connected():
+                await user_client.disconnect()
+            if bot_client is not None and bot_client.is_connected():
+                await bot_client.disconnect()
+        except Exception:
+            pass
+        user_client = None
+        bot_client = None
+
+    clients_loop = current_loop
+
     if user_client is None:
         user_client = TelegramClient("tg_summarizer_user", API_ID, API_HASH)
         user_client.parse_mode = "html"
@@ -241,4 +256,7 @@ async def stop_clients() -> None:
         await user_client.disconnect()
     if bot_client is not None and bot_client.is_connected():
         await bot_client.disconnect()
+    # Ensure fresh clients on next run (prevents event loop mismatch)
+    user_client = None
+    bot_client = None
     clients_loop = None
