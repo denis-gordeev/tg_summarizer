@@ -317,85 +317,24 @@ crontab -e
 
 ## Запуск в AWS Lambda
 
-В репозитории есть entrypoint [`lambda_handler.py`](lambda_handler.py), рассчитанный на запуск по расписанию через EventBridge. Перед выполнением он:
+Для AWS Lambda есть отдельный runbook: [`docs/aws-lambda-runbook.md`](docs/aws-lambda-runbook.md).
 
-1. Переходит в `/tmp`, чтобы Telethon-сессии и JSON-файлы истории были доступны для записи.
-2. Загружает состояние из S3 через `s3_sync.py`, если настроен `STATE_S3_BUCKET`.
-3. Вызывает `run_summarizer(...)`.
-4. Загружает обновлённое состояние обратно в S3.
+Коротко:
 
-### Что нужно положить в Lambda environment
+1. Lambda запускает [`lambda_handler.py`](lambda_handler.py), который переключает рабочую директорию в `/tmp`.
+2. Если задан `STATE_S3_BUCKET`, состояние подтягивается из S3 перед запуском и выгружается обратно после него.
+3. Основной запуск выполняется через `run_summarizer(...)`.
+4. Модель OpenAI в коде сейчас зафиксирована как `gpt-4o-mini`, что соответствует текущему ограничению по стоимости.
 
-Обязательные переменные такие же, как для обычного запуска:
+Минимум для запуска:
 
-```env
-TELEGRAM_API_ID=...
-TELEGRAM_API_HASH=...
-TELEGRAM_BOT_TOKEN=...
-TARGET_CHANNEL=@your_target_channel
-OPENAI_API_KEY=...
-```
-
-Опциональные переменные для источников и файлов состояния:
-
-```env
-SOURCE_CHANNELS=@a,@b
-SOURCE_GROUPS=@g1,@g2
-ABBREVIATIONS_FILE=channel_abbreviations.json
-HISTORY_FILE=summarization_history.json
-SUMMARIES_HISTORY_FILE=summaries_history.json
-DISCOVERED_CHANNELS_FILE=discovered_channels.json
-GROUP_HISTORY_FILE=group_summarization_history.json
-GROUP_SUMMARIES_HISTORY_FILE=group_summaries_history.json
-GROUP_LAST_RUN_FILE=group_last_run.json
-PROMPTS_FILE=prompts.json
-```
-
-Для сохранения состояния между инвокациями включите S3-синхронизацию:
-
-```env
-STATE_S3_BUCKET=your-bucket-name
-STATE_S3_PREFIX=tg_summarizer/prod
-# Необязательно: явный список файлов для синка
-# STATE_SYNC_FILES=tg_summarizer_user.session,tg_summarizer_bot.session,summarization_history.json,summaries_history.json,discovered_channels.json,group_summarization_history.json,group_summaries_history.json,group_last_run.json,prompts.json
-```
-
-Если `STATE_S3_BUCKET` не задан, синхронизация с S3 отключается, и состояние живёт только внутри одного execution environment Lambda.
-
-### Какие файлы надо сохранять
-
-Для корректной работы между инвокациями нужны как минимум:
-
-- `tg_summarizer_user.session`
-- `tg_summarizer_bot.session`
-- `summarization_history.json`
-- `summaries_history.json`
-- `discovered_channels.json`
-- `group_summarization_history.json`
-- `group_summaries_history.json`
-- `group_last_run.json`
-- `prompts.json`, если вы переопределяете промпты через файл
-
-### IAM-права для Lambda
-
-Функции нужны:
-
-- `logs:CreateLogGroup`
-- `logs:CreateLogStream`
-- `logs:PutLogEvents`
-- `s3:GetObject`
-- `s3:PutObject`
-- `s3:ListBucket`
-
-Если S3-синхронизация не используется, права на S3 можно убрать.
-
-### Handler и расписание
-
-- Handler: `lambda_handler.handler`
 - Runtime: Python 3.12
-- Рекомендуемый trigger: EventBridge Scheduler или EventBridge Rule
+- Handler: `lambda_handler.handler`
+- Trigger: EventBridge Scheduler или EventBridge Rule
+- Доступ в интернет к Telegram API и OpenAI API
+- Переменные окружения из `.env.example` плюс `STATE_S3_BUCKET`/`STATE_S3_PREFIX`, если нужно сохранять состояние между инвокациями
 
-Пример события для ручного запуска или scheduler input:
+Пример `event` для ручного запуска:
 
 ```json
 {
@@ -405,13 +344,6 @@ STATE_S3_PREFIX=tg_summarizer/prod
   "include_today_processed_messages": false
 }
 ```
-
-### Практические замечания
-
-- У Lambda должен быть выход в интернет к Telegram API и OpenAI API.
-- Все рабочие файлы создаются в `/tmp`, поэтому без S3 их состояние не гарантируется между холодными стартами.
-- Первый запуск удобнее сделать вручную и убедиться, что Telethon создал обе `.session`-сессии.
-- Если вы деплоите через container image или запускаете Lambda entrypoint локально, проверьте наличие `boto3` в окружении. В managed AWS Lambda Python runtime он обычно доступен, но в других окружениях это может быть не так.
 
 ## Работа с историей суммаризаций
 
