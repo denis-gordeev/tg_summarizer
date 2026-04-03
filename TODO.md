@@ -13,6 +13,8 @@
 - Добавлены smoke/regression-тесты для [`lambda_handler.py`](lambda_handler.py) и [`s3_sync.py`](s3_sync.py) в [`tests/test_lambda_handler.py`](tests/test_lambda_handler.py) и [`tests/test_s3_sync.py`](tests/test_s3_sync.py).
 - README и Lambda runbook дополнены явной командой локальной проверки перед деплоем: `python3 -m unittest discover -s tests`.
 - Подтверждено прохождение нового набора проверок: `python3 -m unittest discover -s tests`.
+- Параметризованы `OPENAI_MODEL`, `OPENAI_DEFAULT_MAX_TOKENS`, `OPENAI_CHANNEL_SUMMARY_MAX_TOKENS` и `OPENAI_GROUP_SUMMARY_MAX_TOKENS` через [`config.py`](config.py) и [`.env.example`](.env.example) с дефолтами не дороже `gpt-4o-mini`.
+- Добавлен unit-тест [`tests/test_openai_config.py`](tests/test_openai_config.py) на чтение OpenAI-настроек и применение дефолтного лимита токенов в [`utils.py`](utils.py).
 
 ## Completed in 2026-04-01 round
 
@@ -25,4 +27,4 @@
 
 - Добавить инфраструктурный шаблон деплоя AWS Lambda (SAM, Serverless Framework или Terraform), чтобы запуск был воспроизводимым.
 - Подключить новые smoke/regression-тесты к CI или хотя бы к локальному pre-push сценарию, чтобы проверки не оставались ручными.
-- Параметризовать модель OpenAI и лимиты генерации через env/config, сохранив дефолт не дороже `gpt-4o-mini`.
+- Добавить явные guardrails на длину итогового саммари после генерации, чтобы модель не выходила за целевой формат даже при завышенном `max_tokens`.

@@ -5,7 +5,12 @@ from typing import List, Set
 from difflib import SequenceMatcher
 from models import MessageInfo, SummaryInfo
 from utils import call_openai, extract_links, count_characters
-from config import SIMILARITY_THRESHOLD, ENABLE_SUMMARIES_DEDUPLICATION
+from config import (
+    SIMILARITY_THRESHOLD,
+    ENABLE_SUMMARIES_DEDUPLICATION,
+    OPENAI_CHANNEL_SUMMARY_MAX_TOKENS,
+    OPENAI_GROUP_SUMMARY_MAX_TOKENS,
+)
 from history_manager import get_recent_summaries_context, get_recent_group_summaries_context
 from channel_manager import (
     load_discovered_channels,
@@ -244,8 +249,7 @@ async def summarize_text(messages: List[MessageInfo]) -> str:
 
     system_prompt = prompts.CHANNEL_SUMMARY_PROMPT.format(max_summary_length=max_summary_length)
 
-    # Вычисляем max_tokens на основе максимальной длины саммари (примерно 4 символа на токен)
-    max_tokens = 16000
+    max_tokens = OPENAI_CHANNEL_SUMMARY_MAX_TOKENS
 
     result = await call_openai(system_prompt, messages_text, max_tokens=max_tokens)
     if not result:
@@ -316,8 +320,7 @@ async def summarize_group_text(messages: List[MessageInfo]) -> str:
 
     system_prompt = prompts.GROUP_SUMMARY_PROMPT.format(max_summary_length=max_summary_length)
 
-    # Вычисляем max_tokens на основе максимальной длины саммари (примерно 4 символа на токен)
-    max_tokens = 16000
+    max_tokens = OPENAI_GROUP_SUMMARY_MAX_TOKENS
 
     result = await call_openai(system_prompt, messages_text, max_tokens=max_tokens)
     if not result:
