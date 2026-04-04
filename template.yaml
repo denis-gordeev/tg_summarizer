@@ -1,0 +1,162 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: tg_summarizer AWS Lambda deployment via AWS SAM
+
+Parameters:
+  TelegramApiId:
+    Type: String
+    Description: Telegram API ID
+    NoEcho: true
+  TelegramApiHash:
+    Type: String
+    Description: Telegram API hash
+    NoEcho: true
+  TelegramBotToken:
+    Type: String
+    Description: Telegram bot token
+    NoEcho: true
+  TargetChannel:
+    Type: String
+    Description: Telegram channel where the digest will be published
+  OpenAIApiKey:
+    Type: String
+    Description: OpenAI API key
+    NoEcho: true
+  SourceChannels:
+    Type: String
+    Default: ""
+    Description: Comma-separated source channels
+  SourceGroups:
+    Type: String
+    Default: ""
+    Description: Comma-separated source groups
+  OpenAIModel:
+    Type: String
+    Default: gpt-4o-mini
+    Description: OpenAI model for summarization
+  OpenAIDefaultMaxTokens:
+    Type: Number
+    Default: 300
+  OpenAIChannelSummaryMaxTokens:
+    Type: Number
+    Default: 16000
+  OpenAIGroupSummaryMaxTokens:
+    Type: Number
+    Default: 16000
+  StateS3Bucket:
+    Type: String
+    Default: ""
+    Description: Optional S3 bucket for Lambda state sync
+  StateS3Prefix:
+    Type: String
+    Default: tg_summarizer/prod
+    Description: Optional S3 prefix for Lambda state sync
+  StateSyncFiles:
+    Type: String
+    Default: ""
+    Description: Optional comma-separated file list for S3 sync
+  FunctionTimeout:
+    Type: Number
+    Default: 180
+  FunctionMemorySize:
+    Type: Number
+    Default: 512
+  ReservedConcurrency:
+    Type: Number
+    Default: 1
+    Description: Keep Lambda single-threaded because execution state is shared via /tmp and optional S3 sync
+  LogRetentionDays:
+    Type: Number
+    Default: 14
+    AllowedValues:
+      - 1
+      - 3
+      - 5
+      - 7
+      - 14
+      - 30
+      - 60
+      - 90
+      - 120
+      - 150
+      - 180
+      - 365
+      - 400
+      - 545
+      - 731
+      - 1096
+      - 1827
+      - 2192
+      - 2557
+      - 2922
+      - 3288
+      - 3653
+
+Conditions:
+  HasStateS3Bucket: !Not [!Equals [!Ref StateS3Bucket, ""]]
+  HasStateSyncFiles: !Not [!Equals [!Ref StateSyncFiles, ""]]
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: !Ref FunctionTimeout
+    MemorySize: !Ref FunctionMemorySize
+    Architectures:
+      - x86_64
+
+Resources:
+  TgSummarizerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: tg-summarizer
+      CodeUri: .
+      Handler: lambda_handler.handler
+      Description: Telegram digest summarizer
+      ReservedConcurrentExecutions: !Ref ReservedConcurrency
+      Environment:
+        Variables:
+          TELEGRAM_API_ID: !Ref TelegramApiId
+          TELEGRAM_API_HASH: !Ref TelegramApiHash
+          TELEGRAM_BOT_TOKEN: !Ref TelegramBotToken
+          TARGET_CHANNEL: !Ref TargetChannel
+          OPENAI_API_KEY: !Ref OpenAIApiKey
+          OPENAI_MODEL: !Ref OpenAIModel
+          OPENAI_DEFAULT_MAX_TOKENS: !Ref OpenAIDefaultMaxTokens
+          OPENAI_CHANNEL_SUMMARY_MAX_TOKENS: !Ref OpenAIChannelSummaryMaxTokens
+          OPENAI_GROUP_SUMMARY_MAX_TOKENS: !Ref OpenAIGroupSummaryMaxTokens
+          SOURCE_CHANNELS: !Ref SourceChannels
+          SOURCE_GROUPS: !Ref SourceGroups
+          STATE_S3_BUCKET: !Ref StateS3Bucket
+          STATE_S3_PREFIX: !Ref StateS3Prefix
+          STATE_SYNC_FILES: !If [HasStateSyncFiles, !Ref StateSyncFiles, ""]
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - !If
+          - HasStateS3Bucket
+          - Statement:
+              - Sid: StateBucketList
+                Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource: !Sub arn:aws:s3:::${StateS3Bucket}
+              - Sid: StateBucketObjects
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource: !Sub arn:aws:s3:::${StateS3Bucket}/*
+          - !Ref AWS::NoValue
+    Metadata:
+      BuildMethod: python3.12
+
+  TgSummarizerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${TgSummarizerFunction}
+      RetentionInDays: !Ref LogRetentionDays
+
+Outputs:
+  FunctionName:
+    Value: !Ref TgSummarizerFunction
+  FunctionArn:
+    Value: !GetAtt TgSummarizerFunction.Arn

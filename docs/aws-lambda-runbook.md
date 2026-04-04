@@ -22,6 +22,35 @@
 - Memory: от `512 MB`, дальше подбирать по времени ответа и объёму истории
 - Ephemeral storage: достаточно значения по умолчанию, если в `/tmp` лежат только `.session` и JSON-файлы
 
+## Воспроизводимый деплой через AWS SAM
+
+В репозитории есть минимальный инфраструктурный шаблон [`template.yaml`](../template.yaml) для zip-deploy через AWS SAM.
+
+Что он делает:
+
+- создаёт Lambda с handler `lambda_handler.handler`
+- прокидывает обязательные env-переменные как CloudFormation parameters
+- оставляет дефолтную модель `gpt-4o-mini`
+- по умолчанию ставит `ReservedConcurrentExecutions=1`, чтобы не было параллельных инвокаций с гонками за `/tmp` и S3 state
+- выдаёт CloudWatch Logs policy и, если задан `StateS3Bucket`, добавляет IAM-доступ к bucket
+
+Базовый сценарий:
+
+```bash
+sam build
+sam deploy --guided
+```
+
+На первом `sam deploy --guided` задайте:
+
+- `TelegramApiId`, `TelegramApiHash`, `TelegramBotToken`
+- `TargetChannel`
+- `OpenAIApiKey`
+- `SourceChannels` и/или `SourceGroups`
+- `StateS3Bucket` и `StateS3Prefix`, если хотите переживать cold start
+
+Если хотите сохранить конфигурацию SAM CLI локально, создайте некоммитящийся `samconfig.toml`. В `.gitignore` его пока нет намеренно, чтобы не навязывать конкретный workflow для всех окружений.
+
 ## Environment variables
 
 Обязательные переменные:
@@ -118,11 +147,12 @@ Lambda нужны права CloudWatch Logs:
 ## Порядок первого деплоя
 
 1. Создайте S3 bucket для состояния, если нужен стабильный state между cold start.
-2. Разверните код и задайте environment variables.
-3. Выдайте Lambda доступ в интернет к Telegram API и OpenAI API.
-4. Запустите функцию вручную с `send_message=false`, чтобы не публиковать тестовый дайджест.
-5. Убедитесь, что в S3 появились `.session` и JSON-файлы состояния.
-6. После этого включайте расписание с `send_message=true`.
+2. Выполните `sam build`.
+3. Выполните `sam deploy --guided` и заполните параметры шаблона.
+4. Выдайте Lambda доступ в интернет к Telegram API и OpenAI API.
+5. Запустите функцию вручную с `send_message=false`, чтобы не публиковать тестовый дайджест.
+6. Убедитесь, что в S3 появились `.session` и JSON-файлы состояния.
+7. После этого включайте расписание с `send_message=true`.
 
 ## Операционные замечания
 
@@ -137,6 +167,12 @@ Lambda нужны права CloudWatch Logs:
 
 ```bash
 python3 -m unittest discover -s tests
+```
+
+Проверка шаблона, если установлен AWS SAM CLI:
+
+```bash
+sam validate
 ```
 
 Полезные OpenAI-переменные окружения для Lambda:
@@ -164,3 +200,4 @@ python3 -m unittest discover -s tests
 
 - проверьте, что зависимости из `requirements.txt` или `pyproject.toml` действительно установлены, включая `boto3`
 - проверьте все обязательные переменные окружения из `config.py`
+- если деплой через AWS SAM, проверьте финальные значения parameters и итоговый env в Lambda configuration
