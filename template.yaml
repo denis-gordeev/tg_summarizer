@@ -91,6 +91,25 @@ Parameters:
       - 2922
       - 3288
       - 3653
+  ScheduleExpression:
+    Type: String
+    Default: cron(0 9 * * ? *)
+    Description: EventBridge Scheduler expression for regular summarizer runs
+  ScheduleExpressionTimezone:
+    Type: String
+    Default: Europe/Moscow
+    Description: Timezone used to evaluate the scheduler expression
+  ScheduleState:
+    Type: String
+    Default: DISABLED
+    AllowedValues:
+      - ENABLED
+      - DISABLED
+    Description: Keep the schedule disabled until the first manual smoke run succeeds
+  SchedulePayload:
+    Type: String
+    Default: '{"send_message": true, "save_changes": true, "include_today_processed_groups": false, "include_today_processed_messages": false}'
+    Description: JSON payload delivered by EventBridge Scheduler to lambda_handler.py
 
 Conditions:
   HasStateS3Bucket: !Not [!Equals [!Ref StateS3Bucket, ""]]
@@ -129,6 +148,18 @@ Resources:
           STATE_S3_BUCKET: !Ref StateS3Bucket
           STATE_S3_PREFIX: !Ref StateS3Prefix
           STATE_SYNC_FILES: !If [HasStateSyncFiles, !Ref StateSyncFiles, ""]
+      Events:
+        ScheduledRun:
+          Type: ScheduleV2
+          Properties:
+            Name: !Sub ${AWS::StackName}-tg-summarizer
+            Description: Regular tg_summarizer run via EventBridge Scheduler
+            ScheduleExpression: !Ref ScheduleExpression
+            ScheduleExpressionTimezone: !Ref ScheduleExpressionTimezone
+            State: !Ref ScheduleState
+            FlexibleTimeWindow:
+              Mode: "OFF"
+            Input: !Ref SchedulePayload
       Policies:
         - AWSLambdaBasicExecutionRole
         - !If
@@ -160,3 +191,7 @@ Outputs:
     Value: !Ref TgSummarizerFunction
   FunctionArn:
     Value: !GetAtt TgSummarizerFunction.Arn
+  ScheduleExpression:
+    Value: !Ref ScheduleExpression
+  ScheduleState:
+    Value: !Ref ScheduleState

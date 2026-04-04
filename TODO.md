@@ -21,6 +21,9 @@
 - Добавлен AWS SAM шаблон [`template.yaml`](template.yaml) для воспроизводимого zip-deploy в AWS Lambda.
 - README и [docs/aws-lambda-runbook.md](docs/aws-lambda-runbook.md) дополнены SAM workflow, параметрами шаблона и пояснением про `ReservedConcurrentExecutions=1`.
 - Подтверждено прохождение релевантных проверок: `python3 -m unittest discover -s tests` и синтаксический разбор `template.yaml`.
+- AWS SAM шаблон расширен встроенным EventBridge Scheduler (`ScheduleV2`) с параметрами `ScheduleExpression`, `ScheduleExpressionTimezone`, `ScheduleState` и `SchedulePayload`.
+- README и [docs/aws-lambda-runbook.md](docs/aws-lambda-runbook.md) уточнены по безопасному первому деплою: scheduler создаётся сразу, но по умолчанию остаётся выключенным до ручного smoke run.
+- Подтверждено прохождение проверок после добавления scheduler: `python3 -m unittest discover -s tests` и `ruby -e 'require "yaml"; YAML.load_file("template.yaml")'`.
 
 ## Completed in 2026-04-01 round
 
@@ -32,5 +35,5 @@
 ## Next actions
 
 - Подключить новые smoke/regression-тесты к CI или хотя бы к локальному pre-push сценарию, чтобы проверки не оставались ручными.
-- Добавить в инфраструктуру расписание EventBridge Scheduler рядом с Lambda, чтобы деплой покрывал не только функцию, но и регулярный запуск.
 - Добавить явные guardrails на длину итогового саммари после генерации, чтобы модель не выходила за целевой формат даже при завышенном `max_tokens`.
+- Добавить мониторинг для Lambda/Scheduler: alarm на ошибки и, при необходимости, DLQ для неуспешных scheduled invoke.

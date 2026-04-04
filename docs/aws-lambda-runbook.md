@@ -29,9 +29,11 @@
 Что он делает:
 
 - создаёт Lambda с handler `lambda_handler.handler`
+- создаёт EventBridge Scheduler trigger для регулярного запуска
 - прокидывает обязательные env-переменные как CloudFormation parameters
 - оставляет дефолтную модель `gpt-4o-mini`
 - по умолчанию ставит `ReservedConcurrentExecutions=1`, чтобы не было параллельных инвокаций с гонками за `/tmp` и S3 state
+- по умолчанию оставляет scheduler в состоянии `DISABLED`, чтобы после первого deploy сначала можно было сделать ручной smoke run
 - выдаёт CloudWatch Logs policy и, если задан `StateS3Bucket`, добавляет IAM-доступ к bucket
 
 Базовый сценарий:
@@ -48,8 +50,16 @@ sam deploy --guided
 - `OpenAIApiKey`
 - `SourceChannels` и/или `SourceGroups`
 - `StateS3Bucket` и `StateS3Prefix`, если хотите переживать cold start
+- `ScheduleExpression`, `ScheduleExpressionTimezone`, `ScheduleState` и при необходимости `SchedulePayload`
 
 Если хотите сохранить конфигурацию SAM CLI локально, создайте некоммитящийся `samconfig.toml`. В `.gitignore` его пока нет намеренно, чтобы не навязывать конкретный workflow для всех окружений.
+
+Параметры расписания по умолчанию:
+
+- `ScheduleExpression=cron(0 9 * * ? *)`
+- `ScheduleExpressionTimezone=Europe/Moscow`
+- `ScheduleState=DISABLED`
+- `SchedulePayload={"send_message": true, "save_changes": true, "include_today_processed_groups": false, "include_today_processed_messages": false}`
 
 ## Environment variables
 
@@ -144,15 +154,17 @@ Lambda нужны права CloudWatch Logs:
 
 `lambda_handler.py` принимает эти флаги как нормальные JSON-boolean и как строковые значения `true` / `false`, если scheduler или input transform передаёт их строками.
 
+Если используется SAM-шаблон из репозитория, scheduler уже создаётся в стеке. Для безопасного первого запуска оставляйте `ScheduleState=DISABLED`, пока не убедитесь, что ручной invoke отрабатывает корректно.
+
 ## Порядок первого деплоя
 
 1. Создайте S3 bucket для состояния, если нужен стабильный state между cold start.
 2. Выполните `sam build`.
-3. Выполните `sam deploy --guided` и заполните параметры шаблона.
+3. Выполните `sam deploy --guided` и заполните параметры шаблона, оставив `ScheduleState=DISABLED`.
 4. Выдайте Lambda доступ в интернет к Telegram API и OpenAI API.
 5. Запустите функцию вручную с `send_message=false`, чтобы не публиковать тестовый дайджест.
 6. Убедитесь, что в S3 появились `.session` и JSON-файлы состояния.
-7. После этого включайте расписание с `send_message=true`.
+7. После этого обновите стек с `ScheduleState=ENABLED`.
 
 ## Операционные замечания
 

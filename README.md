@@ -325,7 +325,7 @@ crontab -e
 2. Если задан `STATE_S3_BUCKET`, состояние подтягивается из S3 перед запуском и выгружается обратно после него.
 3. Основной запуск выполняется через `run_summarizer(...)`.
 4. По умолчанию OpenAI-конфиг остаётся в бюджете `gpt-4o-mini`, но модель и лимиты генерации теперь можно переопределить через env.
-5. Для воспроизводимого деплоя в репозитории есть AWS SAM шаблон [`template.yaml`](template.yaml).
+5. Для воспроизводимого деплоя в репозитории есть AWS SAM шаблон [`template.yaml`](template.yaml), который создаёт и Lambda, и опциональное расписание EventBridge Scheduler.
 
 Минимум для запуска:
 
@@ -370,7 +370,21 @@ sam build
 sam deploy --guided
 ```
 
-Секреты и параметры (`TELEGRAM_API_ID`, `OPENAI_API_KEY`, `SOURCE_CHANNELS`, `STATE_S3_BUCKET` и т.д.) задаются через параметры шаблона из [`template.yaml`](template.yaml). По умолчанию шаблон оставляет модель `gpt-4o-mini` и ограничивает `ReservedConcurrentExecutions=1`, чтобы не запускать параллельные инвокации поверх общего состояния в `/tmp` и S3.
+Секреты и параметры (`TELEGRAM_API_ID`, `OPENAI_API_KEY`, `SOURCE_CHANNELS`, `STATE_S3_BUCKET` и т.д.) задаются через параметры шаблона из [`template.yaml`](template.yaml). По умолчанию шаблон оставляет модель `gpt-4o-mini`, ограничивает `ReservedConcurrentExecutions=1`, чтобы не запускать параллельные инвокации поверх общего состояния в `/tmp` и S3, и создаёт расписание EventBridge Scheduler в состоянии `DISABLED`.
+
+Параметры расписания в SAM:
+
+- `ScheduleExpression` по умолчанию равен `cron(0 9 * * ? *)`.
+- `ScheduleExpressionTimezone` по умолчанию равен `Europe/Moscow`.
+- `ScheduleState` по умолчанию равен `DISABLED`, чтобы первый production deploy не начал публикации автоматически.
+- `SchedulePayload` задаёт JSON event для [`lambda_handler.py`](lambda_handler.py) и по умолчанию запускает обычный рабочий прогон с `send_message=true`.
+
+Рекомендуемый порядок включения расписания:
+
+1. Сначала задеплойте стек с `ScheduleState=DISABLED`.
+2. Выполните ручной invoke с `send_message=false`.
+3. Проверьте логи, S3 state и итоговый дайджест.
+4. Обновите стек с `ScheduleState=ENABLED`.
 
 ## Работа с историей суммаризаций
 
