@@ -25,6 +25,12 @@
 - README и [docs/aws-lambda-runbook.md](docs/aws-lambda-runbook.md) уточнены по безопасному первому деплою: scheduler создаётся сразу, но по умолчанию остаётся выключенным до ручного smoke run.
 - Подтверждено прохождение проверок после добавления scheduler: `python3 -m unittest discover -s tests` и `ruby -e 'require "yaml"; YAML.load_file("template.yaml")'`.
 
+## Completed in 2026-04-05 round
+
+- AWS SAM шаблон дополнен базовым мониторингом эксплуатации: alarm на `AWS/Lambda Errors`, retry policy Scheduler и SQS DLQ для недоставленных scheduled invoke.
+- README и [docs/aws-lambda-runbook.md](docs/aws-lambda-runbook.md) обновлены с параметрами мониторинга, различием между scheduler DLQ и ошибками самой Lambda, и шагами проверки после deploy.
+- Подтверждено прохождение проверок после обновления шаблона и документации: `python3 -m unittest discover -s tests` и `ruby -e 'require "yaml"; YAML.load_file("template.yaml")'`.
+
 ## Completed in 2026-04-01 round
 
 - Добавлена документация по запуску и эксплуатации в AWS Lambda.
@@ -36,4 +42,4 @@
 
 - Подключить новые smoke/regression-тесты к CI или хотя бы к локальному pre-push сценарию, чтобы проверки не оставались ручными.
 - Добавить явные guardrails на длину итогового саммари после генерации, чтобы модель не выходила за целевой формат даже при завышенном `max_tokens`.
-- Добавить мониторинг для Lambda/Scheduler: alarm на ошибки и, при необходимости, DLQ для неуспешных scheduled invoke.
+- Добавить отдельный alarm на сообщения в scheduler DLQ, если потребуется автоэскалация не только по `AWS/Lambda Errors`, но и по недоставленным invoke.

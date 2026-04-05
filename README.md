@@ -326,6 +326,7 @@ crontab -e
 3. Основной запуск выполняется через `run_summarizer(...)`.
 4. По умолчанию OpenAI-конфиг остаётся в бюджете `gpt-4o-mini`, но модель и лимиты генерации теперь можно переопределить через env.
 5. Для воспроизводимого деплоя в репозитории есть AWS SAM шаблон [`template.yaml`](template.yaml), который создаёт и Lambda, и опциональное расписание EventBridge Scheduler.
+6. Тот же SAM шаблон добавляет базовый мониторинг: CloudWatch alarm на `AWS/Lambda Errors` и SQS DLQ для недоставленных scheduled invoke.
 
 Минимум для запуска:
 
@@ -378,6 +379,8 @@ sam deploy --guided
 - `ScheduleExpressionTimezone` по умолчанию равен `Europe/Moscow`.
 - `ScheduleState` по умолчанию равен `DISABLED`, чтобы первый production deploy не начал публикации автоматически.
 - `SchedulePayload` задаёт JSON event для [`lambda_handler.py`](lambda_handler.py) и по умолчанию запускает обычный рабочий прогон с `send_message=true`.
+- `SchedulerMaximumRetryAttempts=2` и `SchedulerMaximumEventAgeInSeconds=900` ограничивают ретраи Scheduler, чтобы недоставленные invoke быстрее попадали в DLQ.
+- `EnableSchedulerDlq=true` создаёт SQS DLQ для сбоев доставки invoke, а `AlarmNotificationTopicArn` позволяет привязать alarm к SNS-уведомлениям.
 
 Рекомендуемый порядок включения расписания:
 
