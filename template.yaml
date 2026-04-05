@@ -249,6 +249,8 @@ Outputs:
     Value: !Ref TgSummarizerFunction
   FunctionArn:
     Value: !GetAtt TgSummarizerFunction.Arn
+  LogGroupName:
+    Value: !Ref TgSummarizerLogGroup
   ScheduleExpression:
     Value: !Ref ScheduleExpression
   ScheduleState:

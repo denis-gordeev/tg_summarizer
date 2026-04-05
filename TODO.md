@@ -30,6 +30,9 @@
 - AWS SAM шаблон дополнен базовым мониторингом эксплуатации: alarm на `AWS/Lambda Errors`, retry policy Scheduler и SQS DLQ для недоставленных scheduled invoke.
 - README и [docs/aws-lambda-runbook.md](docs/aws-lambda-runbook.md) обновлены с параметрами мониторинга, различием между scheduler DLQ и ошибками самой Lambda, и шагами проверки после deploy.
 - Подтверждено прохождение проверок после обновления шаблона и документации: `python3 -m unittest discover -s tests` и `ruby -e 'require "yaml"; YAML.load_file("template.yaml")'`.
+- AWS SAM шаблон дополнен stack output `LogGroupName`, чтобы post-deploy smoke run и просмотр логов не требовали ручного поиска log group.
+- README и [docs/aws-lambda-runbook.md](docs/aws-lambda-runbook.md) дополнены CLI-командами для `describe-stacks`, ручного `aws lambda invoke`, `aws logs tail` и явным использованием stack outputs после deploy.
+- Подтверждено прохождение проверок после доработки runbook и outputs: `python3 -m unittest discover -s tests` и `ruby -e 'require "yaml"; YAML.load_file("template.yaml")'`.
 
 ## Completed in 2026-04-01 round
 
@@ -43,3 +46,4 @@
 - Подключить новые smoke/regression-тесты к CI или хотя бы к локальному pre-push сценарию, чтобы проверки не оставались ручными.
 - Добавить явные guardrails на длину итогового саммари после генерации, чтобы модель не выходила за целевой формат даже при завышенном `max_tokens`.
 - Добавить отдельный alarm на сообщения в scheduler DLQ, если потребуется автоэскалация не только по `AWS/Lambda Errors`, но и по недоставленным invoke.
+- Добавить в runbook отдельный раздел про обновление/ротацию Telegram/OpenAI секретов без полного пересоздания стека.

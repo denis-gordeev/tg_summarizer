@@ -37,6 +37,7 @@
 - по умолчанию ставит `ReservedConcurrentExecutions=1`, чтобы не было параллельных инвокаций с гонками за `/tmp` и S3 state
 - по умолчанию оставляет scheduler в состоянии `DISABLED`, чтобы после первого deploy сначала можно было сделать ручной smoke run
 - выдаёт CloudWatch Logs policy и, если задан `StateS3Bucket`, добавляет IAM-доступ к bucket
+- публикует stack outputs с именем Lambda, ARN, log group и alarm
 
 Базовый сценарий:
 
@@ -54,8 +55,25 @@ sam deploy --guided
 - `StateS3Bucket` и `StateS3Prefix`, если хотите переживать cold start
 - `ScheduleExpression`, `ScheduleExpressionTimezone`, `ScheduleState` и при необходимости `SchedulePayload`
 - при необходимости `AlarmNotificationTopicArn`, если хотите получать уведомления от CloudWatch alarm в SNS
+- при необходимости `FunctionTimeout`, `FunctionMemorySize`, `ReservedConcurrency`, `LogRetentionDays` и `LambdaErrorAlarmThreshold`, если дефолты уже не подходят под рабочую нагрузку
 
 Если хотите сохранить конфигурацию SAM CLI локально, создайте некоммитящийся `samconfig.toml`. В `.gitignore` его пока нет намеренно, чтобы не навязывать конкретный workflow для всех окружений.
+
+После deploy удобно сразу вытащить outputs стека:
+
+```bash
+aws cloudformation describe-stacks \
+  --stack-name <stack-name> \
+  --query 'Stacks[0].Outputs[].[OutputKey,OutputValue]' \
+  --output table
+```
+
+Полезные outputs из шаблона:
+
+- `FunctionName` для `aws lambda invoke`
+- `FunctionArn` для IAM или интеграций
+- `LogGroupName` для `aws logs tail`
+- `LambdaErrorsAlarmName` для проверки alarm после первого запуска
 
 Параметры расписания по умолчанию:
 
@@ -182,10 +200,27 @@ Lambda нужны права CloudWatch Logs:
 2. Выполните `sam build`.
 3. Выполните `sam deploy --guided` и заполните параметры шаблона, оставив `ScheduleState=DISABLED`.
 4. Выдайте Lambda доступ в интернет к Telegram API и OpenAI API.
-5. Запустите функцию вручную с `send_message=false`, чтобы не публиковать тестовый дайджест.
-6. Убедитесь, что в S3 появились `.session` и JSON-файлы состояния.
-7. Проверьте, что создан alarm `LambdaErrorsAlarmName`, а при включённом `EnableSchedulerDlq` появилась очередь `TgSummarizerSchedulerDlq`.
-8. После этого обновите стек с `ScheduleState=ENABLED`.
+5. Получите outputs стека и зафиксируйте `FunctionName`, `LogGroupName` и `LambdaErrorsAlarmName`.
+6. Запустите функцию вручную с `send_message=false`, чтобы не публиковать тестовый дайджест.
+7. Убедитесь, что в S3 появились `.session` и JSON-файлы состояния.
+8. Проверьте, что создан alarm `LambdaErrorsAlarmName`, а при включённом `EnableSchedulerDlq` появилась очередь `TgSummarizerSchedulerDlq`.
+9. После этого обновите стек с `ScheduleState=ENABLED`.
+
+Пример ручного smoke run:
+
+```bash
+aws lambda invoke \
+  --function-name <FunctionName> \
+  --cli-binary-format raw-in-base64-out \
+  --payload '{"send_message": false, "save_changes": true, "include_today_processed_groups": false, "include_today_processed_messages": false}' \
+  /tmp/tg-summarizer-smoke.json && cat /tmp/tg-summarizer-smoke.json
+```
+
+Быстрая проверка логов сразу после invoke:
+
+```bash
+aws logs tail <LogGroupName> --since 10m --follow
+```
 
 ## Операционные замечания
 
@@ -214,6 +249,13 @@ sam validate
 - `OPENAI_DEFAULT_MAX_TOKENS` (`300` по умолчанию для коротких служебных запросов)
 - `OPENAI_CHANNEL_SUMMARY_MAX_TOKENS` (`16000` по умолчанию для канальных дайджестов)
 - `OPENAI_GROUP_SUMMARY_MAX_TOKENS` (`16000` по умолчанию для групповых дайджестов)
+
+Быстрый update уже существующего стека без `--guided`:
+
+```bash
+sam build
+sam deploy --stack-name <stack-name>
+```
 
 ## Диагностика
 

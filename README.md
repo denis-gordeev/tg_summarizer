@@ -327,6 +327,7 @@ crontab -e
 4. По умолчанию OpenAI-конфиг остаётся в бюджете `gpt-4o-mini`, но модель и лимиты генерации теперь можно переопределить через env.
 5. Для воспроизводимого деплоя в репозитории есть AWS SAM шаблон [`template.yaml`](template.yaml), который создаёт и Lambda, и опциональное расписание EventBridge Scheduler.
 6. Тот же SAM шаблон добавляет базовый мониторинг: CloudWatch alarm на `AWS/Lambda Errors` и SQS DLQ для недоставленных scheduled invoke.
+7. Шаблон публикует stack outputs (`FunctionName`, `FunctionArn`, `LogGroupName`, `LambdaErrorsAlarmName`), чтобы post-deploy проверки можно было делать через AWS CLI без ручного поиска ресурсов.
 
 Минимум для запуска:
 
@@ -371,6 +372,15 @@ sam build
 sam deploy --guided
 ```
 
+После deploy удобно сразу посмотреть outputs стека:
+
+```bash
+aws cloudformation describe-stacks \
+  --stack-name <stack-name> \
+  --query 'Stacks[0].Outputs[].[OutputKey,OutputValue]' \
+  --output table
+```
+
 Секреты и параметры (`TELEGRAM_API_ID`, `OPENAI_API_KEY`, `SOURCE_CHANNELS`, `STATE_S3_BUCKET` и т.д.) задаются через параметры шаблона из [`template.yaml`](template.yaml). По умолчанию шаблон оставляет модель `gpt-4o-mini`, ограничивает `ReservedConcurrentExecutions=1`, чтобы не запускать параллельные инвокации поверх общего состояния в `/tmp` и S3, и создаёт расписание EventBridge Scheduler в состоянии `DISABLED`.
 
 Параметры расписания в SAM:
@@ -385,9 +395,10 @@ sam deploy --guided
 Рекомендуемый порядок включения расписания:
 
 1. Сначала задеплойте стек с `ScheduleState=DISABLED`.
-2. Выполните ручной invoke с `send_message=false`.
-3. Проверьте логи, S3 state и итоговый дайджест.
-4. Обновите стек с `ScheduleState=ENABLED`.
+2. Получите `FunctionName` и `LogGroupName` из stack outputs.
+3. Выполните ручной invoke с `send_message=false`.
+4. Проверьте логи, S3 state и итоговый дайджест.
+5. Обновите стек с `ScheduleState=ENABLED`.
 
 ## Работа с историей суммаризаций
 
