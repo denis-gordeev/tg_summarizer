@@ -26,6 +26,8 @@ async def run_summarizer(
             await process_messages(group_messages, save_changes, send_message, is_group=True)
         else:
             print("\nGroup summarization skipped.")
+    except Exception as e:
+        print(f"Error: {e}")
     finally:
         await stop_clients()
 
