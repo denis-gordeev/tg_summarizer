@@ -257,6 +257,42 @@ sam build
 sam deploy --stack-name <stack-name>
 ```
 
+## Ротация Telegram и OpenAI секретов
+
+Пересоздавать stack для ротации `TelegramApiHash`, `TelegramBotToken` или `OpenAIApiKey` не нужно. Достаточно обновить параметры существующего CloudFormation/SAM-стека: Lambda получит новую конфигурацию окружения на следующем deploy.
+
+Рекомендуемый порядок:
+
+1. Подготовьте новые значения секретов.
+2. Временно оставьте `ScheduleState=DISABLED`, если хотите исключить публикации во время ротации, или заранее выключите расписание update-деплоем.
+3. Выполните обычный `sam build`.
+4. Выполните `sam deploy --guided` с тем же `stack-name`, обновив только секретные параметры и сохранив остальные значения без изменений.
+5. После deploy сделайте ручной smoke run с `send_message=false`.
+6. Проверьте логи и только потом снова включайте `ScheduleState=ENABLED`, если отключали расписание.
+
+Минимальный smoke run после ротации:
+
+```bash
+aws lambda invoke \
+  --function-name <FunctionName> \
+  --cli-binary-format raw-in-base64-out \
+  --payload '{"send_message": false, "save_changes": false, "include_today_processed_groups": false, "include_today_processed_messages": false}' \
+  /tmp/tg-summarizer-rotate-secrets.json && cat /tmp/tg-summarizer-rotate-secrets.json
+```
+
+Что проверить после обновления секретов:
+
+- Lambda стартует без ошибок `ValueError` по обязательным env-переменным.
+- В логах нет ошибок аутентификации Telegram (`TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_BOT_TOKEN`).
+- В логах нет ошибок авторизации OpenAI по `OPENAI_API_KEY`.
+- Если используется S3 state, `.session` и JSON-файлы продолжают успешно читаться и записываться.
+
+Практические замечания:
+
+- Параметры шаблона помечены `NoEcho`, но это не заменяет внешний секрет-хранилище; не храните реальные значения в Git.
+- Если ротация затрагивает и `TELEGRAM_API_ID`, и `TELEGRAM_API_HASH`, удобнее менять их одной операцией, чтобы не оставлять несовместимую пару между deploy-ами.
+- Существующие Telethon `.session` файлы обычно можно сохранить; ротация bot token или OpenAI key не требует очистки state в S3.
+
 ## Диагностика
 
 Если функция отработала, но результат не сохранился:

@@ -400,6 +400,8 @@ aws cloudformation describe-stacks \
 4. Проверьте логи, S3 state и итоговый дайджест.
 5. Обновите стек с `ScheduleState=ENABLED`.
 
+Ротация Telegram/OpenAI секретов не требует пересоздания Lambda-стека: обновите параметры существующего SAM stack, затем прогоните ручной smoke run с `send_message=false`. Подробный пошаговый сценарий описан в [`docs/aws-lambda-runbook.md`](docs/aws-lambda-runbook.md).
+
 ## Работа с историей суммаризаций
 
 Система автоматически отслеживает уже обработанные сообщения, чтобы избежать дублирования информации в дайджестах.
