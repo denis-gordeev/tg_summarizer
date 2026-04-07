@@ -292,14 +292,14 @@ SOURCE_GROUPS=@g1,@g2
 
 ### Использование готового скрипта
 
-В проекте есть готовый скрипт `run_daily.sh`:
+В проекте есть готовый скрипт `run_summarizer.sh`:
 
 ```bash
 # Запуск вручную
-./run_daily.sh
+./run_summarizer.sh
 
 # Добавить в crontab для запуска каждый день в 9:00
-0 9 * * * /path/to/tg_summarizer/run_daily.sh >> /path/to/tg_summarizer/logs/summarizer.log 2>&1
+0 9 * * * /path/to/tg_summarizer/run_summarizer.sh >> /path/to/tg_summarizer/logs/summarizer.log 2>&1
 ```
 
 ### Ручная настройка cron
@@ -314,6 +314,93 @@ crontab -e
 # Или для запуска каждый час
 0 * * * * cd /path/to/tg_summarizer && python summarizer.py
 ```
+
+## Запуск в AWS Lambda
+
+Для AWS Lambda есть отдельный runbook: [`docs/aws-lambda-runbook.md`](docs/aws-lambda-runbook.md).
+
+Коротко:
+
+1. Lambda запускает [`lambda_handler.py`](lambda_handler.py), который переключает рабочую директорию в `/tmp`.
+2. Если задан `STATE_S3_BUCKET`, состояние подтягивается из S3 перед запуском и выгружается обратно после него.
+3. Основной запуск выполняется через `run_summarizer(...)`.
+4. По умолчанию OpenAI-конфиг остаётся в бюджете `gpt-4o-mini`, но модель и лимиты генерации теперь можно переопределить через env.
+5. Для воспроизводимого деплоя в репозитории есть AWS SAM шаблон [`template.yaml`](template.yaml), который создаёт и Lambda, и опциональное расписание EventBridge Scheduler.
+6. Тот же SAM шаблон добавляет базовый мониторинг: CloudWatch alarm на `AWS/Lambda Errors` и SQS DLQ для недоставленных scheduled invoke.
+7. Шаблон публикует stack outputs (`FunctionName`, `FunctionArn`, `LogGroupName`, `LambdaErrorsAlarmName`), чтобы post-deploy проверки можно было делать через AWS CLI без ручного поиска ресурсов.
+
+Минимум для запуска:
+
+- Runtime: Python 3.12
+- Handler: `lambda_handler.handler`
+- Trigger: EventBridge Scheduler или EventBridge Rule
+- Доступ в интернет к Telegram API и OpenAI API
+- Переменные окружения из `.env.example` плюс `STATE_S3_BUCKET`/`STATE_S3_PREFIX`, если нужно сохранять состояние между инвокациями
+
+Пример `event` для ручного запуска:
+
+```json
+{
+  "send_message": true,
+  "save_changes": true,
+  "include_today_processed_groups": false,
+  "include_today_processed_messages": false
+}
+```
+
+`lambda_handler.py` корректно понимает как JSON-boolean значения, так и строковые флаги вроде `"true"` / `"false"` из EventBridge input transform.
+
+Для container image и локальной отладки зависимость `boto3` теперь включена в проект явно, поэтому S3-синхронизация не зависит от особенностей AWS managed runtime.
+
+Полезные OpenAI-переменные окружения:
+
+- `OPENAI_MODEL` (`gpt-4o-mini` по умолчанию)
+- `OPENAI_DEFAULT_MAX_TOKENS` (`300` по умолчанию для коротких служебных запросов)
+- `OPENAI_CHANNEL_SUMMARY_MAX_TOKENS` (`16000` по умолчанию для канальных дайджестов)
+- `OPENAI_GROUP_SUMMARY_MAX_TOKENS` (`16000` по умолчанию для групповых дайджестов)
+
+Быстрая локальная проверка Lambda-обвязки и S3-синхронизации:
+
+```bash
+python3 -m unittest discover -s tests
+```
+
+Минимальный воспроизводимый деплой через AWS SAM:
+
+```bash
+sam build
+sam deploy --guided
+```
+
+После deploy удобно сразу посмотреть outputs стека:
+
+```bash
+aws cloudformation describe-stacks \
+  --stack-name <stack-name> \
+  --query 'Stacks[0].Outputs[].[OutputKey,OutputValue]' \
+  --output table
+```
+
+Секреты и параметры (`TELEGRAM_API_ID`, `OPENAI_API_KEY`, `SOURCE_CHANNELS`, `STATE_S3_BUCKET` и т.д.) задаются через параметры шаблона из [`template.yaml`](template.yaml). По умолчанию шаблон оставляет модель `gpt-4o-mini`, ограничивает `ReservedConcurrentExecutions=1`, чтобы не запускать параллельные инвокации поверх общего состояния в `/tmp` и S3, и создаёт расписание EventBridge Scheduler в состоянии `DISABLED`.
+
+Параметры расписания в SAM:
+
+- `ScheduleExpression` по умолчанию равен `cron(0 9 * * ? *)`.
+- `ScheduleExpressionTimezone` по умолчанию равен `Europe/Moscow`.
+- `ScheduleState` по умолчанию равен `DISABLED`, чтобы первый production deploy не начал публикации автоматически.
+- `SchedulePayload` задаёт JSON event для [`lambda_handler.py`](lambda_handler.py) и по умолчанию запускает обычный рабочий прогон с `send_message=true`.
+- `SchedulerMaximumRetryAttempts=2` и `SchedulerMaximumEventAgeInSeconds=900` ограничивают ретраи Scheduler, чтобы недоставленные invoke быстрее попадали в DLQ.
+- `EnableSchedulerDlq=true` создаёт SQS DLQ для сбоев доставки invoke, а `AlarmNotificationTopicArn` позволяет привязать alarm к SNS-уведомлениям.
+
+Рекомендуемый порядок включения расписания:
+
+1. Сначала задеплойте стек с `ScheduleState=DISABLED`.
+2. Получите `FunctionName` и `LogGroupName` из stack outputs.
+3. Выполните ручной invoke с `send_message=false`.
+4. Проверьте логи, S3 state и итоговый дайджест.
+5. Обновите стек с `ScheduleState=ENABLED`.
+
+Ротация Telegram/OpenAI секретов не требует пересоздания Lambda-стека: обновите параметры существующего SAM stack, затем прогоните ручной smoke run с `send_message=false`. Подробный пошаговый сценарий описан в [`docs/aws-lambda-runbook.md`](docs/aws-lambda-runbook.md).
 
 ## Работа с историей суммаризаций
 
@@ -464,12 +551,16 @@ python view_summaries_history.py --clear
 ```
 tg_summarizer/
 ├── summarizer.py                           # Основной скрипт
+├── lambda_handler.py                       # Entry point для AWS Lambda
+├── s3_sync.py                              # Синхронизация сессионных и history-файлов через S3
 ├── view_summarization_history.py           # Скрипт для просмотра истории
 ├── view_summaries_history.py               # Скрипт для просмотра истории саммари
 ├── view_discovered_channels.py             # Скрипт для просмотра обнаруженных каналов
 ├── view_group_summarization_history.py     # Скрипт для просмотра истории групп
+├── run_summarizer.sh                       # Локальный запуск по cron
 ├── requirements.txt                        # Зависимости Python
 ├── README.md                              # Документация
+├── TODO.md                                # Живой список задач для следующих раундов
 ├── .env                                   # Переменные окружения (создать самостоятельно)
 ├── summarization_history.json             # История обработанных сообщений (создается автоматически)
 ├── summaries_history.json                 # История созданных саммари (создается автоматически)
@@ -477,6 +568,8 @@ tg_summarizer/
 ├── group_summarization_history.json       # История обработанных сообщений из групп (создается автоматически)
 ├── group_summaries_history.json           # История созданных саммари групп (создается автоматически)
 ├── group_last_run.json                    # Информация о последнем запуске групп (создается автоматически)
+├── tg_summarizer_user.session             # Telethon user session (создается автоматически)
+├── tg_summarizer_bot.session              # Telethon bot session (создается автоматически)
 └── logs/                                  # Папка для логов (создается автоматически)
 ```
 

@@ -1,0 +1,320 @@
+# AWS Lambda Runbook
+
+Этот runbook описывает эксплуатационный запуск `tg_summarizer` в AWS Lambda без постоянного локального диска.
+
+## Что делает Lambda entrypoint
+
+Файл [`lambda_handler.py`](../lambda_handler.py) выполняет один цикл суммаризации:
+
+1. Переходит в `/tmp`, чтобы Telethon-сессии и JSON-файлы были доступны для записи.
+2. Вызывает `download_from_s3()` из [`s3_sync.py`](../s3_sync.py), если задан `STATE_S3_BUCKET`.
+3. Запускает `run_summarizer(...)`.
+4. После завершения вызывает `upload_to_s3()`.
+
+Без `STATE_S3_BUCKET` состояние существует только внутри текущего execution environment Lambda и может пропасть при cold start.
+
+## Минимальная конфигурация Lambda
+
+- Runtime: `Python 3.12`
+- Handler: `lambda_handler.handler`
+- Trigger: `EventBridge Scheduler` или `EventBridge Rule`
+- Timeout: от `3` минут, дальше подбирать по реальному объёму каналов
+- Memory: от `512 MB`, дальше подбирать по времени ответа и объёму истории
+- Ephemeral storage: достаточно значения по умолчанию, если в `/tmp` лежат только `.session` и JSON-файлы
+
+## Воспроизводимый деплой через AWS SAM
+
+В репозитории есть минимальный инфраструктурный шаблон [`template.yaml`](../template.yaml) для zip-deploy через AWS SAM.
+
+Что он делает:
+
+- создаёт Lambda с handler `lambda_handler.handler`
+- создаёт EventBridge Scheduler trigger для регулярного запуска
+- включает CloudWatch alarm на метрику `AWS/Lambda Errors`
+- по умолчанию создаёт SQS DLQ для случаев, когда Scheduler не смог доставить invoke в Lambda
+- прокидывает обязательные env-переменные как CloudFormation parameters
+- оставляет дефолтную модель `gpt-4o-mini`
+- по умолчанию ставит `ReservedConcurrentExecutions=1`, чтобы не было параллельных инвокаций с гонками за `/tmp` и S3 state
+- по умолчанию оставляет scheduler в состоянии `DISABLED`, чтобы после первого deploy сначала можно было сделать ручной smoke run
+- выдаёт CloudWatch Logs policy и, если задан `StateS3Bucket`, добавляет IAM-доступ к bucket
+- публикует stack outputs с именем Lambda, ARN, log group и alarm
+
+Базовый сценарий:
+
+```bash
+sam build
+sam deploy --guided
+```
+
+На первом `sam deploy --guided` задайте:
+
+- `TelegramApiId`, `TelegramApiHash`, `TelegramBotToken`
+- `TargetChannel`
+- `OpenAIApiKey`
+- `SourceChannels` и/или `SourceGroups`
+- `StateS3Bucket` и `StateS3Prefix`, если хотите переживать cold start
+- `ScheduleExpression`, `ScheduleExpressionTimezone`, `ScheduleState` и при необходимости `SchedulePayload`
+- при необходимости `AlarmNotificationTopicArn`, если хотите получать уведомления от CloudWatch alarm в SNS
+- при необходимости `FunctionTimeout`, `FunctionMemorySize`, `ReservedConcurrency`, `LogRetentionDays` и `LambdaErrorAlarmThreshold`, если дефолты уже не подходят под рабочую нагрузку
+
+Если хотите сохранить конфигурацию SAM CLI локально, создайте некоммитящийся `samconfig.toml`. В `.gitignore` его пока нет намеренно, чтобы не навязывать конкретный workflow для всех окружений.
+
+После deploy удобно сразу вытащить outputs стека:
+
+```bash
+aws cloudformation describe-stacks \
+  --stack-name <stack-name> \
+  --query 'Stacks[0].Outputs[].[OutputKey,OutputValue]' \
+  --output table
+```
+
+Полезные outputs из шаблона:
+
+- `FunctionName` для `aws lambda invoke`
+- `FunctionArn` для IAM или интеграций
+- `LogGroupName` для `aws logs tail`
+- `LambdaErrorsAlarmName` для проверки alarm после первого запуска
+
+Параметры расписания по умолчанию:
+
+- `ScheduleExpression=cron(0 9 * * ? *)`
+- `ScheduleExpressionTimezone=Europe/Moscow`
+- `ScheduleState=DISABLED`
+- `SchedulePayload={"send_message": true, "save_changes": true, "include_today_processed_groups": false, "include_today_processed_messages": false}`
+- `SchedulerMaximumRetryAttempts=2`
+- `SchedulerMaximumEventAgeInSeconds=900`
+- `EnableSchedulerDlq=true`
+
+## Мониторинг и отказоустойчивость
+
+Шаблон теперь включает базовые эксплуатационные guardrails:
+
+- CloudWatch alarm `LambdaErrorsAlarmName` следит за метрикой `AWS/Lambda Errors` по `FunctionName` и срабатывает при первой ошибке за 5-минутное окно.
+- Если передан `AlarmNotificationTopicArn`, alarm отправляет уведомления в SNS при переходе в `ALARM` и при возврате в `OK`.
+- Scheduler использует retry policy с параметрами `SchedulerMaximumRetryAttempts` и `SchedulerMaximumEventAgeInSeconds`.
+- При `EnableSchedulerDlq=true` AWS SAM создаёт SQS DLQ `TgSummarizerSchedulerDlq` для событий, которые Scheduler не смог доставить в Lambda после исчерпания retry policy.
+
+Важно различать типы сбоев:
+
+- DLQ Scheduler покрывает сбои доставки invoke в Lambda, например проблемы с правами или недоступной target-конфигурацией.
+- Ошибки уже запущенной Lambda в DLQ Scheduler не попадают; для них нужен CloudWatch alarm по `Errors`, а при необходимости позже можно добавить и Lambda async DLQ/destination.
+
+## Environment variables
+
+Обязательные переменные:
+
+```env
+TELEGRAM_API_ID=...
+TELEGRAM_API_HASH=...
+TELEGRAM_BOT_TOKEN=...
+TARGET_CHANNEL=@your_target_channel
+OPENAI_API_KEY=...
+```
+
+Обычно также нужны источники:
+
+```env
+SOURCE_CHANNELS=@channel_a,@channel_b
+SOURCE_GROUPS=@group_a,@group_b
+```
+
+Имена файлов состояния при необходимости можно переопределить:
+
+```env
+ABBREVIATIONS_FILE=channel_abbreviations.json
+HISTORY_FILE=summarization_history.json
+SUMMARIES_HISTORY_FILE=summaries_history.json
+DISCOVERED_CHANNELS_FILE=discovered_channels.json
+GROUP_HISTORY_FILE=group_summarization_history.json
+GROUP_SUMMARIES_HISTORY_FILE=group_summaries_history.json
+GROUP_LAST_RUN_FILE=group_last_run.json
+PROMPTS_FILE=prompts.json
+```
+
+Переменные для синхронизации состояния через S3:
+
+```env
+STATE_S3_BUCKET=your-bucket-name
+STATE_S3_PREFIX=tg_summarizer/prod
+# Необязательно: явный список файлов для синка
+# STATE_SYNC_FILES=tg_summarizer_user.session,tg_summarizer_bot.session,summarization_history.json,summaries_history.json,discovered_channels.json,group_summarization_history.json,group_summaries_history.json,group_last_run.json,prompts.json
+```
+
+## Какие файлы нужно сохранять
+
+Для корректной работы между инвокациями обычно нужны:
+
+- `tg_summarizer_user.session`
+- `tg_summarizer_bot.session`
+- `summarization_history.json`
+- `summaries_history.json`
+- `discovered_channels.json`
+- `group_summarization_history.json`
+- `group_summaries_history.json`
+- `group_last_run.json`
+- `prompts.json`, если вы используете файл с кастомными промптами
+
+Если часть функциональности не используется, список можно сузить через `STATE_SYNC_FILES`.
+
+## IAM-права
+
+Lambda нужны права CloudWatch Logs:
+
+- `logs:CreateLogGroup`
+- `logs:CreateLogStream`
+- `logs:PutLogEvents`
+
+Если используется синхронизация состояния через S3, добавьте:
+
+- `s3:GetObject`
+- `s3:PutObject`
+- `s3:ListBucket`
+
+## Scheduler event
+
+Пример входного события:
+
+```json
+{
+  "send_message": true,
+  "save_changes": true,
+  "include_today_processed_groups": false,
+  "include_today_processed_messages": false
+}
+```
+
+Практический смысл флагов:
+
+- `send_message=true` публикует дайджест в `TARGET_CHANNEL`
+- `save_changes=true` сохраняет локальное состояние и историю
+- `include_today_processed_groups=true` форсирует суммаризацию групп даже если сегодня они уже обрабатывались
+- `include_today_processed_messages=true` игнорирует обычную защиту от повторной обработки сообщений за текущий день
+
+`lambda_handler.py` принимает эти флаги как нормальные JSON-boolean и как строковые значения `true` / `false`, если scheduler или input transform передаёт их строками.
+
+Если используется SAM-шаблон из репозитория, scheduler уже создаётся в стеке. Для безопасного первого запуска оставляйте `ScheduleState=DISABLED`, пока не убедитесь, что ручной invoke отрабатывает корректно.
+
+## Порядок первого деплоя
+
+1. Создайте S3 bucket для состояния, если нужен стабильный state между cold start.
+2. Выполните `sam build`.
+3. Выполните `sam deploy --guided` и заполните параметры шаблона, оставив `ScheduleState=DISABLED`.
+4. Выдайте Lambda доступ в интернет к Telegram API и OpenAI API.
+5. Получите outputs стека и зафиксируйте `FunctionName`, `LogGroupName` и `LambdaErrorsAlarmName`.
+6. Запустите функцию вручную с `send_message=false`, чтобы не публиковать тестовый дайджест.
+7. Убедитесь, что в S3 появились `.session` и JSON-файлы состояния.
+8. Проверьте, что создан alarm `LambdaErrorsAlarmName`, а при включённом `EnableSchedulerDlq` появилась очередь `TgSummarizerSchedulerDlq`.
+9. После этого обновите стек с `ScheduleState=ENABLED`.
+
+Пример ручного smoke run:
+
+```bash
+aws lambda invoke \
+  --function-name <FunctionName> \
+  --cli-binary-format raw-in-base64-out \
+  --payload '{"send_message": false, "save_changes": true, "include_today_processed_groups": false, "include_today_processed_messages": false}' \
+  /tmp/tg-summarizer-smoke.json && cat /tmp/tg-summarizer-smoke.json
+```
+
+Быстрая проверка логов сразу после invoke:
+
+```bash
+aws logs tail <LogGroupName> --since 10m --follow
+```
+
+## Операционные замечания
+
+- `boto3` включён в зависимости проекта, поэтому S3-синхронизация должна одинаково работать в managed runtime, container image и локальной отладке.
+- По умолчанию OpenAI-конфиг остаётся в бюджете `gpt-4o-mini`, но модель и лимиты генерации можно переопределить через env.
+- Если S3 временно недоступен, функция не падает на каждом объекте синка: ошибки логируются, а обработка продолжается.
+- Первый запуск может занять больше времени из-за инициализации Telethon-сессий.
+
+## Быстрая проверка перед деплоем
+
+Локально можно прогнать smoke/regression-тесты для Lambda entrypoint и S3 sync:
+
+```bash
+python3 -m unittest discover -s tests
+```
+
+Проверка шаблона, если установлен AWS SAM CLI:
+
+```bash
+sam validate
+```
+
+Полезные OpenAI-переменные окружения для Lambda:
+
+- `OPENAI_MODEL` (`gpt-4o-mini` по умолчанию)
+- `OPENAI_DEFAULT_MAX_TOKENS` (`300` по умолчанию для коротких служебных запросов)
+- `OPENAI_CHANNEL_SUMMARY_MAX_TOKENS` (`16000` по умолчанию для канальных дайджестов)
+- `OPENAI_GROUP_SUMMARY_MAX_TOKENS` (`16000` по умолчанию для групповых дайджестов)
+
+Быстрый update уже существующего стека без `--guided`:
+
+```bash
+sam build
+sam deploy --stack-name <stack-name>
+```
+
+## Ротация Telegram и OpenAI секретов
+
+Пересоздавать stack для ротации `TelegramApiHash`, `TelegramBotToken` или `OpenAIApiKey` не нужно. Достаточно обновить параметры существующего CloudFormation/SAM-стека: Lambda получит новую конфигурацию окружения на следующем deploy.
+
+Рекомендуемый порядок:
+
+1. Подготовьте новые значения секретов.
+2. Временно оставьте `ScheduleState=DISABLED`, если хотите исключить публикации во время ротации, или заранее выключите расписание update-деплоем.
+3. Выполните обычный `sam build`.
+4. Выполните `sam deploy --guided` с тем же `stack-name`, обновив только секретные параметры и сохранив остальные значения без изменений.
+5. После deploy сделайте ручной smoke run с `send_message=false`.
+6. Проверьте логи и только потом снова включайте `ScheduleState=ENABLED`, если отключали расписание.
+
+Минимальный smoke run после ротации:
+
+```bash
+aws lambda invoke \
+  --function-name <FunctionName> \
+  --cli-binary-format raw-in-base64-out \
+  --payload '{"send_message": false, "save_changes": false, "include_today_processed_groups": false, "include_today_processed_messages": false}' \
+  /tmp/tg-summarizer-rotate-secrets.json && cat /tmp/tg-summarizer-rotate-secrets.json
+```
+
+Что проверить после обновления секретов:
+
+- Lambda стартует без ошибок `ValueError` по обязательным env-переменным.
+- В логах нет ошибок аутентификации Telegram (`TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_BOT_TOKEN`).
+- В логах нет ошибок авторизации OpenAI по `OPENAI_API_KEY`.
+- Если используется S3 state, `.session` и JSON-файлы продолжают успешно читаться и записываться.
+
+Практические замечания:
+
+- Параметры шаблона помечены `NoEcho`, но это не заменяет внешний секрет-хранилище; не храните реальные значения в Git.
+- Если ротация затрагивает и `TELEGRAM_API_ID`, и `TELEGRAM_API_HASH`, удобнее менять их одной операцией, чтобы не оставлять несовместимую пару между deploy-ами.
+- Существующие Telethon `.session` файлы обычно можно сохранить; ротация bot token или OpenAI key не требует очистки state в S3.
+
+## Диагностика
+
+Если функция отработала, но результат не сохранился:
+
+- проверьте, что задан `STATE_S3_BUCKET`
+- проверьте права `s3:GetObject`, `s3:PutObject`, `s3:ListBucket`
+- проверьте, что нужные файлы входят в `STATE_SYNC_FILES`
+
+Если Lambda отработала без публикации:
+
+- проверьте `TARGET_CHANNEL`
+- проверьте `send_message` во входном событии
+- проверьте, что бот имеет право писать в целевой канал
+
+Если scheduler не может доставить invoke в Lambda:
+
+- проверьте сообщения в SQS DLQ `TgSummarizerSchedulerDlq`, если `EnableSchedulerDlq=true`
+- проверьте IAM и resource policy, если вы переопределяли scheduler target вручную вне SAM
+- проверьте, не исчерпаны ли `SchedulerMaximumRetryAttempts` / `SchedulerMaximumEventAgeInSeconds`
+
+Если Lambda не может стартовать локально или в container image:
+
+- проверьте, что зависимости из `requirements.txt` или `pyproject.toml` действительно установлены, включая `boto3`
+- проверьте все обязательные переменные окружения из `config.py`
+- если деплой через AWS SAM, проверьте финальные значения parameters и итоговый env в Lambda configuration

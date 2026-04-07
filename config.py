@@ -3,6 +3,19 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
+def _get_int_env(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None or value.strip() == "":
+        return default
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+    if parsed <= 0:
+        raise ValueError(f"{name} must be greater than 0")
+    return parsed
+
 # Get environment variables with proper error handling
 api_id_str = os.getenv('TELEGRAM_API_ID')
 if not api_id_str:
@@ -30,6 +43,14 @@ openai_api_key = os.getenv('OPENAI_API_KEY')
 if not openai_api_key:
     raise ValueError("OPENAI_API_KEY environment variable is required")
 OPENAI_API_KEY = openai_api_key
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+OPENAI_DEFAULT_MAX_TOKENS = _get_int_env("OPENAI_DEFAULT_MAX_TOKENS", 300)
+OPENAI_CHANNEL_SUMMARY_MAX_TOKENS = _get_int_env(
+    "OPENAI_CHANNEL_SUMMARY_MAX_TOKENS", 16000
+)
+OPENAI_GROUP_SUMMARY_MAX_TOKENS = _get_int_env(
+    "OPENAI_GROUP_SUMMARY_MAX_TOKENS", 16000
+)
 
 source_channels_str = os.getenv('SOURCE_CHANNELS', '')
 SOURCE_CHANNELS = set([c.strip() for c in source_channels_str.split(',') if c.strip()])
@@ -57,3 +78,4 @@ ENABLE_SUMMARY_UPDATES = True
 print(f"SOURCE_CHANNELS: {SOURCE_CHANNELS}")
 print(f"SUMMARIES_HISTORY_FILE: {SUMMARIES_HISTORY_FILE}")
 print(f"PROMPTS_FILE: {PROMPTS_FILE}")
+print(f"OPENAI_MODEL: {OPENAI_MODEL}")

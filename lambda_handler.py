@@ -5,6 +5,22 @@ from s3_sync import download_from_s3, upload_to_s3
 from summarizer import run_summarizer
 
 
+def _parse_event_flag(value: Any, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "y", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "n", "off", ""}:
+            return False
+    return default
+
+
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     # Ensure we can write files (sessions, history) in Lambda
     try:
@@ -16,10 +32,14 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     download_from_s3()
 
     # Defaults can be overridden via EventBridge input transform
-    send_message = bool(event.get('send_message', True))
-    save_changes = bool(event.get('save_changes', True))
-    include_today_processed_groups = bool(event.get('include_today_processed_groups', False))
-    include_today_processed_messages = bool(event.get('include_today_processed_messages', False))
+    send_message = _parse_event_flag(event.get('send_message'), True)
+    save_changes = _parse_event_flag(event.get('save_changes'), True)
+    include_today_processed_groups = _parse_event_flag(
+        event.get('include_today_processed_groups'), False
+    )
+    include_today_processed_messages = _parse_event_flag(
+        event.get('include_today_processed_messages'), False
+    )
 
     # Run the summarizer
     asyncio.run(
