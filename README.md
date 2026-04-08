@@ -283,23 +283,70 @@ TELEGRAM_API_HASH=...
 TELEGRAM_BOT_TOKEN=...
 TARGET_CHANNEL=@your_target_channel
 OPENAI_API_KEY=...
+OPENAI_MODEL=gpt-4o-mini
 # Опционально
 SOURCE_CHANNELS=@a,@b
 SOURCE_GROUPS=@g1,@g2
 ```
 
+Перед деплоем или после изменения логики полезно прогонять локальные проверки:
+
+```bash
+python3 -m unittest discover -s tests
+```
+
+## AWS Lambda
+
+Сервис можно запускать в AWS Lambda через entrypoint `lambda_handler.handler`.
+
+Что делает Lambda-обвязка:
+
+1. Переключает рабочую директорию в `/tmp`, чтобы Telethon session-файлы и JSON history были доступны для записи.
+2. При наличии `STATE_S3_BUCKET` скачивает состояние из S3 через `s3_sync.py`.
+3. Выполняет один цикл `run_summarizer(...)`.
+4. Загружает обновлённое состояние обратно в S3.
+
+Минимально для Lambda нужны:
+
+- runtime `Python 3.12`
+- handler `lambda_handler.handler`
+- env-переменные из `.env.example`
+- outbound доступ к Telegram API и OpenAI API
+
+Дополнительные переменные для state sync:
+
+```env
+STATE_S3_BUCKET=your-bucket
+STATE_S3_PREFIX=tg_summarizer/prod
+```
+
+Пример event payload:
+
+```json
+{
+  "send_message": false,
+  "save_changes": true,
+  "include_today_processed_groups": false,
+  "include_today_processed_messages": false
+}
+```
+
+Строковые значения `true` / `false` тоже поддерживаются, если trigger передаёт их строками.
+
+Подробный пошаговый runbook по настройке и smoke-check для Lambda находится в [docs/aws-lambda-runbook.md](docs/aws-lambda-runbook.md).
+
 ## Автоматизация
 
 ### Использование готового скрипта
 
-В проекте есть готовый скрипт `run_daily.sh`:
+В проекте есть готовый скрипт `run_summarizer.sh`:
 
 ```bash
 # Запуск вручную
-./run_daily.sh
+./run_summarizer.sh
 
 # Добавить в crontab для запуска каждый день в 9:00
-0 9 * * * /path/to/tg_summarizer/run_daily.sh >> /path/to/tg_summarizer/logs/summarizer.log 2>&1
+0 9 * * * /path/to/tg_summarizer/run_summarizer.sh >> /path/to/tg_summarizer/logs/summarizer.log 2>&1
 ```
 
 ### Ручная настройка cron

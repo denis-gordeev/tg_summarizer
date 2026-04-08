@@ -1,6 +1,6 @@
 import re
 from openai import OpenAI
-from config import OPENAI_API_KEY
+from config import OPENAI_API_KEY, OPENAI_DEFAULT_MAX_TOKENS, OPENAI_MODEL
 
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
@@ -65,7 +65,11 @@ def extract_all_channels(text: str) -> list[str]:
     return all_channels
 
 
-async def call_openai(system_prompt: str, user_content: str, max_tokens: int = 300) -> str:
+async def call_openai(
+    system_prompt: str,
+    user_content: str,
+    max_tokens: int = OPENAI_DEFAULT_MAX_TOKENS,
+) -> str:
     """Универсальная функция для вызова OpenAI API."""
     try:
         response = openai_client.chat.completions.create(
@@ -73,7 +77,7 @@ async def call_openai(system_prompt: str, user_content: str, max_tokens: int = 3
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content}
             ],
-            model="gpt-4o-mini",
+            model=OPENAI_MODEL,
             max_tokens=max_tokens,
         )
         result = response.choices[0].message.content

@@ -1,5 +1,4 @@
 import asyncio
-import fire
 from telegram_client import start_clients, stop_clients, fetch_messages, fetch_group_messages
 from message_processor import process_messages
 from config import SOURCE_GROUPS
@@ -45,4 +44,6 @@ def main(
 
 
 if __name__ == "__main__":
+    import fire
+
     fire.Fire(main)
