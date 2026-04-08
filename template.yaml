@@ -1,0 +1,156 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  tg_summarizer - Telegram channel summarizer with AI-powered summarization
+  
+Globals:
+  Function:
+    Timeout: 180
+    MemorySize: 512
+    Runtime: python3.12
+    Environment:
+      Variables:
+        OPENAI_MODEL: !Ref OpenAIModel
+        OPENAI_DEFAULT_MAX_TOKENS: !Ref OpenAIDefaultMaxTokens
+        OPENAI_CHANNEL_SUMMARY_MAX_TOKENS: !Ref OpenAIChannelSummaryMaxTokens
+        OPENAI_GROUP_SUMMARY_MAX_TOKENS: !Ref OpenAIGroupSummaryMaxTokens
+        TARGET_CHANNEL: !Ref TargetChannel
+        SOURCE_CHANNELS: !Ref SourceChannels
+        SOURCE_GROUPS: !Ref SourceGroups
+        STATE_S3_BUCKET: !Ref StateBucket
+        STATE_S3_PREFIX: !Ref StatePrefix
+        TELEGRAM_API_ID: !Ref TelegramApiId
+        TELEGRAM_API_HASH: !Ref TelegramApiHash
+        TELEGRAM_BOT_TOKEN: !Ref TelegramBotToken
+        OPENAI_API_KEY: !Ref OpenAIApiKey
+
+Parameters:
+  TelegramApiId:
+    Type: String
+    Description: Telegram API ID from my.telegram.org
+    NoEcho: false
+  
+  TelegramApiHash:
+    Type: String
+    Description: Telegram API Hash from my.telegram.org
+    NoEcho: false
+  
+  TelegramBotToken:
+    Type: String
+    Description: Telegram Bot token from BotFather
+    NoEcho: true
+  
+  OpenAIApiKey:
+    Type: String
+    Description: OpenAI API key
+    NoEcho: true
+  
+  TargetChannel:
+    Type: String
+    Description: Target Telegram channel for summaries (e.g., @dstgsum)
+    Default: "@dstgsum"
+  
+  SourceChannels:
+    Type: String
+    Description: Comma-separated list of source Telegram channels
+    Default: ""
+  
+  SourceGroups:
+    Type: String
+    Description: Comma-separated list of source Telegram groups
+    Default: ""
+  
+  OpenAIModel:
+    Type: String
+    Description: OpenAI model to use
+    Default: "gpt-4o-mini"
+  
+  OpenAIDefaultMaxTokens:
+    Type: String
+    Description: Default max tokens for OpenAI
+    Default: "300"
+  
+  OpenAIChannelSummaryMaxTokens:
+    Type: String
+    Description: Max tokens for channel summaries
+    Default: "16000"
+  
+  OpenAIGroupSummaryMaxTokens:
+    Type: String
+    Description: Max tokens for group summaries
+    Default: "16000"
+  
+  StateBucket:
+    Type: String
+    Description: S3 bucket for state persistence (leave empty for no persistence)
+    Default: ""
+  
+  StatePrefix:
+    Type: String
+    Description: S3 prefix for state files
+    Default: "tg_summarizer/prod"
+  
+  ScheduleExpression:
+    Type: String
+    Description: EventBridge schedule expression
+    Default: "cron(0 9 * * ? *)"
+  
+  EnableSsmSend:
+    Type: String
+    Description: Enable sending summaries to Telegram (set to false for testing)
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+
+Conditions:
+  HasStateBucket: !Not [!Equals [!Ref StateBucket, ""]]
+
+Resources:
+  SummarizerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: tg-summarizer
+      CodeUri: .
+      Handler: lambda_handler.handler
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref StateBucket
+        - S3WritePolicy:
+            BucketName: !Ref StateBucket
+      Events:
+        ScheduledRun:
+          Type: Schedule
+          Properties:
+            Schedule: !Ref ScheduleExpression
+            Input:
+              Fn::Sub: >
+                {
+                  "send_message": "${EnableSsmSend}",
+                  "save_changes": true,
+                  "include_today_processed_groups": false,
+                  "include_today_processed_messages": false
+                }
+      Environment:
+        Variables:
+          send_message: !Ref EnableSsmSend
+
+  StateBucket:
+    Type: AWS::Serverless::SimpleBucket
+    Condition: HasStateBucket
+    Properties:
+      BucketName: !Ref StateBucket
+
+Outputs:
+  SummarizerFunctionArn:
+    Description: "Lambda Function ARN"
+    Value: !GetAtt SummarizerFunction.Arn
+  
+  SummarizerFunctionName:
+    Description: "Lambda Function Name"
+    Value: !Ref SummarizerFunction
+  
+  StateBucketName:
+    Description: "S3 Bucket for state persistence"
+    Value: !Ref StateBucket
+    Condition: HasStateBucket

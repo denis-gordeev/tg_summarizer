@@ -1,0 +1,26 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "tg-summarizer"
+region = "us-east-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
+
+# Replace these with your actual values
+parameter_overrides = [
+    "TelegramApiId=YOUR_TELEGRAM_API_ID",
+    "TelegramApiHash=YOUR_TELEGRAM_API_HASH",
+    "TelegramBotToken=YOUR_BOT_TOKEN",
+    "OpenAIApiKey=YOUR_OPENAI_API_KEY",
+    "TargetChannel=@your_target_channel",
+    "SourceChannels=@channel1,@channel2",
+    "SourceGroups=",
+    "OpenAIModel=gpt-4o-mini",
+    "OpenAIDefaultMaxTokens=300",
+    "OpenAIChannelSummaryMaxTokens=16000",
+    "OpenAIGroupSummaryMaxTokens=16000",
+    "StateBucket=your-state-bucket-name",
+    "StatePrefix=tg_summarizer/prod",
+    "ScheduleExpression=cron(0 9 * * ? *)",
+    "EnableSsmSend=true"
+]

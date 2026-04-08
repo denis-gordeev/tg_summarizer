@@ -10,10 +10,13 @@
 - Добавлены guardrails на длину итогового дайджеста в [`message_processor.py`](message_processor.py), чтобы итоговые саммари оставались лаконичными даже если модель пытается выйти за целевой объём.
 - Исправлены и документированы OpenAI env-настройки с дефолтом `gpt-4o-mini` в [`config.py`](config.py), [`utils.py`](utils.py) и [`.env.example`](.env.example).
 - Добавлен отдельный Lambda runbook [`docs/aws-lambda-runbook.md`](docs/aws-lambda-runbook.md), а [`README.md`](README.md) синхронизирован с текущим деревом проекта.
+- Добавлен [`boto3`](https://pypi.org/project/boto3/) в [`pyproject.toml`](pyproject.toml) и [`requirements.txt`](requirements.txt), чтобы S3-синхронизация работала в container image и локальной отладке, а не только в AWS managed runtime.
+- Создан AWS SAM шаблон [`template.yaml`](template.yaml) для воспроизводимого деплоя Lambda с полной инфраструктурой (S3 bucket, IAM роли, EventBridge триггер).
+- Добавлен скрипт [`build_lambda_package.sh`](build_lambda_package.sh) для сборки deployment package с зависимостями под Python 3.12.
+- Написана полная инструкция по деплою в [`docs/aws-lambda-deployment.md`](docs/aws-lambda-deployment.md) с двумя опциями: ручной деплой через AWS CLI и автоматический через AWS SAM.
+- Добавлен пример конфигурации [`samconfig.toml.example`](samconfig.toml.example) для быстрого старта SAM деплоя.
 
 ## Next actions
 
 - Подключить `python3 -m unittest discover -s tests` к CI или хотя бы к локальному pre-push сценарию, чтобы проверки не оставались ручными.
 - Добавить интеграционный тест на post-processing дайджеста целиком, включая замену `[1]` на HTML-ссылки и финальное ограничение длины.
-- Добавить воспроизводимый infra-шаблон для AWS Lambda deploy (AWS SAM или Terraform), чтобы runbook не оставался только manual-процедурой.
-- Проверить, нужно ли явно добавить `boto3` в зависимости проекта для локального container-image запуска Lambda, а не только для managed AWS runtime.
