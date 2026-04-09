@@ -333,7 +333,9 @@ STATE_S3_PREFIX=tg_summarizer/prod
 
 Строковые значения `true` / `false` тоже поддерживаются, если trigger передаёт их строками.
 
-Подробный пошаговый runbook по настройке и smoke-check для Lambda находится в [docs/aws-lambda-runbook.md](docs/aws-lambda-runbook.md).
+**Документация по Lambda:**
+- [Deployment Guide](docs/aws-lambda-deployment.md) - полное руководство по развертыванию (AWS CLI и SAM)
+- [Runbook](docs/aws-lambda-runbook.md) - эксплуатационная документация и smoke-check
 
 ## Автоматизация
 
