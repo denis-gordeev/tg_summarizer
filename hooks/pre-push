@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Pre-push hook: runs the test suite before allowing a push.
+# Install: cp hooks/pre-push .git/hooks/pre-push && chmod +x .git/hooks/pre-push
+#
+# If you prefer a manual step, just run:
+#   python3 -m unittest discover -s tests
+
+echo "Running pre-push test suite..."
+
+if ! python3 -m unittest discover -s tests; then
+    echo ""
+    echo "❌ Pre-push checks failed. Fix the errors above before pushing."
+    exit 1
+fi
+
+echo "✅ All pre-push checks passed."

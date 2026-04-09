@@ -16,7 +16,17 @@
 - Написана полная инструкция по деплою в [`docs/aws-lambda-deployment.md`](docs/aws-lambda-deployment.md) с двумя опциями: ручной деплой через AWS CLI и автоматический через AWS SAM.
 - Добавлен пример конфигурации [`samconfig.toml.example`](samconfig.toml.example) для быстрого старта SAM деплоя.
 
+## Completed in 2026-04-09 round
+
+- Добавлен pre-push hook [`hooks/pre-push`](hooks/pre-push), который автоматически запускает `python3 -m unittest discover -s tests` перед каждым push.
+- Добавлен интеграционный тест [`tests/test_digest_post_processing.py`](tests/test_digest_post_processing.py) (10 тестов) на полный пост-процессинг дайджеста:
+  - замена ссылок `[1]`, `[2]`, `[1,2]` на HTML-ссылки;
+  - ограничение длины channel/group summary;
+  - корректное закрытие HTML-тегов при обрезке;
+  - консистентность аббревиатур каналов.
+- Общее количество тестов увеличено с 15 до 25.
+
 ## Next actions
 
-- Подключить `python3 -m unittest discover -s tests` к CI или хотя бы к локальному pre-push сценарию, чтобы проверки не оставались ручными.
-- Добавить интеграционный тест на post-processing дайджеста целиком, включая замену `[1]` на HTML-ссылки и финальное ограничение длины.
+- Настроить GitHub Actions CI для автоматического прогона тестов на каждый PR и push.
+- Добавить интеграционный тест на `process_messages()` целиком (end-to-end pipeline с моками Telegram и OpenAI).
