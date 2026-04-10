@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "autowork/**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        python-version: ["3.12"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests
+        run: |
+          python -m unittest discover -s tests -v
+
+  build-lambda-package:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install zip
+        run: sudo apt-get install -y zip
+
+      - name: Build Lambda package
+        run: |
+          chmod +x build_lambda_package.sh
+          ./build_lambda_package.sh --clean
+
+      - name: Verify package exists
+        run: |
+          ls -lh tg_summarizer_lambda.zip
+          unzip -l tg_summarizer_lambda.zip | head -20

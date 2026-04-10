@@ -26,7 +26,20 @@
   - консистентность аббревиатур каналов.
 - Общее количество тестов увеличено с 15 до 25.
 
+## Completed in 2026-04-10 round
+
+- Добавлен GitHub Actions workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml) для автоматического прогона тестов и сборки Lambda-пакета на каждый push и PR.
+- Добавлен интеграционный тест [`tests/test_process_messages_integration.py`](tests/test_process_messages_integration.py) (5 тестов) на полный end-to-end pipeline `process_messages()`:
+  - полный канал pipeline: фильтрация NLP, дедупликация, суммаризация, сохранение истории;
+  - пропуск non-NLP сообщений;
+  - обработка пустого списка сообщений;
+  - group pipeline: фильтрация, групповая суммаризация, обновление last run;
+  - отправка сообщения в Telegram при `send_message=True`.
+- Общее количество тестов увеличено с 25 до 30.
+- Обновлён [`docs/aws-lambda-runbook.md`](docs/aws-lambda-runbook.md): секция «Следующий шаг по инфраструктуре» заменена на актуальную «Инфраструктура» с ссылками на существующие `template.yaml`, `samconfig.toml.example` и deployment guide.
+
 ## Next actions
 
-- Настроить GitHub Actions CI для автоматического прогона тестов на каждый PR и push.
-- Добавить интеграционный тест на `process_messages()` целиком (end-to-end pipeline с моками Telegram и OpenAI).
+- Настроить GitHub Actions CI/CD для автоматического деплоя Lambda при мердже в main.
+- Перенести чувствительные переменные в AWS SSM Parameter Store / Secrets Manager вместо env vars.
+- Добавить CloudWatch алерты на ошибки и таймауты Lambda.

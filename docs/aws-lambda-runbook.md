@@ -144,6 +144,16 @@ python3 -m unittest discover -s tests
 - проверьте значения `OPENAI_CHANNEL_SUMMARY_MAX_TOKENS` и `OPENAI_GROUP_SUMMARY_MAX_TOKENS`
 - убедитесь, что post-generation guardrails не были отключены локальными правками
 
-## Следующий шаг по инфраструктуре
+## Инфраструктура
 
-В текущем репозитории runbook описывает рабочий runtime-path, но не содержит воспроизводимого infra-шаблона. Следующий логичный шаг для проекта: добавить AWS SAM или Terraform шаблон, чтобы deploy был полностью повторяемым.
+Воспроизводимый infra-шаблон уже добавлен в репозиторий:
+
+- [`template.yaml`](../template.yaml) — AWS SAM шаблон с полной инфраструктурой (Lambda, IAM роли, S3 bucket для state, EventBridge триггер).
+- [`samconfig.toml.example`](../samconfig.toml.example) — пример конфигурации для `sam deploy --guided`.
+- [`docs/aws-lambda-deployment.md`](../docs/aws-lambda-deployment.md) — полное руководство по деплою (AWS CLI + SAM).
+
+### Следующие улучшения
+
+- Настроить GitHub Actions CI/CD для автоматического деплоя при мердже в main.
+- Перенести чувствительные переменные в AWS SSM Parameter Store / Secrets Manager вместо env vars.
+- Добавить алерты CloudWatch на ошибки и таймауты Lambda.
