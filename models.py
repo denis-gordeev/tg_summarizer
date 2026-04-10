@@ -44,6 +44,7 @@ class MessageInfo:
             date=datetime.fromisoformat(data['date']),
             link=data['link'],
             is_nlp_related=data.get('is_nlp_related'),
+            is_nlp_related_reason=data.get('is_nlp_related_reason'),
             is_covered_in_summaries=data.get('is_covered_in_summaries')
         )
 

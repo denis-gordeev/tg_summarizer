@@ -43,3 +43,12 @@
 - Настроить GitHub Actions CI/CD для автоматического деплоя Lambda при мердже в main.
 - Перенести чувствительные переменные в AWS SSM Parameter Store / Secrets Manager вместо env vars.
 - Добавить CloudWatch алерты на ошибки и таймауты Lambda.
+
+## Completed in 2026-04-10 round 2 (code quality)
+
+- Удалён неиспользуемый импорт `from operator import is_` в [`message_processor.py`](message_processor.py).
+- Исправлен `MessageInfo.from_dict()` в [`models.py`](models.py): теперь восстанавливается поле `is_nlp_related_reason`.
+- Устранено дублирование кода дедупликации (~100 строк) в [`message_processor.py`](message_processor.py): `remove_duplicates` и `remove_group_duplicates` теперь делегируют общую логику `_remove_duplicates_generic`.
+- Вынесена общая функция `_replace_source_with_links` и `_prepare_messages_text` в [`message_processor.py`](message_processor.py), убрано ~60 строк дублирования между `summarize_text` и `summarize_group_text`.
+- Удалена захардкоженная привязка к конкретному каналу (`denissexy`) из `CHANNEL_SUMMARY_PROMPT` в [`prompts.py`](prompts.py).
+- Все 30 тестов проходят без ошибок.

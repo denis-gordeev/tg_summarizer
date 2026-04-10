@@ -1,4 +1,3 @@
-from operator import is_
 import random
 import re
 from typing import List, Set
@@ -195,19 +194,23 @@ async def is_nlp_related(text: str) -> (bool, str):
     return answer.lower().strip().startswith("да"), answer
 
 
-async def remove_duplicates(messages: List[MessageInfo]) -> List[MessageInfo]:
+async def _remove_duplicates_generic(
+    messages: List[MessageInfo],
+    coverage_check_fn,
+    unique_label: str,
+    duplicate_label: str,
+) -> List[MessageInfo]:
+    """Generic deduplication shared by channel and group message streams."""
     unique_msgs: List[MessageInfo] = []
     seen_links = set()
 
     for msg in messages:
         links = extract_links(msg.text)
 
-        # Сначала проверяем по ссылкам - если ссылка уже была, пропускаем
         if links and any(link in seen_links for link in links):
             print(f"  Пропускаем дубликат по ссылке: {links[0]}")
             continue
 
-        # Проверяем дубликаты по тексту
         duplicate = False
         for u in unique_msgs:
             if SequenceMatcher(None, msg.text, u.text).ratio() > SIMILARITY_THRESHOLD:
@@ -215,7 +218,6 @@ async def remove_duplicates(messages: List[MessageInfo]) -> List[MessageInfo]:
                 duplicate = True
                 break
 
-        # Если не нашли дубликат по тексту, проверяем через LLM
         if not duplicate:
             for u in unique_msgs:
                 try:
@@ -225,102 +227,87 @@ async def remove_duplicates(messages: List[MessageInfo]) -> List[MessageInfo]:
                         break
                 except Exception as e:
                     print(f"  Ошибка при проверке дубликата через LLM: {e}")
-                    # В случае ошибки LLM, считаем сообщения разными
                     continue
 
-        # Проверяем, не была ли тема уже освещена в предыдущих саммари
         if not duplicate and ENABLE_SUMMARIES_DEDUPLICATION:
             try:
-                if await is_message_covered_in_summaries(msg):
-                    print(f"  Пропускаем сообщение, уже освещенное в саммари: {msg.text[:50]}...")
+                if await coverage_check_fn(msg):
+                    print(f"  Пропускаем {duplicate_label}: {msg.text[:50]}...")
                     duplicate = True
             except Exception as e:
                 print(f"  Ошибка при проверке покрытия в саммари: {e}")
-                # В случае ошибки, считаем сообщение новым
-                pass
 
         if not duplicate:
             unique_msgs.append(msg)
             seen_links.update(links)
-            print(f"  Добавляем уникальное сообщение: {msg.text[:50]}...")
+            print(f"  {unique_label}: {msg.text[:50]}...")
 
     return unique_msgs
+
+
+async def remove_duplicates(messages: List[MessageInfo]) -> List[MessageInfo]:
+    return await _remove_duplicates_generic(
+        messages,
+        coverage_check_fn=is_message_covered_in_summaries,
+        unique_label="Добавляем уникальное сообщение",
+        duplicate_label="сообщение, уже освещенное в саммари",
+    )
 
 
 async def remove_group_duplicates(messages: List[MessageInfo]) -> List[MessageInfo]:
     """Remove duplicates from group messages, checking against group summaries history."""
-    unique_msgs: List[MessageInfo] = []
-    seen_links = set()
+    return await _remove_duplicates_generic(
+        messages,
+        coverage_check_fn=is_message_covered_in_group_summaries,
+        unique_label="Добавляем уникальное сообщение из группы",
+        duplicate_label="сообщение, уже освещенное в саммари групп",
+    )
 
-    for msg in messages:
-        links = extract_links(msg.text)
 
-        # Сначала проверяем по ссылкам - если ссылка уже была, пропускаем
-        if links and any(link in seen_links for link in links):
-            print(f"  Пропускаем дубликат по ссылке: {links[0]}")
-            continue
-
-        # Проверяем дубликаты по тексту
-        duplicate = False
-        for u in unique_msgs:
-            if SequenceMatcher(None, msg.text, u.text).ratio() > SIMILARITY_THRESHOLD:
-                print(f"  Пропускаем дубликат по тексту: {msg.text[:50]}...")
-                duplicate = True
-                break
-
-        # Если не нашли дубликат по тексту, проверяем через LLM
-        if not duplicate:
-            for u in unique_msgs:
-                try:
-                    if await are_messages_duplicate(msg, u):
-                        print(f"  Пропускаем дубликат по LLM: {msg.text[:50]}...")
-                        duplicate = True
-                        break
-                except Exception as e:
-                    print(f"  Ошибка при проверке дубликата через LLM: {e}")
-                    # В случае ошибки LLM, считаем сообщения разными
-                    continue
-
-        # Проверяем, не была ли тема уже освещена в предыдущих саммари групп
-        if not duplicate and ENABLE_SUMMARIES_DEDUPLICATION:
+def _replace_source_with_links(messages: List[MessageInfo], result: str) -> str:
+    """Replace source numbers [1], [2,3], etc. with HTML links in LLM output."""
+    def _replacer(match):
+        numbers = [num.strip() for num in match.group(1).split(",")]
+        source_links = []
+        for num_str in numbers:
             try:
-                if await is_message_covered_in_group_summaries(msg):
-                    print(
-                        f"  Пропускаем сообщение, уже освещенное в саммари групп: "
-                        f"{msg.text[:50]}..."
-                    )
-                    duplicate = True
-            except Exception as e:
-                print(f"  Ошибка при проверке покрытия в саммари групп: {e}")
-                # В случае ошибки, считаем сообщение новым
-                pass
+                num = int(num_str)
+                if 1 <= num <= len(messages):
+                    msg = messages[num - 1]
+                    links = extract_links(msg.text)
+                    telegram_link = msg.get_telegram_link()
+                    channel_abbr = create_channel_abbreviation(msg.channel)
+                    if links:
+                        main_link = links[0]
+                        source_links.append(
+                            f'<a href="{main_link}">[{num}]</a> <a href="{telegram_link}">[{channel_abbr}]</a>'
+                        )
+                    else:
+                        source_links.append(f'<a href="{telegram_link}">[{channel_abbr}]</a>')
+            except ValueError:
+                continue
+        return ", ".join(source_links)
 
-        if not duplicate:
-            unique_msgs.append(msg)
-            seen_links.update(links)
-            print(f"  Добавляем уникальное сообщение из группы: {msg.text[:50]}...")
-
-    return unique_msgs
+    return re.sub(r"\[(\d+(?:,\s*\d+)*)\]", _replacer, result)
 
 
-async def summarize_text(messages: List[MessageInfo]) -> str:
-    """Call LLM to summarize the given messages with links."""
-    # Подготавливаем текст для суммаризации с указанием номеров источников
+def _prepare_messages_text(messages: List[MessageInfo]) -> tuple[str, int]:
+    """Prepare messages text with source numbering and return (text, total_length)."""
     messages_with_sources = []
     total_original_length = 0
-
     for i, msg in enumerate(messages, 1):
-        # Извлекаем ссылки из текста сообщения
         links = extract_links(msg.text)
         source_info = f"[{i}] {msg.text}"
         if links:
             source_info += f" (Ссылки: {', '.join(links)})"
         messages_with_sources.append(source_info)
         total_original_length += count_characters(msg.text)
+    return "\n\n".join(messages_with_sources), total_original_length
 
-    messages_text = "\n\n".join(messages_with_sources)
 
-    # Устанавливаем максимальную длину саммари
+async def summarize_text(messages: List[MessageInfo]) -> str:
+    """Call LLM to summarize the given messages with links."""
+    messages_text, total_original_length = _prepare_messages_text(messages)
     max_summary_length = _calculate_channel_summary_limit(total_original_length)
 
     system_prompt = prompts.CHANNEL_SUMMARY_PROMPT.format(max_summary_length=max_summary_length)
@@ -336,41 +323,7 @@ async def summarize_text(messages: List[MessageInfo]) -> str:
     print(f"Длина исходного текста: {total_original_length} символов")
     print(f"Длина саммари: {count_characters(result)} символов")
 
-    # Заменяем номера источников на HTML-ссылки
-    def replace_source_with_links(match):
-        content = match.group(1)  # содержимое внутри скобок
-        numbers = [num.strip() for num in content.split(",")]
-        source_links = []
-
-        for num_str in numbers:
-            try:
-                num = int(num_str)
-                if 1 <= num <= len(messages):
-                    msg = messages[num - 1]
-                    # Извлекаем ссылки из текста сообщения
-                    links = extract_links(msg.text)
-                    telegram_link = msg.get_telegram_link()
-
-                    # Всегда создаем аббревиатуру канала
-                    channel_abbr = create_channel_abbreviation(msg.channel)
-
-                    if links:
-                        # Если есть внешние ссылки, добавляем и внешнюю ссылку, и ссылку на Telegram-пост
-                        main_link = links[0]
-                        source_links.append(
-                            f'<a href="{main_link}">[{num}]</a> <a href="{telegram_link}">[{channel_abbr}]</a>'
-                        )
-                    else:
-                        # Если внешних ссылок нет, используем только ссылку на Telegram-сообщение с аббревиатурой
-                        source_links.append(f'<a href="{telegram_link}">[{channel_abbr}]</a>')
-
-            except ValueError:
-                continue
-        return ", ".join(source_links)
-
-    # Паттерн для поиска всех ссылок на источники [1], [1,2], [1,2,3] и т.д.
-    all_sources_pattern = r"\[(\d+(?:,\s*\d+)*)\]"
-    result = re.sub(all_sources_pattern, replace_source_with_links, result)
+    result = _replace_source_with_links(messages, result)
     result = enforce_summary_length(result, max_summary_length)
     print("result:", "=" * 100, "\n", result, "\n", "=" * 100, "\n")
 
@@ -379,22 +332,7 @@ async def summarize_text(messages: List[MessageInfo]) -> str:
 
 async def summarize_group_text(messages: List[MessageInfo]) -> str:
     """Call LLM to summarize group messages with community review header."""
-    # Подготавливаем текст для суммаризации с указанием номеров источников
-    messages_with_sources = []
-    total_original_length = 0
-
-    for i, msg in enumerate(messages, 1):
-        # Извлекаем ссылки из текста сообщения
-        links = extract_links(msg.text)
-        source_info = f"[{i}] {msg.text}"
-        if links:
-            source_info += f" (Ссылки: {', '.join(links)})"
-        messages_with_sources.append(source_info)
-        total_original_length += count_characters(msg.text)
-
-    messages_text = "\n\n".join(messages_with_sources)
-
-    # Устанавливаем максимальную длину саммари
+    messages_text, total_original_length = _prepare_messages_text(messages)
     max_summary_length = _calculate_group_summary_limit(total_original_length)
 
     system_prompt = prompts.GROUP_SUMMARY_PROMPT.format(max_summary_length=max_summary_length)
@@ -410,43 +348,8 @@ async def summarize_group_text(messages: List[MessageInfo]) -> str:
     print(f"Длина исходного текста групп: {total_original_length} символов")
     print(f"Длина саммари групп: {count_characters(result)} символов")
 
-    # Заменяем номера источников на HTML-ссылки
-    def replace_source_with_links(match):
-        content = match.group(1)  # содержимое внутри скобок
-        numbers = [num.strip() for num in content.split(",")]
-        source_links = []
+    result = _replace_source_with_links(messages, result)
 
-        for num_str in numbers:
-            try:
-                num = int(num_str)
-                if 1 <= num <= len(messages):
-                    msg = messages[num - 1]
-                    # Извлекаем ссылки из текста сообщения
-                    links = extract_links(msg.text)
-                    telegram_link = msg.get_telegram_link()
-
-                    # Всегда создаем аббревиатуру канала
-                    channel_abbr = create_channel_abbreviation(msg.channel)
-
-                    if links:
-                        # Если есть внешние ссылки, добавляем и внешнюю ссылку, и ссылку на Telegram-пост
-                        main_link = links[0]
-                        source_links.append(
-                            f'<a href="{main_link}">[{num}]</a> <a href="{telegram_link}">[{channel_abbr}]</a>'
-                        )
-                    else:
-                        # Если внешних ссылок нет, используем только ссылку на Telegram-сообщение с аббревиатурой
-                        source_links.append(f'<a href="{telegram_link}">[{channel_abbr}]</a>')
-
-            except ValueError:
-                continue
-        return ", ".join(source_links)
-
-    # Паттерн для поиска всех ссылок на источники [1], [1,2], [1,2,3] и т.д.
-    all_sources_pattern = r"\[(\d+(?:,\s*\d+)*)\]"
-    result = re.sub(all_sources_pattern, replace_source_with_links, result)
-
-    # Добавляем заголовок "Обзор сообщества"
     group_names = list(set(msg.channel.lstrip("@") for msg in messages))
     community_name = ", ".join(group_names)
     header = f"<b>👥 Обзор сообщества {community_name}</b>\n\n"
