@@ -73,10 +73,7 @@ PROMPTS_FILE = os.getenv("PROMPTS_FILE", "prompts.json")
 # Constants
 SIMILARITY_THRESHOLD = 0.9
 ENABLE_SUMMARIES_DEDUPLICATION = True
-ENABLE_SUMMARY_UPDATES = True 
+ENABLE_SUMMARY_UPDATES = True
 
-
-print(f"SOURCE_CHANNELS: {SOURCE_CHANNELS}")
-print(f"SUMMARIES_HISTORY_FILE: {SUMMARIES_HISTORY_FILE}")
-print(f"PROMPTS_FILE: {PROMPTS_FILE}")
-print(f"OPENAI_MODEL: {OPENAI_MODEL}")
+# Debug mode (set DEBUG=1 in environment to enable verbose logging)
+DEBUG = os.getenv("DEBUG", "").lower() in {"1", "true", "yes"}

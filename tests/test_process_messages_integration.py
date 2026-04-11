@@ -25,6 +25,7 @@ def _setup_stubs():
     fake_config.OPENAI_CHANNEL_SUMMARY_MAX_TOKENS = 16000
     fake_config.OPENAI_GROUP_SUMMARY_MAX_TOKENS = 16000
     fake_config.SOURCE_CHANNELS = set()
+    fake_config.DEBUG = False
     sys.modules["config"] = fake_config
 
     # --- Stub history_manager ---

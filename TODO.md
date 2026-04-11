@@ -38,12 +38,6 @@
 - Общее количество тестов увеличено с 25 до 30.
 - Обновлён [`docs/aws-lambda-runbook.md`](docs/aws-lambda-runbook.md): секция «Следующий шаг по инфраструктуре» заменена на актуальную «Инфраструктура» с ссылками на существующие `template.yaml`, `samconfig.toml.example` и deployment guide.
 
-## Next actions
-
-- Настроить GitHub Actions CI/CD для автоматического деплоя Lambda при мердже в main.
-- Перенести чувствительные переменные в AWS SSM Parameter Store / Secrets Manager вместо env vars.
-- Добавить CloudWatch алерты на ошибки и таймауты Lambda.
-
 ## Completed in 2026-04-10 round 2 (code quality)
 
 - Удалён неиспользуемый импорт `from operator import is_` в [`message_processor.py`](message_processor.py).
@@ -52,3 +46,22 @@
 - Вынесена общая функция `_replace_source_with_links` и `_prepare_messages_text` в [`message_processor.py`](message_processor.py), убрано ~60 строк дублирования между `summarize_text` и `summarize_group_text`.
 - Удалена захардкоженная привязка к конкретному каналу (`denissexy`) из `CHANNEL_SUMMARY_PROMPT` в [`prompts.py`](prompts.py).
 - Все 30 тестов проходят без ошибок.
+
+## Completed in 2026-04-11 round (bug fixes & hardening)
+
+- **Критический баг**: Заменён `hash(msg.text)` на детерминированный `hashlib.sha256(msg.text.encode()).hexdigest()[:16]` в [`message_processor.py`](message_processor.py) и [`history_manager.py`](history_manager.py). Python's built-in `hash()` рандомизирован через `PYTHONHASHSEED`, что приводило к пропуску дедупликации между разными Lambda invocation.
+- **Баг**: Исправлен `should_run_group_summarization()` в [`history_manager.py`](history_manager.py): теперь возвращает `True` при первом запуске (когда файл истории ещё не создан), вместо `False`.
+- **Улучшение диагностики**: Добавлен `traceback.print_exc()` в top-level `except` блок [`summarizer.py`](summarizer.py) для полной трассировки ошибок.
+- **Type hints**: Исправлен невалидный type hint `-> (bool, str)` на `-> tuple[bool, str]` в `is_nlp_related()` в [`message_processor.py`](message_processor.py).
+- **Производительность/логи**: Добавлен `DEBUG` флаг в [`config.py`](config.py) (через env `DEBUG=1`).Verbose логирование сообщений и полных саммари теперь gated behind этим флагом в [`message_processor.py`](message_processor.py), что снижает объем CloudWatch логов в production.
+- **Clean up**: Удалены module-level `print()` statements из [`config.py`](config.py), которые срабатывали при каждом импорте модуля.
+- **Тесты**: Обновлён test stub в [`tests/test_process_messages_integration.py`](tests/test_process_messages_integration.py) для поддержки `DEBUG` флага. Все 30 тестов проходят.
+
+## Next actions
+
+- Настроить GitHub Actions CI/CD для автоматического деплоя Lambda при мердже в main.
+- Перенести чувствительные переменные в AWS SSM Parameter Store / Secrets Manager вместо env vars.
+- Добавить CloudWatch алерты на ошибки и таймауты Lambda.
+- Консолидировать дублирующиеся функции в [`history_manager.py`](history_manager.py) и [`channel_manager.py`](channel_manager.py) (7 areas of code duplication identified).
+- Добавить per-channel error handling в [`telegram_client.py`](telegram_client.py) для устойчивости к сбоям отдельных каналов.
+- Заменить O(n^2) LLM calls в дедупликации на более эффективную стратегию (SequenceMatcher как primary, LLM только для borderline cases).

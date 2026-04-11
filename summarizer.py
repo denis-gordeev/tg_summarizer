@@ -1,4 +1,5 @@
 import asyncio
+import traceback
 from telegram_client import start_clients, stop_clients, fetch_messages, fetch_group_messages
 from message_processor import process_messages
 from config import SOURCE_GROUPS
@@ -27,6 +28,7 @@ async def run_summarizer(
             print("\nGroup summarization skipped.")
     except Exception as e:
         print(f"Error: {e}")
+        traceback.print_exc()
     finally:
         await stop_clients()
 

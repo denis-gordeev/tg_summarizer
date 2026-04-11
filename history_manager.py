@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import os
 from datetime import datetime, timedelta, timezone
@@ -31,7 +32,8 @@ def load_summarization_history() -> Set[str]:
             for msg_data in data.get("processed_messages", []):
                 msg = MessageInfo.from_dict(msg_data)
                 # Создаем уникальный идентификатор: канал + message_id + хеш текста
-                msg_id = f"{msg.channel}_{msg.message_id}_{hash(msg.text)}"
+                text_hash = hashlib.sha256(msg.text.encode()).hexdigest()[:16]
+                msg_id = f"{msg.channel}_{msg.message_id}_{text_hash}"
                 processed_messages.add(msg_id)
             return processed_messages
     except Exception as e:
@@ -339,7 +341,8 @@ def load_group_summarization_history() -> Set[str]:
             for msg_data in data.get("processed_messages", []):
                 msg = MessageInfo.from_dict(msg_data)
                 # Создаем уникальный идентификатор: канал + message_id + хеш текста
-                msg_id = f"{msg.channel}_{msg.message_id}_{hash(msg.text)}"
+                text_hash = hashlib.sha256(msg.text.encode()).hexdigest()[:16]
+                msg_id = f"{msg.channel}_{msg.message_id}_{text_hash}"
                 processed_messages.add(msg_id)
             return processed_messages
     except Exception as e:
@@ -427,7 +430,8 @@ def save_group_summary_to_history(summary: SummaryInfo) -> None:
 def should_run_group_summarization() -> bool:
     """Проверяет, нужно ли запускать суммаризацию групп (раз в сутки)."""
     if not os.path.exists(GROUP_LAST_RUN_FILE):
-        return False
+        # First run - should execute
+        return True
 
     try:
         with open(GROUP_LAST_RUN_FILE, "r", encoding="utf-8") as f:
@@ -440,7 +444,7 @@ def should_run_group_summarization() -> bool:
             # Убеждаемся, что last_run имеет timezone info
             if last_run.tzinfo is None:
                 last_run = last_run.replace(tzinfo=timezone.utc)
-            
+
             now = datetime.now(timezone.utc)
 
             time_since_last_run = (now - last_run).total_seconds()

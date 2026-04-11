@@ -1,3 +1,4 @@
+import hashlib
 import random
 import re
 from typing import List, Set
@@ -9,6 +10,7 @@ from config import (
     ENABLE_SUMMARIES_DEDUPLICATION,
     OPENAI_CHANNEL_SUMMARY_MAX_TOKENS,
     OPENAI_GROUP_SUMMARY_MAX_TOKENS,
+    DEBUG,
 )
 from history_manager import get_recent_summaries_context, get_recent_group_summaries_context
 from channel_manager import (
@@ -120,7 +122,8 @@ def get_all_source_channels() -> List[str]:
 
 def is_message_processed(msg: MessageInfo, processed_messages: Set[str]) -> bool:
     """Проверяет, было ли сообщение уже обработано ранее."""
-    msg_id = f"{msg.channel}_{msg.message_id}_{hash(msg.text)}"
+    text_hash = hashlib.sha256(msg.text.encode()).hexdigest()[:16]
+    msg_id = f"{msg.channel}_{msg.message_id}_{text_hash}"
     return msg_id in processed_messages
 
 
@@ -186,7 +189,7 @@ async def is_message_covered_in_group_summaries(msg: MessageInfo) -> bool:
         return False
 
 
-async def is_nlp_related(text: str) -> (bool, str):
+async def is_nlp_related(text: str) -> tuple[bool, str]:
     """Use the LLM to decide if a message is NLP related and not advertising."""
     if len(text) < 100:
         return False, "too_short"
@@ -325,7 +328,8 @@ async def summarize_text(messages: List[MessageInfo]) -> str:
 
     result = _replace_source_with_links(messages, result)
     result = enforce_summary_length(result, max_summary_length)
-    print("result:", "=" * 100, "\n", result, "\n", "=" * 100, "\n")
+    if DEBUG:
+        print("result:", "=" * 100, "\n", result, "\n", "=" * 100, "\n")
 
     return result
 
@@ -356,7 +360,8 @@ async def summarize_group_text(messages: List[MessageInfo]) -> str:
 
     result = header + result
     result = enforce_summary_length(result, max_summary_length)
-    print("group_result:", "=" * 100, "\n", result, "\n", "=" * 100, "\n")
+    if DEBUG:
+        print("group_result:", "=" * 100, "\n", result, "\n", "=" * 100, "\n")
     return result
 
 
@@ -386,10 +391,11 @@ async def process_messages(
     discovered_channels = set()  # Only relevant for channels, but kept for consistency
 
     for i, msg in enumerate(messages):
-        print(f"Checking message {i+1}/{len(messages)}...")
-        print("<" * 100)
-        print(f"msg: {msg.to_dict()}")
-        print(">" * 100)
+        if DEBUG:
+            print(f"Checking message {i+1}/{len(messages)}...")
+            print("<" * 100)
+            print(f"msg: {msg.to_dict()}")
+            print(">" * 100)
         all_checked_messages.append(msg)
 
         # Проверяем, является ли сообщение NLP-релевантным
