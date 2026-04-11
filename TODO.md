@@ -57,11 +57,18 @@
 - **Clean up**: Удалены module-level `print()` statements из [`config.py`](config.py), которые срабатывали при каждом импорте модуля.
 - **Тесты**: Обновлён test stub в [`tests/test_process_messages_integration.py`](tests/test_process_messages_integration.py) для поддержки `DEBUG` флага. Все 30 тестов проходят.
 
+## Completed in 2026-04-11 round 2 (error handling & monitoring)
+
+- Добавлен per-channel error handling в [`telegram_client.py`](telegram_client.py): каждый канал обернут в try/catch, чтобы сбой одного канала не ломал весь цикл загрузки.
+- Добавлен модуль `logging` в [`telegram_client.py`](telegram_client.py) для лучшей трассировки ошибок через `logger.error()`.
+- Добавлены CloudWatch алерты в [`template.yaml`](template.yaml): автоматическое создание трех алертов (Errors, Duration, Throttles) при SAM деплое.
+- Обновлена документация в [`docs/aws-lambda-runbook.md`](docs/aws-lambda-runbook.md): добавлена секция «CloudWatch алерты» с описанием метрик и инструкцией по настройке SNS уведомлений.
+- Обновлена документация в [`docs/aws-lambda-deployment.md`](docs/aws-lambda-deployment.md): добавлена ссылка на CloudWatch алерты в секции Monitoring.
+- Все 30 тестов проходят без ошибок.
+
 ## Next actions
 
 - Настроить GitHub Actions CI/CD для автоматического деплоя Lambda при мердже в main.
 - Перенести чувствительные переменные в AWS SSM Parameter Store / Secrets Manager вместо env vars.
-- Добавить CloudWatch алерты на ошибки и таймауты Lambda.
-- Консолидировать дублирующиеся функции в [`history_manager.py`](history_manager.py) и [`channel_manager.py`](channel_manager.py) (7 areas of code duplication identified).
-- Добавить per-channel error handling в [`telegram_client.py`](telegram_client.py) для устойчивости к сбоям отдельных каналов.
-- Заменить O(n^2) LLM calls в дедупликации на более эффективную стратегию (SequenceMatcher как primary, LLM только для borderline cases).
+- Консолидировать дублирующиеся функции в [`history_manager.py`](history_manager.py) и [`channel_manager.py`](channel_manager.py) (7 areas of code duplication identified, assessed as structurally different - extraction risky).
+- Оптимизировать дедупликацию: SequenceMatcher уже используется как primary filter, LLM только для borderline cases (already implemented, verified).
