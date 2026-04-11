@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import random
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Any
@@ -14,6 +15,8 @@ from history_manager import load_group_summarization_history, load_summarization
 from message_processor import get_all_source_channels, is_message_processed
 from models import MessageInfo
 from utils import extract_links
+
+logger = logging.getLogger(__name__)
 
 # Clients are created lazily inside the active event loop
 user_client: Any = None
@@ -89,34 +92,40 @@ async def fetch_messages(include_today_processed_messages: bool = False) -> List
     for channel in all_channels:
         print(f"Fetching messages from {channel}...")
         channel_msgs = []
-        async for msg in user_client.iter_messages(
-            channel, offset_date=None, min_id=0, reverse=False
-        ):
-            if msg.date < since:
-                break
-            if msg.message:
-                # Извлекаем ссылки из текста сообщения
-                links = extract_links(msg.message)
-                main_link = links[0] if links else ""
+        try:
+            async for msg in user_client.iter_messages(
+                channel, offset_date=None, min_id=0, reverse=False
+            ):
+                if msg.date < since:
+                    break
+                if msg.message:
+                    # Извлекаем ссылки из текста сообщения
+                    links = extract_links(msg.message)
+                    main_link = links[0] if links else ""
 
-                message_info = MessageInfo(
-                    text=msg.message,
-                    channel=channel,
-                    message_id=msg.id,
-                    date=msg.date,
-                    link=main_link,
-                )
+                    message_info = MessageInfo(
+                        text=msg.message,
+                        channel=channel,
+                        message_id=msg.id,
+                        date=msg.date,
+                        link=main_link,
+                    )
 
-                # Проверяем, не было ли сообщение уже обработано (если не игнорируем)
-                if include_today_processed_messages or not is_message_processed(
-                    message_info, processed_messages
-                ):
-                    channel_msgs.append(message_info)
-                    all_msgs.append(message_info)
-                else:
-                    print(f"  Пропускаем уже обработанное сообщение {msg.id} из {channel}")
+                    # Проверяем, не было ли сообщение уже обработано (если не игнорируем)
+                    if include_today_processed_messages or not is_message_processed(
+                        message_info, processed_messages
+                    ):
+                        channel_msgs.append(message_info)
+                        all_msgs.append(message_info)
+                    else:
+                        print(f"  Пропускаем уже обработанное сообщение {msg.id} из {channel}")
 
-        print(f"  Found {len(channel_msgs)} новых сообщений from {channel}")
+            print(f"  Found {len(channel_msgs)} новых сообщений from {channel}")
+        except Exception as e:
+            logger.error(f"Error fetching messages from channel {channel}: {e}", exc_info=True)
+            print(f"  ⚠️ Error fetching messages from {channel}: {e}")
+            # Continue with next channel instead of failing entirely
+            continue
     return all_msgs
 
 
@@ -140,34 +149,40 @@ async def fetch_group_messages(include_today_processed_messages: bool = False) -
     for group in all_groups:
         print(f"Fetching messages from group {group}...")
         group_msgs = []
-        async for msg in user_client.iter_messages(
-            group, offset_date=None, min_id=0, reverse=False
-        ):
-            if msg.date < since:
-                break
-            if msg.message:
-                # Извлекаем ссылки из текста сообщения
-                links = extract_links(msg.message)
-                main_link = links[0] if links else ""
+        try:
+            async for msg in user_client.iter_messages(
+                group, offset_date=None, min_id=0, reverse=False
+            ):
+                if msg.date < since:
+                    break
+                if msg.message:
+                    # Извлекаем ссылки из текста сообщения
+                    links = extract_links(msg.message)
+                    main_link = links[0] if links else ""
 
-                message_info = MessageInfo(
-                    text=msg.message,
-                    channel=group,
-                    message_id=msg.id,
-                    date=msg.date,
-                    link=main_link,
-                )
+                    message_info = MessageInfo(
+                        text=msg.message,
+                        channel=group,
+                        message_id=msg.id,
+                        date=msg.date,
+                        link=main_link,
+                    )
 
-                # Проверяем, не было ли сообщение уже обработано (если не игнорируем)
-                if include_today_processed_messages or not is_message_processed(
-                    message_info, processed_messages
-                ):
-                    group_msgs.append(message_info)
-                    all_msgs.append(message_info)
-                else:
-                    print(f"  Пропускаем уже обработанное сообщение {msg.id} из группы {group}")
+                    # Проверяем, не было ли сообщение уже обработано (если не игнорируем)
+                    if include_today_processed_messages or not is_message_processed(
+                        message_info, processed_messages
+                    ):
+                        group_msgs.append(message_info)
+                        all_msgs.append(message_info)
+                    else:
+                        print(f"  Пропускаем уже обработанное сообщение {msg.id} из группы {group}")
 
-        print(f"  Found {len(group_msgs)} новых сообщений from group {group}")
+            print(f"  Found {len(group_msgs)} новых сообщений from group {group}")
+        except Exception as e:
+            logger.error(f"Error fetching messages from group {group}: {e}", exc_info=True)
+            print(f"  ⚠️ Error fetching messages from group {group}: {e}")
+            # Continue with next group instead of failing entirely
+            continue
     return all_msgs
 
 

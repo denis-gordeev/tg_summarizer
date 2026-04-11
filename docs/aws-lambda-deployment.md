@@ -266,6 +266,16 @@ Monitor these metrics in CloudWatch Console:
 - `Invocations` - number of invocations
 - `Throttles` - number of throttles
 
+### CloudWatch Alarms
+
+When deployed via `template.yaml`, three CloudWatch alarms are automatically created:
+
+1. **Lambda Errors** - triggers on any error count
+2. **Lambda Duration** - triggers when average duration exceeds 150 seconds
+3. **Lambda Throttles** - triggers on any throttle events
+
+To set up email notifications for these alarms, see the [Runbook](aws-lambda-runbook.md#cloudwatch-алерты).
+
 ### S3 state verification
 
 ```bash

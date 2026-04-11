@@ -141,6 +141,58 @@ Resources:
     Properties:
       BucketName: !Ref StateBucket
 
+  # CloudWatch Alarms for Lambda monitoring
+  LambdaErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-lambda-errors"
+      AlarmDescription: "Alarm for tg_summarizer Lambda errors"
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 1
+      Threshold: 0
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Period: 300
+      Statistic: Sum
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref SummarizerFunction
+      TreatMissingData: notBreaching
+
+  LambdaDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-lambda-duration"
+      AlarmDescription: "Alarm for tg_summarizer Lambda duration approaching timeout"
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 2
+      Threshold: 150
+      MetricName: Duration
+      Namespace: AWS/Lambda
+      Period: 300
+      Statistic: Average
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref SummarizerFunction
+      TreatMissingData: notBreaching
+
+  LambdaThrottlesAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-lambda-throttles"
+      AlarmDescription: "Alarm for tg_summarizer Lambda throttles"
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 1
+      Threshold: 0
+      MetricName: Throttles
+      Namespace: AWS/Lambda
+      Period: 300
+      Statistic: Sum
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref SummarizerFunction
+      TreatMissingData: notBreaching
+
 Outputs:
   SummarizerFunctionArn:
     Description: "Lambda Function ARN"

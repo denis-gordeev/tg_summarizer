@@ -148,12 +148,50 @@ python3 -m unittest discover -s tests
 
 Воспроизводимый infra-шаблон уже добавлен в репозиторий:
 
-- [`template.yaml`](../template.yaml) — AWS SAM шаблон с полной инфраструктурой (Lambda, IAM роли, S3 bucket для state, EventBridge триггер).
+- [`template.yaml`](../template.yaml) — AWS SAM шаблон с полной инфраструктурой (Lambda, IAM роли, S3 bucket для state, EventBridge триггер, CloudWatch алерты).
 - [`samconfig.toml.example`](../samconfig.toml.example) — пример конфигурации для `sam deploy --guided`.
 - [`docs/aws-lambda-deployment.md`](../docs/aws-lambda-deployment.md) — полное руководство по деплою (AWS CLI + SAM).
+
+### CloudWatch алерты
+
+Шаблон `template.yaml` автоматически создает три CloudWatch алерта:
+
+1. **Lambda Errors** (`${AWS::StackName}-lambda-errors`)
+   - Срабатывает при любом количестве ошибок
+   - Метрика: `Errors > 0`
+   - Период оценки: 5 минут
+
+2. **Lambda Duration** (`${AWS::StackName}-lambda-duration`)
+   - Срабатывает при среднем времени выполнения > 150 секунд
+   - Метрика: `Average Duration > 150s`
+   - Период оценки: 2x5 минут = 10 минут
+
+3. **Lambda Throttles** (`${AWS::StackName}-lambda-throttles`)
+   - Срабатывает при любом количестве троттлингов
+   - Метрика: `Throttles > 0`
+   - Период оценки: 5 минут
+
+#### Настройка уведомлений
+
+Для получения уведомлений об алертах создайте SNS тему и подпишитесь на нее:
+
+```bash
+# Создать SNS тему
+aws sns create-topic --name tg-summarizer-alerts
+
+# Подписаться на тему (email)
+aws sns subscribe \
+  --topic-arn arn:aws:sns:us-east-1:YOUR_ACCOUNT_ID:tg-summarizer-alerts \
+  --protocol email \
+  --notification-endpoint your-email@example.com
+
+# Обновить алерты для использования SNS
+aws cloudwatch put-metric-alarm \
+  --alarm-name tg-summarizer-lambda-errors \
+  --alarm-actions arn:aws:sns:us-east-1:YOUR_ACCOUNT_ID:tg-summarizer-alerts
+```
 
 ### Следующие улучшения
 
 - Настроить GitHub Actions CI/CD для автоматического деплоя при мердже в main.
 - Перенести чувствительные переменные в AWS SSM Parameter Store / Secrets Manager вместо env vars.
-- Добавить алерты CloudWatch на ошибки и таймауты Lambda.
