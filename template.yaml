@@ -95,7 +95,7 @@ Parameters:
     Description: EventBridge schedule expression
     Default: "cron(0 9 * * ? *)"
   
-  EnableSsmSend:
+  EnableTelegramSend:
     Type: String
     Description: Enable sending summaries to Telegram (set to false for testing)
     Default: "true"
@@ -126,14 +126,14 @@ Resources:
             Input:
               Fn::Sub: >
                 {
-                  "send_message": "${EnableSsmSend}",
+                  "send_message": "${EnableTelegramSend}",
                   "save_changes": true,
                   "include_today_processed_groups": false,
                   "include_today_processed_messages": false
                 }
       Environment:
         Variables:
-          send_message: !Ref EnableSsmSend
+          send_message: !Ref EnableTelegramSend
 
   StateBucket:
     Type: AWS::Serverless::SimpleBucket

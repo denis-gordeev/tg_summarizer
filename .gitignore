@@ -1,2 +1,51 @@
+# Environment and secrets
 .env
+.env.local
+.env.*.local
+
+# Dependency locks (managed by poetry/pip)
 poetry.lock
+
+# Telegram session files
+*.session
+*.session-journal
+
+# Local state files (JSON)
+channel_abbreviations.json
+discovered_channels.json
+history.json
+group_history.json
+group_last_run.json
+group_summaries_history.json
+summaries_history.json
+
+# Logs
+*.log
+logs/
+
+# Build artifacts
+build/
+dist/
+*.zip
+lambda_package.zip
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.eggs/
+*.egg-info/
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# AWS SAM
+.samconfig.toml
