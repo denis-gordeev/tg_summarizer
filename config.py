@@ -75,5 +75,23 @@ SIMILARITY_THRESHOLD = 0.9
 ENABLE_SUMMARIES_DEDUPLICATION = True
 ENABLE_SUMMARY_UPDATES = True
 
+# History limits (configurable via environment variables)
+MAX_CHANNEL_HISTORY_MESSAGES = int(os.getenv("MAX_CHANNEL_HISTORY_MESSAGES", "1000"))
+MAX_CHANNEL_SUMMARIES = int(os.getenv("MAX_CHANNEL_SUMMARIES", "50"))
+MAX_GROUP_HISTORY_MESSAGES = int(os.getenv("MAX_GROUP_HISTORY_MESSAGES", "1000"))
+MAX_GROUP_SUMMARIES = int(os.getenv("MAX_GROUP_SUMMARIES", "100"))
+
+# Time intervals (in seconds)
+GROUP_SUMMARIZATION_INTERVAL_SECONDS = int(os.getenv("GROUP_SUMMARIZATION_INTERVAL_SECONDS", str(24 * 60 * 60)))
+RESTORE_HISTORY_DAYS = int(os.getenv("RESTORE_HISTORY_DAYS", "7"))
+
+# Summary size guardrails
+SUMMARY_MIN_RATIO = 3  # total_original_length // SUMMARY_MIN_RATIO
+SUMMARY_MIN_LENGTH = 800
+SUMMARY_MAX_LENGTH = 4000
+GROUP_SUMMARY_MIN_LENGTH = 2000
+GROUP_SUMMARY_MAX_LENGTH = 12000
+TEXT_PREVIEW_LENGTH = 50
+
 # Debug mode (set DEBUG=1 in environment to enable verbose logging)
 DEBUG = os.getenv("DEBUG", "").lower() in {"1", "true", "yes"}

@@ -2,6 +2,18 @@
 
 Живой список задач для автоматических раундов.
 
+## Completed in 2026-04-12 round 2 (code quality & refactoring)
+
+- Выделены универсальные функции `_load_json_file()`, `_save_json_file()` и `_now_iso()` в [`history_manager.py`](history_manager.py), устранено дублирование кода загрузки/сохранения JSON (~150 строк сокращено).
+- Рефакторинг `load_summarization_history`/`save_summarization_history` и их group-аналогов в [`history_manager.py`](history_manager.py): убраны `try/except` с `print()`, заменены на `logger.error()` и универсальные хелперы.
+- Выделены универсальные функции `_load_channel_list()` и `_save_channel_list()` в [`channel_manager.py`](channel_manager.py), устранено дублирование `load_discovered_channels`/`load_similar_channels`/`load_banned_channels` и их save-аналогов (~80 строк сокращено).
+- Все `datetime.now().isoformat()` заменены на `_now_iso()` (UTC timezone), что устраняет неоднозначность часовых поясов при сравнении timestamps в Lambda и между машинами.
+- Магические числа вынесены в именованные константы в [`config.py`](config.py): `MAX_CHANNEL_HISTORY_MESSAGES`, `MAX_CHANNEL_SUMMARIES`, `MAX_GROUP_HISTORY_MESSAGES`, `MAX_GROUP_SUMMARIES`, `GROUP_SUMMARIZATION_INTERVAL_SECONDS`, `RESTORE_HISTORY_DAYS`, `SUMMARY_MIN_RATIO`, `SUMMARY_MIN_LENGTH`, `SUMMARY_MAX_LENGTH`, `GROUP_SUMMARY_MIN_LENGTH`, `GROUP_SUMMARY_MAX_LENGTH`, `TEXT_PREVIEW_LENGTH`.
+- [`message_processor.py`](message_processor.py) обновлён для использования новых констант из `config.py`.
+- Все `print()` в функциях восстановления истории ([`history_manager.py`](history_manager.py)) заменены на `logger.info()`/`logger.debug()`/`logger.error()`, что обеспечивает структурированное логирование в CloudWatch.
+- Обновлён test stub в [`tests/test_process_messages_integration.py`](tests/test_process_messages_integration.py) для поддержки новых констант.
+- Все 30 тестов проходят без ошибок.
+
 ## Completed in 2026-04-08 round
 
 - Восстановлен [`s3_sync.py`](s3_sync.py), без которого чистый импорт [`lambda_handler.py`](lambda_handler.py) падал с `ModuleNotFoundError`.

@@ -1,10 +1,11 @@
 import asyncio
 import hashlib
 import json
+import logging
 import os
 from datetime import datetime, timedelta, timezone
-from typing import List, Set, Optional
- 
+from typing import Any, Dict, List, Set, Optional, Callable, TypeVar
+
 from channel_manager import create_channel_abbreviation
 from config import (
     GROUP_HISTORY_FILE,
@@ -13,95 +14,103 @@ from config import (
     HISTORY_FILE,
     SUMMARIES_HISTORY_FILE,
     TARGET_CHANNEL,
+    MAX_CHANNEL_HISTORY_MESSAGES,
+    MAX_CHANNEL_SUMMARIES,
+    MAX_GROUP_HISTORY_MESSAGES,
+    MAX_GROUP_SUMMARIES,
+    GROUP_SUMMARIZATION_INTERVAL_SECONDS,
 )
 from models import MessageInfo, SummaryInfo
 from prompts import prompts
 from utils import call_openai, extract_links
 
+logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
+
+
+def _load_json_file(filepath: str, default: Any = None) -> Any:
+    """Generic JSON file loader with error handling."""
+    if default is None:
+        default = {}
+    if not os.path.exists(filepath):
+        return default
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        logger.error(f"Error loading {filepath}: {e}")
+        return default
+
+
+def _save_json_file(filepath: str, data: Any, error_msg: str) -> bool:
+    """Generic JSON file saver with error handling."""
+    try:
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        logger.error(f"{error_msg}: {e}")
+        return False
+
+
+def _now_iso() -> str:
+    """Returns current UTC time in ISO format."""
+    return datetime.now(timezone.utc).isoformat()
+
 
 def load_summarization_history() -> Set[str]:
     """Загружает историю уже обработанных сообщений из файла."""
-    if not os.path.exists(HISTORY_FILE):
-        return set()
-
-    try:
-        with open(HISTORY_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            # Создаем уникальные идентификаторы для каждого сообщения
-            processed_messages = set()
-            for msg_data in data.get("processed_messages", []):
-                msg = MessageInfo.from_dict(msg_data)
-                # Создаем уникальный идентификатор: канал + message_id + хеш текста
-                text_hash = hashlib.sha256(msg.text.encode()).hexdigest()[:16]
-                msg_id = f"{msg.channel}_{msg.message_id}_{text_hash}"
-                processed_messages.add(msg_id)
-            return processed_messages
-    except Exception as e:
-        print(f"Ошибка при загрузке истории: {e}")
-        return set()
+    data = _load_json_file(HISTORY_FILE, {"processed_messages": []})
+    processed_messages = set()
+    for msg_data in data.get("processed_messages", []):
+        msg = MessageInfo.from_dict(msg_data)
+        text_hash = hashlib.sha256(msg.text.encode()).hexdigest()[:16]
+        msg_id = f"{msg.channel}_{msg.message_id}_{text_hash}"
+        processed_messages.add(msg_id)
+    return processed_messages
 
 
 def save_summarization_history(messages: List[MessageInfo]) -> None:
     """Сохраняет обработанные сообщения в историю."""
-    try:
-        # Загружаем существующую историю
-        existing_data = []
-        if os.path.exists(HISTORY_FILE):
-            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                existing_data = data.get("processed_messages", [])
+    existing_data = _load_json_file(HISTORY_FILE, {"processed_messages": []})
+    existing_messages = existing_data.get("processed_messages", [])
 
-        # Добавляем новые сообщения
-        new_messages = [msg.to_dict() for msg in messages]
-        all_messages = existing_data + new_messages
+    new_messages = [msg.to_dict() for msg in messages]
+    all_messages = existing_messages + new_messages
 
-        # Ограничиваем историю последними 1000 сообщениями
-        if len(all_messages) > 1000:
-            all_messages = all_messages[-1000:]
+    if len(all_messages) > MAX_CHANNEL_HISTORY_MESSAGES:
+        all_messages = all_messages[-MAX_CHANNEL_HISTORY_MESSAGES:]
 
-        # Сохраняем обновленную историю
-        with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-            json.dump(
-                {"processed_messages": all_messages, "last_updated": datetime.now().isoformat()},
-                f,
-                ensure_ascii=False,
-                indent=2,
-            )
+    data = {"processed_messages": all_messages, "last_updated": _now_iso()}
+    _save_json_file(HISTORY_FILE, data, "Error saving summarization history")
 
-    except Exception as e:
-        print(f"Ошибка при сохранении истории: {e}")
+
+def _parse_summaries_from_data(data: Any) -> List[SummaryInfo]:
+    """Parses summary data from JSON format (handles both old and new formats)."""
+    summaries = []
+    if isinstance(data, list):
+        for summary_data in data:
+            summaries.append(SummaryInfo.from_dict(summary_data))
+    else:
+        for summary_data in data.get("summaries", []):
+            summaries.append(SummaryInfo.from_dict(summary_data))
+    return summaries
 
 
 def load_summaries_history() -> List[SummaryInfo]:
     """Загружает историю созданных саммари из файла."""
-    if not os.path.exists(SUMMARIES_HISTORY_FILE):
+    data = _load_json_file(SUMMARIES_HISTORY_FILE, None)
+    if data is None:
         return []
 
-    try:
-        with open(SUMMARIES_HISTORY_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            summaries = []
-
-            # Handle both old format (array) and new format (object with summaries key)
-            if isinstance(data, list):
-                # Old format: direct array of summary objects
-                for summary_data in data:
-                    summaries.append(SummaryInfo.from_dict(summary_data))
-            else:
-                # New format: object with summaries key
-                for summary_data in data.get("summaries", []):
-                    summaries.append(SummaryInfo.from_dict(summary_data))
-
-            if not summaries:
-                print("No summaries found in history file")
-                print("Пытаемся восстановить историю из канала...")
-                return restore_summaries_from_channel_sync()
-            summaries = sorted(summaries, key=lambda x: x.date)
-            return summaries
-    except Exception as e:
-        print(f"Ошибка при загрузке истории саммари: {e}")
-        print("Пытаемся восстановить историю из канала...")
+    summaries = _parse_summaries_from_data(data)
+    if not summaries:
+        logger.info("No summaries found in history file, attempting channel restore...")
         return restore_summaries_from_channel_sync()
+
+    summaries = sorted(summaries, key=lambda x: x.date)
+    return summaries
 
 
 async def restore_summaries_from_channel() -> List[SummaryInfo]:
@@ -110,23 +119,23 @@ async def restore_summaries_from_channel() -> List[SummaryInfo]:
         import telegram_client as tg
         # Запускаем клиент если не запущен
         if tg.user_client is None or not tg.user_client.is_connected():
-            print("Запускаем клиент")
+            logger.info("Starting Telegram client...")
             await tg.start_clients()
-            print("Запустили клиент")
+            logger.info("Telegram client started")
 
         # Получаем сообщения за последнюю неделю
-        since = datetime.now(timezone.utc) - timedelta(days=7)
-        print("since", since)
+        since = datetime.now(timezone.utc) - timedelta(days=RESTORE_HISTORY_DAYS)
+        logger.debug(f"Restoring summaries since {since}")
         summaries = []
 
-        print(f"Читаем сообщения из канала {TARGET_CHANNEL} " f"за последнюю неделю...")
+        logger.info(f"Reading messages from channel {TARGET_CHANNEL} for the last {RESTORE_HISTORY_DAYS} days...")
 
         async for msg in tg.user_client.iter_messages(
             TARGET_CHANNEL, offset_date=None, min_id=0, reverse=False
         ):
             if msg.date < since:
                 break
-            print("msg", msg)
+            logger.debug(f"Processing message: id={msg.id}, date={msg.date}")
             if msg.message and msg.message.strip():
                 # Все сообщения в канале - это саммари
                 # Извлекаем каналы из ссылок и аббревиатур в сообщении
@@ -144,75 +153,59 @@ async def restore_summaries_from_channel() -> List[SummaryInfo]:
                 )
                 summaries.append(summary_info)
 
-        print(f"Восстановлено {len(summaries)} саммари из канала")
+        logger.info(f"Restored {len(summaries)} summaries from channel")
         summaries = sorted(summaries, key=lambda x: x.date)
         # Сохраняем восстановленную историю
         if summaries:
-            # Создаем новый файл с восстановленными данными
             all_summaries = [summary.to_dict() for summary in summaries]
-
-            with open(SUMMARIES_HISTORY_FILE, "w", encoding="utf-8") as f:
-                json.dump(
-                    {"summaries": all_summaries, "last_updated": datetime.now().isoformat()},
-                    f,
-                    ensure_ascii=False,
-                    indent=2,
-                )
+            data = {"summaries": all_summaries, "last_updated": _now_iso()}
+            _save_json_file(SUMMARIES_HISTORY_FILE, data, "Error saving restored summary history")
 
         return summaries
 
     except Exception as e:
-        print(f"Ошибка при восстановлении истории из канала: {e}")
+        logger.error(f"Error restoring history from channel: {e}")
         return []
 
 
 def restore_summaries_from_channel_sync() -> List[SummaryInfo]:
     """Синхронная обёртка для restore_summaries_from_channel."""
     import telegram_client as tg
-    print("tg", tg)
-    # Если клиент уже подключён к своему циклу, выполняем корутину в нём
     tg_loop = getattr(tg, "clients_loop", None)
-    print("tg_loop", tg_loop)
+    
     try:
         current_loop = asyncio.get_running_loop()
-        print("asyncio.get_running_loop()")
-        # Мы внутри уже запущенного цикла
+        # We're inside a running event loop
         if tg_loop and tg_loop.is_running():
-            # Если это тот же loop, блокируем восстановление, чтобы не повиснуть
             if tg_loop is current_loop:
-                print("Восстановление истории: тот же event loop, пропускаем восстановление")
+                logger.debug("Restore: same event loop, skipping to avoid deadlock")
                 return []
-            print("Восстановление истории: клиенты запущены в отдельном цикле")
-            # Планируем выполнение в цикле клиентов (другой поток)
+            logger.debug("Restore: clients running in separate loop")
             future = asyncio.run_coroutine_threadsafe(
                 restore_summaries_from_channel(), tg_loop
             )
-            # Не ждём бесконечно — ограничим ожидание, чтобы не зависать в Lambda
             try:
                 return future.result(timeout=float(os.getenv("RESTORE_TIMEOUT_SEC", "30")))
             except Exception as wait_err:
-                print(f"Восстановление истории: таймаут/ошибка ожидания: {wait_err}")
+                logger.error(f"Restore: timeout/wait error: {wait_err}")
                 return []
-        # Нет выделенного цикла клиентов – возвращаем пустой список, чтобы не рушить текущий цикл
-        print("Восстановление истории: клиенты не запущены в отдельном цикле")
+        logger.debug("Restore: clients not running in separate loop")
         return []
     except RuntimeError:
-        print("restore_summaries_from_channel_sync RuntimeError")
-        # Текущий поток без event loop
+        # No event loop in current thread
         if tg_loop and tg_loop.is_running():
-            print("Восстановление истории: клиенты запущены в отдельном цикле 2")
+            logger.debug("Restore: clients running in separate loop (RuntimeError path)")
             future = asyncio.run_coroutine_threadsafe(
                 restore_summaries_from_channel(), tg_loop
             )
             try:
                 return future.result(timeout=float(os.getenv("RESTORE_TIMEOUT_SEC", "30")))
             except Exception as wait_err:
-                print(f"Восстановление истории: таймаут/ошибка ожидания: {wait_err}")
+                logger.error(f"Restore: timeout/wait error: {wait_err}")
                 return []
-        # Клиенты не запущены – безопасно создать новый цикл
         return asyncio.run(restore_summaries_from_channel())
     except Exception as e:
-        print(f"Ошибка при восстановлении истории из канала: {e}")
+        logger.error(f"Error restoring history from channel: {e}")
         return []
 
 
@@ -225,10 +218,10 @@ async def restore_group_summaries_from_channel() -> List[SummaryInfo]:
             await tg.start_clients()
 
         # Получаем сообщения за последнюю неделю
-        since = datetime.now(timezone.utc) - timedelta(days=7)
+        since = datetime.now(timezone.utc) - timedelta(days=RESTORE_HISTORY_DAYS)
         summaries = []
 
-        print(f"Читаем групповые саммари из канала {TARGET_CHANNEL} " f"за последнюю неделю...")
+        logger.info(f"Reading group summaries from channel {TARGET_CHANNEL} for the last {RESTORE_HISTORY_DAYS} days...")
 
         async for msg in tg.user_client.iter_messages(
             TARGET_CHANNEL, offset_date=None, min_id=0, reverse=False
@@ -253,26 +246,19 @@ async def restore_group_summaries_from_channel() -> List[SummaryInfo]:
                 )
                 summaries.append(summary_info)
 
-        print(f"Восстановлено {len(summaries)} групповых саммари из канала")
+        logger.info(f"Restored {len(summaries)} group summaries from channel")
 
         summaries = sorted(summaries, key=lambda x: x.date)
         # Сохраняем восстановленную историю
         if summaries:
-            # Создаем новый файл с восстановленными данными
             all_summaries = [summary.to_dict() for summary in summaries]
-
-            with open(GROUP_SUMMARIES_HISTORY_FILE, "w", encoding="utf-8") as f:
-                json.dump(
-                    {"summaries": all_summaries, "last_updated": datetime.now().isoformat()},
-                    f,
-                    ensure_ascii=False,
-                    indent=2,
-                )
+            data = {"summaries": all_summaries, "last_updated": _now_iso()}
+            _save_json_file(GROUP_SUMMARIES_HISTORY_FILE, data, "Error saving restored group summary history")
 
         return summaries
 
     except Exception as e:
-        print(f"Ошибка при восстановлении истории групповых саммари из канала: {e}")
+        logger.error(f"Error restoring group summary history from channel: {e}")
         return []
 
 
@@ -287,7 +273,7 @@ def restore_group_summaries_from_channel_sync() -> List[SummaryInfo]:
                 restore_group_summaries_from_channel(), tg_loop
             )
             return future.result()
-        print("Восстановление групповых саммари: клиенты не запущены в отдельном цикле")
+        logger.debug("Restore group summaries: clients not running in separate loop")
         return []
     except RuntimeError:
         if tg_loop and tg_loop.is_running():
@@ -297,180 +283,107 @@ def restore_group_summaries_from_channel_sync() -> List[SummaryInfo]:
             return future.result()
         return asyncio.run(restore_group_summaries_from_channel())
     except Exception as e:
-        print(f"Ошибка при восстановлении истории групповых саммари из канала: {e}")
+        logger.error(f"Error restoring group summary history from channel: {e}")
         return []
 
 
 def save_summary_to_history(summary: SummaryInfo) -> None:
     """Сохраняет новое саммари в историю."""
-    try:
-        # Загружаем существующую историю
-        existing_summaries = load_summaries_history()
-        # Добавляем новое саммари
-        new_summary = summary.to_dict()
-        all_summaries = existing_summaries + [new_summary]
+    existing_summaries = load_summaries_history()
+    all_summaries = existing_summaries + [summary]
 
-        # Ограничиваем историю последними 50 саммари
-        if len(all_summaries) > 50:
-            all_summaries = all_summaries[-50:]
+    if len(all_summaries) > MAX_CHANNEL_SUMMARIES:
+        all_summaries = all_summaries[-MAX_CHANNEL_SUMMARIES:]
 
-        # Сохраняем обновленную историю
-        all_summaries_dict = [s.to_dict() for s in all_summaries if isinstance(s, SummaryInfo)]
-        with open(SUMMARIES_HISTORY_FILE, "w", encoding="utf-8") as f:
-            json.dump(
-                {"summaries": all_summaries_dict, "last_updated": datetime.now().isoformat()},
-                f,
-                ensure_ascii=False,
-                indent=2,
-            )
-
-    except Exception as e:
-        print(f"Ошибка при сохранении истории саммари: {e}")
+    all_summaries_dict = [s.to_dict() for s in all_summaries if isinstance(s, SummaryInfo)]
+    data = {"summaries": all_summaries_dict, "last_updated": _now_iso()}
+    _save_json_file(SUMMARIES_HISTORY_FILE, data, "Error saving summary history")
 
 
 def load_group_summarization_history() -> Set[str]:
     """Загружает историю уже обработанных сообщений из групп из файла."""
-    if not os.path.exists(GROUP_HISTORY_FILE):
-        return set()
-
-    try:
-        with open(GROUP_HISTORY_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            # Создаем уникальные идентификаторы для каждого сообщения
-            processed_messages = set()
-            for msg_data in data.get("processed_messages", []):
-                msg = MessageInfo.from_dict(msg_data)
-                # Создаем уникальный идентификатор: канал + message_id + хеш текста
-                text_hash = hashlib.sha256(msg.text.encode()).hexdigest()[:16]
-                msg_id = f"{msg.channel}_{msg.message_id}_{text_hash}"
-                processed_messages.add(msg_id)
-            return processed_messages
-    except Exception as e:
-        print(f"Ошибка при загрузке истории групп: {e}")
-        return set()
+    data = _load_json_file(GROUP_HISTORY_FILE, {"processed_messages": []})
+    processed_messages = set()
+    for msg_data in data.get("processed_messages", []):
+        msg = MessageInfo.from_dict(msg_data)
+        text_hash = hashlib.sha256(msg.text.encode()).hexdigest()[:16]
+        msg_id = f"{msg.channel}_{msg.message_id}_{text_hash}"
+        processed_messages.add(msg_id)
+    return processed_messages
 
 
 def save_group_summarization_history(messages: List[MessageInfo]) -> None:
     """Сохраняет историю обработанных сообщений из групп в файл."""
-    try:
-        # Загружаем существующие данные
-        if os.path.exists(GROUP_HISTORY_FILE):
-            with open(GROUP_HISTORY_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        else:
-            data = {"processed_messages": [], "last_updated": ""}
+    data = _load_json_file(GROUP_HISTORY_FILE, {"processed_messages": [], "last_updated": ""})
 
-        # Добавляем новые сообщения
-        for msg in messages:
-            data["processed_messages"].append(msg.to_dict())
+    for msg in messages:
+        data["processed_messages"].append(msg.to_dict())
 
-        # Ограничиваем историю последними 1000 сообщениями
-        if len(data["processed_messages"]) > 1000:
-            data["processed_messages"] = data["processed_messages"][-1000:]
+    if len(data["processed_messages"]) > MAX_GROUP_HISTORY_MESSAGES:
+        data["processed_messages"] = data["processed_messages"][-MAX_GROUP_HISTORY_MESSAGES:]
 
-        data["last_updated"] = datetime.now().isoformat()
-
-        # Сохраняем обновленные данные
-        with open(GROUP_HISTORY_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-
-    except Exception as e:
-        print(f"Ошибка при сохранении истории групп: {e}")
+    data["last_updated"] = _now_iso()
+    _save_json_file(GROUP_HISTORY_FILE, data, "Error saving group summarization history")
 
 
 def load_group_summaries_history() -> List[SummaryInfo]:
     """Загружает историю созданных саммари из групп из файла."""
-    if not os.path.exists(GROUP_SUMMARIES_HISTORY_FILE):
+    data = _load_json_file(GROUP_SUMMARIES_HISTORY_FILE, None)
+    if data is None:
         return []
 
-    try:
-        with open(GROUP_SUMMARIES_HISTORY_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            summaries = []
-            if isinstance(data, list):
-                for summary_data in data:
-                    summaries.append(SummaryInfo.from_dict(summary_data))
-            else:
-                for summary_data in data.get("summaries", []):
-                    summaries.append(SummaryInfo.from_dict(summary_data))
-            return summaries
-    except Exception as e:
-        print(f"Ошибка при загрузке истории саммари групп: {e}")
-        print("Пытаемся восстановить историю групповых саммари из канала...")
-        return restore_group_summaries_from_channel_sync()
+    summaries = _parse_summaries_from_data(data)
+    if not summaries:
+        return []
+    return summaries
 
 
 def save_group_summary_to_history(summary: SummaryInfo) -> None:
     """Сохраняет саммари из групп в историю."""
-    try:
-        # Загружаем существующие данные
-        if os.path.exists(GROUP_SUMMARIES_HISTORY_FILE):
-            with open(GROUP_SUMMARIES_HISTORY_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        else:
-            data = {"summaries": [], "last_updated": ""}
+    data = _load_json_file(GROUP_SUMMARIES_HISTORY_FILE, {"summaries": [], "last_updated": ""})
 
-        # Добавляем новое саммари
-        data["summaries"].append(summary.to_dict())
+    data["summaries"].append(summary.to_dict())
 
-        # Ограничиваем историю последними 100 саммари
-        if len(data["summaries"]) > 100:
-            data["summaries"] = data["summaries"][-100:]
+    if len(data["summaries"]) > MAX_GROUP_SUMMARIES:
+        data["summaries"] = data["summaries"][-MAX_GROUP_SUMMARIES:]
 
-        data["last_updated"] = datetime.now().isoformat()
-
-        # Сохраняем обновленные данные
-        with open(GROUP_SUMMARIES_HISTORY_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-
-    except Exception as e:
-        print(f"Ошибка при сохранении саммари групп в историю: {e}")
+    data["last_updated"] = _now_iso()
+    _save_json_file(GROUP_SUMMARIES_HISTORY_FILE, data, "Error saving group summary history")
 
 
 def should_run_group_summarization() -> bool:
     """Проверяет, нужно ли запускать суммаризацию групп (раз в сутки)."""
     if not os.path.exists(GROUP_LAST_RUN_FILE):
-        # First run - should execute
+        return True
+
+    data = _load_json_file(GROUP_LAST_RUN_FILE, {})
+    last_run_str = data.get("last_run", "")
+    if not last_run_str:
         return True
 
     try:
-        with open(GROUP_LAST_RUN_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            last_run_str = data.get("last_run", "")
-            if not last_run_str:
-                return True
+        last_run = datetime.fromisoformat(last_run_str)
+        if last_run.tzinfo is None:
+            last_run = last_run.replace(tzinfo=timezone.utc)
 
-            last_run = datetime.fromisoformat(last_run_str)
-            # Убеждаемся, что last_run имеет timezone info
-            if last_run.tzinfo is None:
-                last_run = last_run.replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+        time_since_last_run = (now - last_run).total_seconds()
+        logger.debug(f"Last run: {last_run}; now: {now}; time since last run: {time_since_last_run}")
 
-            now = datetime.now(timezone.utc)
-
-            time_since_last_run = (now - last_run).total_seconds()
-            print(f"Last run: {last_run}; now: {now}; "
-                  f"time since last run: {time_since_last_run}")
-            # Проверяем, прошло ли больше 24 часов с последнего запуска
-            return time_since_last_run > 24 * 60 * 60
-
-    except Exception as e:
-        print(f"Ошибка при проверке времени последнего запуска групп: {e}")
+        # Check if more than 24 hours have passed
+        return time_since_last_run > GROUP_SUMMARIZATION_INTERVAL_SECONDS
+    except (ValueError, TypeError) as e:
+        logger.error(f"Error parsing group last run time: {e}")
         return False
 
 
 def update_group_last_run() -> None:
     """Обновляет время последнего запуска суммаризации групп."""
-    try:
-        data = {
-            "last_run": datetime.now(timezone.utc).isoformat(),
-            "last_updated": datetime.now().isoformat(),
-        }
-
-        with open(GROUP_LAST_RUN_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-
-    except Exception as e:
-        print(f"Ошибка при обновлении времени последнего запуска групп: {e}")
+    data = {
+        "last_run": _now_iso(),
+        "last_updated": _now_iso(),
+    }
+    _save_json_file(GROUP_LAST_RUN_FILE, data, "Error updating group last run")
 
 
 def get_recent_group_summaries_context(days: int = 7) -> str:

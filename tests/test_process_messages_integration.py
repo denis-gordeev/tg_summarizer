@@ -26,6 +26,11 @@ def _setup_stubs():
     fake_config.OPENAI_GROUP_SUMMARY_MAX_TOKENS = 16000
     fake_config.SOURCE_CHANNELS = set()
     fake_config.DEBUG = False
+    fake_config.SUMMARY_MIN_RATIO = 3
+    fake_config.SUMMARY_MIN_LENGTH = 800
+    fake_config.SUMMARY_MAX_LENGTH = 4000
+    fake_config.GROUP_SUMMARY_MIN_LENGTH = 2000
+    fake_config.GROUP_SUMMARY_MAX_LENGTH = 12000
     sys.modules["config"] = fake_config
 
     # --- Stub history_manager ---

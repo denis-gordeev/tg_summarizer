@@ -11,6 +11,11 @@ from config import (
     OPENAI_CHANNEL_SUMMARY_MAX_TOKENS,
     OPENAI_GROUP_SUMMARY_MAX_TOKENS,
     DEBUG,
+    SUMMARY_MIN_RATIO,
+    SUMMARY_MIN_LENGTH,
+    SUMMARY_MAX_LENGTH,
+    GROUP_SUMMARY_MIN_LENGTH,
+    GROUP_SUMMARY_MAX_LENGTH,
 )
 from history_manager import get_recent_summaries_context, get_recent_group_summaries_context
 from channel_manager import (
@@ -23,11 +28,11 @@ from prompts import prompts
 
 
 def _calculate_channel_summary_limit(total_original_length: int) -> int:
-    return min(max(total_original_length // 3, 800), 4000)
+    return min(max(total_original_length // SUMMARY_MIN_RATIO, SUMMARY_MIN_LENGTH), SUMMARY_MAX_LENGTH)
 
 
 def _calculate_group_summary_limit(total_original_length: int) -> int:
-    return min(max(total_original_length, 2000), 12000)
+    return min(max(total_original_length, GROUP_SUMMARY_MIN_LENGTH), GROUP_SUMMARY_MAX_LENGTH)
 
 
 def _truncate_html_preserving_tags(text: str, max_visible_chars: int) -> str:

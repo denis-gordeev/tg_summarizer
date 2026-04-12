@@ -1,38 +1,75 @@
 import os
 import json
 import re
-from datetime import datetime
+import logging
+from datetime import datetime, timezone
 from config import ABBREVIATIONS_FILE, DISCOVERED_CHANNELS_FILE
+
+logger = logging.getLogger(__name__)
+
+
+def _load_json_file(filepath: str, default: dict = None) -> dict:
+    """Generic JSON file loader with error handling."""
+    if default is None:
+        default = {}
+    if not os.path.exists(filepath):
+        return default
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        logger.error(f"Error loading {filepath}: {e}")
+        return default
+
+
+def _save_json_file(filepath: str, data: dict, error_msg: str) -> bool:
+    """Generic JSON file saver with error handling."""
+    try:
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        logger.error(f"{error_msg}: {e}")
+        return False
+
+
+def _now_iso() -> str:
+    """Returns current UTC time in ISO format."""
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _load_channel_list(key: str) -> list[str]:
+    """Generic function to load a channel list from the discovered channels file."""
+    data = _load_json_file(DISCOVERED_CHANNELS_FILE, {})
+    return data.get(key, [])
+
+
+def _save_channel_list(key: str, channel_name: str, success_msg: str) -> None:
+    """Generic function to add a channel to a list in the discovered channels file."""
+    data = _load_json_file(DISCOVERED_CHANNELS_FILE, {
+        'discovered_channels': [],
+        'similar_channels': [],
+        'banned_channels': [],
+        'last_updated': ''
+    })
+
+    if channel_name not in data[key]:
+        data[key].append(channel_name)
+        data['last_updated'] = _now_iso()
+        _save_json_file(DISCOVERED_CHANNELS_FILE, data, success_msg)
 
 
 def load_channel_abbreviations() -> dict:
     """Загружает существующие аббревиатуры каналов из JSON файла."""
-    abbreviations_file = ABBREVIATIONS_FILE
-    if not os.path.exists(abbreviations_file):
-        return {}
-    
-    try:
-        with open(abbreviations_file, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            return data.get('channel_abbreviations', {})
-    except Exception as e:
-        print(f"Ошибка при загрузке аббревиатур каналов: {e}")
-        return {}
+    return _load_json_file(ABBREVIATIONS_FILE, {}).get('channel_abbreviations', {})
 
 
 def save_channel_abbreviation(channel_name: str, abbreviation: str) -> None:
     """Сохраняет новую аббревиатуру канала в JSON файл."""
-    abbreviations_file = ABBREVIATIONS_FILE
-    try:
-        abbreviations = load_channel_abbreviations()
-        abbreviations[channel_name] = abbreviation
-        data = {"channel_abbreviations": abbreviations, "last_updated": datetime.now().isoformat()}
-        
-        # Сохраняем обновленные данные
-        with open(abbreviations_file, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        print(f"Ошибка при сохранении аббревиатуры канала: {e}")
+    abbreviations = load_channel_abbreviations()
+    abbreviations[channel_name] = abbreviation
+    data = {"channel_abbreviations": abbreviations, "last_updated": _now_iso()}
+    _save_json_file(ABBREVIATIONS_FILE, data, "Error saving channel abbreviation")
 
 
 def create_channel_abbreviation(channel_name: str) -> str:
@@ -73,124 +110,29 @@ def create_channel_abbreviation(channel_name: str) -> str:
 
 def load_discovered_channels() -> list[str]:
     """Загружает список обнаруженных каналов из файла."""
-    if not os.path.exists(DISCOVERED_CHANNELS_FILE):
-        return []
-    
-    try:
-        with open(DISCOVERED_CHANNELS_FILE, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            return data.get('discovered_channels', [])
-    except Exception as e:
-        print(f"Ошибка при загрузке обнаруженных каналов: {e}")
-        return []
+    return _load_channel_list('discovered_channels')
 
 
 def load_similar_channels() -> list[str]:
     """Загружает список похожих каналов из файла."""
-    if not os.path.exists(DISCOVERED_CHANNELS_FILE):
-        return []
-    
-    try:
-        with open(DISCOVERED_CHANNELS_FILE, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            return data.get('similar_channels', [])
-    except Exception as e:
-        print(f"Ошибка при загрузке похожих каналов: {e}")
-        return []
+    return _load_channel_list('similar_channels')
 
 
 def load_banned_channels() -> list[str]:
     """Загружает список заблокированных каналов из файла."""
-    if not os.path.exists(DISCOVERED_CHANNELS_FILE):
-        return []
-    
-    try:
-        with open(DISCOVERED_CHANNELS_FILE, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            return data.get('banned_channels', [])
-    except Exception as e:
-        print(f"Ошибка при загрузке заблокированных каналов: {e}")
-        return []
+    return _load_channel_list('banned_channels')
 
 
 def save_discovered_channel(channel_name: str) -> None:
     """Сохраняет новый обнаруженный канал в JSON файл."""
-    try:
-        # Загружаем существующие данные
-        if os.path.exists(DISCOVERED_CHANNELS_FILE):
-            with open(DISCOVERED_CHANNELS_FILE, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-        else:
-            data = {
-                'discovered_channels': [], 
-                'similar_channels': [], 
-                'last_updated': ''
-            }
-        
-        # Проверяем, нет ли уже такого канала
-        if channel_name not in data['discovered_channels']:
-            data['discovered_channels'].append(channel_name)
-            data['last_updated'] = datetime.now().isoformat()
-            
-            # Сохраняем обновленные данные
-            with open(DISCOVERED_CHANNELS_FILE, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-                
-    except Exception as e:
-        print(f"Ошибка при сохранении обнаруженного канала: {e}")
+    _save_channel_list('discovered_channels', channel_name, "Error saving discovered channel")
 
 
 def save_similar_channel(channel_name: str) -> None:
     """Сохраняет новый похожий канал в JSON файл."""
-    try:
-        # Загружаем существующие данные
-        if os.path.exists(DISCOVERED_CHANNELS_FILE):
-            with open(DISCOVERED_CHANNELS_FILE, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-        else:
-            data = {
-                'discovered_channels': [], 
-                'similar_channels': [], 
-                'banned_channels': [], 
-                'last_updated': ''
-            }
-        
-        # Проверяем, нет ли уже такого канала
-        if channel_name not in data['similar_channels']:
-            data['similar_channels'].append(channel_name)
-            data['last_updated'] = datetime.now().isoformat()
-            
-            # Сохраняем обновленные данные
-            with open(DISCOVERED_CHANNELS_FILE, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-                
-    except Exception as e:
-        print(f"Ошибка при сохранении похожего канала: {e}")
+    _save_channel_list('similar_channels', channel_name, "Error saving similar channel")
 
 
 def save_banned_channel(channel_name: str) -> None:
     """Сохраняет новый заблокированный канал в JSON файл."""
-    try:
-        # Загружаем существующие данные
-        if os.path.exists(DISCOVERED_CHANNELS_FILE):
-            with open(DISCOVERED_CHANNELS_FILE, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-        else:
-            data = {
-                'discovered_channels': [], 
-                'similar_channels': [], 
-                'banned_channels': [], 
-                'last_updated': ''
-            }
-        
-        # Проверяем, нет ли уже такого канала
-        if channel_name not in data['banned_channels']:
-            data['banned_channels'].append(channel_name)
-            data['last_updated'] = datetime.now().isoformat()
-            
-            # Сохраняем обновленные данные
-            with open(DISCOVERED_CHANNELS_FILE, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-                
-    except Exception as e:
-        print(f"Ошибка при сохранении заблокированного канала: {e}") 
+    _save_channel_list('banned_channels', channel_name, "Error saving banned channel")
