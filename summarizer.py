@@ -1,9 +1,12 @@
 import asyncio
+import logging
 import traceback
 from telegram_client import start_clients, stop_clients, fetch_messages, fetch_group_messages
 from message_processor import process_messages
 from config import SOURCE_GROUPS
 from history_manager import should_run_group_summarization
+
+logger = logging.getLogger(__name__)
 
 
 async def run_summarizer(
@@ -15,19 +18,19 @@ async def run_summarizer(
     await start_clients()
     try:
         # Process channels
-        print("=== Processing Channels ===")
+        logger.info("=== Processing Channels ===")
         channel_messages = await fetch_messages(include_today_processed_messages)
         await process_messages(channel_messages, save_changes, send_message)
 
         # Process groups
         if SOURCE_GROUPS and (should_run_group_summarization() or include_today_processed_groups):
-            print("\n=== Processing Groups ===")
+            logger.info("=== Processing Groups ===")
             group_messages = await fetch_group_messages(include_today_processed_messages)
             await process_messages(group_messages, save_changes, send_message, is_group=True)
         else:
-            print("\nGroup summarization skipped.")
+            logger.info("Group summarization skipped.")
     except Exception as e:
-        print(f"Error: {e}")
+        logger.error("Error: %s", e)
         traceback.print_exc()
     finally:
         await stop_clients()

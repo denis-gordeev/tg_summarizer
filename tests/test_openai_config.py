@@ -91,7 +91,11 @@ class CallOpenAITests(unittest.IsolatedAsyncioTestCase):
             )()
         )
 
-        with patch.object(utils.openai_client.chat.completions, "create", create_mock):
+        # Trigger lazy initialization of openai_client
+        _ = utils.openai_client  # will be None initially
+        # The client is initialized inside call_openai, so we patch the class
+        with patch.object(utils, "openai_client", create=True) as mock_client:
+            mock_client.chat.completions.create = create_mock
             result = await utils.call_openai("system", "user")
 
         self.assertEqual(result, "done")

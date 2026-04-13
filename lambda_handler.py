@@ -1,8 +1,15 @@
 import os
+import logging
 import asyncio
 from typing import Any, Dict
 from s3_sync import download_from_s3, upload_to_s3
 from summarizer import run_summarizer
+
+# Configure structured logging for CloudWatch
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+)
 
 
 def _parse_event_flag(value: Any, default: bool) -> bool:

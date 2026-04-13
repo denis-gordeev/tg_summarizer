@@ -19,49 +19,20 @@ from config import (
     MAX_GROUP_HISTORY_MESSAGES,
     MAX_GROUP_SUMMARIES,
     GROUP_SUMMARIZATION_INTERVAL_SECONDS,
+    RESTORE_HISTORY_DAYS,
 )
 from models import MessageInfo, SummaryInfo
 from prompts import prompts
-from utils import call_openai, extract_links
+from utils import call_openai, extract_links, load_json_file, save_json_file, now_iso
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
 
-def _load_json_file(filepath: str, default: Any = None) -> Any:
-    """Generic JSON file loader with error handling."""
-    if default is None:
-        default = {}
-    if not os.path.exists(filepath):
-        return default
-    try:
-        with open(filepath, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception as e:
-        logger.error(f"Error loading {filepath}: {e}")
-        return default
-
-
-def _save_json_file(filepath: str, data: Any, error_msg: str) -> bool:
-    """Generic JSON file saver with error handling."""
-    try:
-        with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        return True
-    except Exception as e:
-        logger.error(f"{error_msg}: {e}")
-        return False
-
-
-def _now_iso() -> str:
-    """Returns current UTC time in ISO format."""
-    return datetime.now(timezone.utc).isoformat()
-
-
 def load_summarization_history() -> Set[str]:
     """Загружает историю уже обработанных сообщений из файла."""
-    data = _load_json_file(HISTORY_FILE, {"processed_messages": []})
+    data = load_json_file(HISTORY_FILE, {"processed_messages": []})
     processed_messages = set()
     for msg_data in data.get("processed_messages", []):
         msg = MessageInfo.from_dict(msg_data)
@@ -73,7 +44,7 @@ def load_summarization_history() -> Set[str]:
 
 def save_summarization_history(messages: List[MessageInfo]) -> None:
     """Сохраняет обработанные сообщения в историю."""
-    existing_data = _load_json_file(HISTORY_FILE, {"processed_messages": []})
+    existing_data = load_json_file(HISTORY_FILE, {"processed_messages": []})
     existing_messages = existing_data.get("processed_messages", [])
 
     new_messages = [msg.to_dict() for msg in messages]
@@ -82,8 +53,8 @@ def save_summarization_history(messages: List[MessageInfo]) -> None:
     if len(all_messages) > MAX_CHANNEL_HISTORY_MESSAGES:
         all_messages = all_messages[-MAX_CHANNEL_HISTORY_MESSAGES:]
 
-    data = {"processed_messages": all_messages, "last_updated": _now_iso()}
-    _save_json_file(HISTORY_FILE, data, "Error saving summarization history")
+    data = {"processed_messages": all_messages, "last_updated": now_iso()}
+    save_json_file(HISTORY_FILE, data, "Error saving summarization history")
 
 
 def _parse_summaries_from_data(data: Any) -> List[SummaryInfo]:
@@ -100,7 +71,7 @@ def _parse_summaries_from_data(data: Any) -> List[SummaryInfo]:
 
 def load_summaries_history() -> List[SummaryInfo]:
     """Загружает историю созданных саммари из файла."""
-    data = _load_json_file(SUMMARIES_HISTORY_FILE, None)
+    data = load_json_file(SUMMARIES_HISTORY_FILE, None)
     if data is None:
         return []
 
@@ -158,8 +129,8 @@ async def restore_summaries_from_channel() -> List[SummaryInfo]:
         # Сохраняем восстановленную историю
         if summaries:
             all_summaries = [summary.to_dict() for summary in summaries]
-            data = {"summaries": all_summaries, "last_updated": _now_iso()}
-            _save_json_file(SUMMARIES_HISTORY_FILE, data, "Error saving restored summary history")
+            data = {"summaries": all_summaries, "last_updated": now_iso()}
+            save_json_file(SUMMARIES_HISTORY_FILE, data, "Error saving restored summary history")
 
         return summaries
 
@@ -252,8 +223,8 @@ async def restore_group_summaries_from_channel() -> List[SummaryInfo]:
         # Сохраняем восстановленную историю
         if summaries:
             all_summaries = [summary.to_dict() for summary in summaries]
-            data = {"summaries": all_summaries, "last_updated": _now_iso()}
-            _save_json_file(GROUP_SUMMARIES_HISTORY_FILE, data, "Error saving restored group summary history")
+            data = {"summaries": all_summaries, "last_updated": now_iso()}
+            save_json_file(GROUP_SUMMARIES_HISTORY_FILE, data, "Error saving restored group summary history")
 
         return summaries
 
@@ -296,13 +267,13 @@ def save_summary_to_history(summary: SummaryInfo) -> None:
         all_summaries = all_summaries[-MAX_CHANNEL_SUMMARIES:]
 
     all_summaries_dict = [s.to_dict() for s in all_summaries if isinstance(s, SummaryInfo)]
-    data = {"summaries": all_summaries_dict, "last_updated": _now_iso()}
-    _save_json_file(SUMMARIES_HISTORY_FILE, data, "Error saving summary history")
+    data = {"summaries": all_summaries_dict, "last_updated": now_iso()}
+    save_json_file(SUMMARIES_HISTORY_FILE, data, "Error saving summary history")
 
 
 def load_group_summarization_history() -> Set[str]:
     """Загружает историю уже обработанных сообщений из групп из файла."""
-    data = _load_json_file(GROUP_HISTORY_FILE, {"processed_messages": []})
+    data = load_json_file(GROUP_HISTORY_FILE, {"processed_messages": []})
     processed_messages = set()
     for msg_data in data.get("processed_messages", []):
         msg = MessageInfo.from_dict(msg_data)
@@ -314,7 +285,7 @@ def load_group_summarization_history() -> Set[str]:
 
 def save_group_summarization_history(messages: List[MessageInfo]) -> None:
     """Сохраняет историю обработанных сообщений из групп в файл."""
-    data = _load_json_file(GROUP_HISTORY_FILE, {"processed_messages": [], "last_updated": ""})
+    data = load_json_file(GROUP_HISTORY_FILE, {"processed_messages": [], "last_updated": ""})
 
     for msg in messages:
         data["processed_messages"].append(msg.to_dict())
@@ -322,13 +293,13 @@ def save_group_summarization_history(messages: List[MessageInfo]) -> None:
     if len(data["processed_messages"]) > MAX_GROUP_HISTORY_MESSAGES:
         data["processed_messages"] = data["processed_messages"][-MAX_GROUP_HISTORY_MESSAGES:]
 
-    data["last_updated"] = _now_iso()
-    _save_json_file(GROUP_HISTORY_FILE, data, "Error saving group summarization history")
+    data["last_updated"] = now_iso()
+    save_json_file(GROUP_HISTORY_FILE, data, "Error saving group summarization history")
 
 
 def load_group_summaries_history() -> List[SummaryInfo]:
     """Загружает историю созданных саммари из групп из файла."""
-    data = _load_json_file(GROUP_SUMMARIES_HISTORY_FILE, None)
+    data = load_json_file(GROUP_SUMMARIES_HISTORY_FILE, None)
     if data is None:
         return []
 
@@ -340,15 +311,15 @@ def load_group_summaries_history() -> List[SummaryInfo]:
 
 def save_group_summary_to_history(summary: SummaryInfo) -> None:
     """Сохраняет саммари из групп в историю."""
-    data = _load_json_file(GROUP_SUMMARIES_HISTORY_FILE, {"summaries": [], "last_updated": ""})
+    data = load_json_file(GROUP_SUMMARIES_HISTORY_FILE, {"summaries": [], "last_updated": ""})
 
     data["summaries"].append(summary.to_dict())
 
     if len(data["summaries"]) > MAX_GROUP_SUMMARIES:
         data["summaries"] = data["summaries"][-MAX_GROUP_SUMMARIES:]
 
-    data["last_updated"] = _now_iso()
-    _save_json_file(GROUP_SUMMARIES_HISTORY_FILE, data, "Error saving group summary history")
+    data["last_updated"] = now_iso()
+    save_json_file(GROUP_SUMMARIES_HISTORY_FILE, data, "Error saving group summary history")
 
 
 def should_run_group_summarization() -> bool:
@@ -356,7 +327,7 @@ def should_run_group_summarization() -> bool:
     if not os.path.exists(GROUP_LAST_RUN_FILE):
         return True
 
-    data = _load_json_file(GROUP_LAST_RUN_FILE, {})
+    data = load_json_file(GROUP_LAST_RUN_FILE, {})
     last_run_str = data.get("last_run", "")
     if not last_run_str:
         return True
@@ -380,10 +351,10 @@ def should_run_group_summarization() -> bool:
 def update_group_last_run() -> None:
     """Обновляет время последнего запуска суммаризации групп."""
     data = {
-        "last_run": _now_iso(),
-        "last_updated": _now_iso(),
+        "last_run": now_iso(),
+        "last_updated": now_iso(),
     }
-    _save_json_file(GROUP_LAST_RUN_FILE, data, "Error updating group last run")
+    save_json_file(GROUP_LAST_RUN_FILE, data, "Error updating group last run")
 
 
 def get_recent_group_summaries_context(days: int = 7) -> str:
@@ -550,30 +521,33 @@ async def save_updated_summary(
                 break
 
         # Сохраняем обновленную историю
-        with open(GROUP_SUMMARIES_HISTORY_FILE, "w", encoding="utf-8") as f:
-            json.dump([s.to_dict() for s in summaries], f, ensure_ascii=False, indent=2)
+        save_json_file(
+            GROUP_SUMMARIES_HISTORY_FILE,
+            [s.to_dict() for s in summaries],
+            "Error saving updated group summary history",
+        )
     else:
         summaries = load_summaries_history()
         # Находим индекс оригинального саммари
         for i, summary in enumerate(summaries):
             if summary.content == original_summary.content:
                 summaries[i] = updated_summary
-                print(
-                    "updated_summary:", "=" * 100, "\n", updated_summary,
-                    "\n", "=" * 100, "\n"
-                )
+                logger.debug("updated_summary: %s", updated_summary)
                 break
 
-        # Сохраняем обновленную историю в текущем формате (массив)
-        with open(SUMMARIES_HISTORY_FILE, "w", encoding="utf-8") as f:
-            json.dump([s.to_dict() for s in summaries], f, ensure_ascii=False, indent=2)
-    
+        # Сохраняем обновленную историю
+        save_json_file(
+            SUMMARIES_HISTORY_FILE,
+            [s.to_dict() for s in summaries],
+            "Error saving updated summary history",
+        )
+
     # Редактируем сообщение в канале, если есть message_id
     if original_summary.message_id:
         try:
             await edit_message_in_target_channel(
                 original_summary.message_id, updated_summary.content
             )
-            print(f"Сообщение {original_summary.message_id} обновлено в канале")
+            logger.info("Message %s updated in channel", original_summary.message_id)
         except Exception as e:
-            print(f"Ошибка при редактировании сообщения {original_summary.message_id}: {e}")
+            logger.error("Error updating message %s in channel: %s", original_summary.message_id, e)

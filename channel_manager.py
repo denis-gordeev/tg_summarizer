@@ -4,49 +4,20 @@ import re
 import logging
 from datetime import datetime, timezone
 from config import ABBREVIATIONS_FILE, DISCOVERED_CHANNELS_FILE
+from utils import load_json_file, save_json_file, now_iso
 
 logger = logging.getLogger(__name__)
 
 
-def _load_json_file(filepath: str, default: dict = None) -> dict:
-    """Generic JSON file loader with error handling."""
-    if default is None:
-        default = {}
-    if not os.path.exists(filepath):
-        return default
-    try:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except Exception as e:
-        logger.error(f"Error loading {filepath}: {e}")
-        return default
-
-
-def _save_json_file(filepath: str, data: dict, error_msg: str) -> bool:
-    """Generic JSON file saver with error handling."""
-    try:
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        return True
-    except Exception as e:
-        logger.error(f"{error_msg}: {e}")
-        return False
-
-
-def _now_iso() -> str:
-    """Returns current UTC time in ISO format."""
-    return datetime.now(timezone.utc).isoformat()
-
-
 def _load_channel_list(key: str) -> list[str]:
     """Generic function to load a channel list from the discovered channels file."""
-    data = _load_json_file(DISCOVERED_CHANNELS_FILE, {})
+    data = load_json_file(DISCOVERED_CHANNELS_FILE, {})
     return data.get(key, [])
 
 
 def _save_channel_list(key: str, channel_name: str, success_msg: str) -> None:
     """Generic function to add a channel to a list in the discovered channels file."""
-    data = _load_json_file(DISCOVERED_CHANNELS_FILE, {
+    data = load_json_file(DISCOVERED_CHANNELS_FILE, {
         'discovered_channels': [],
         'similar_channels': [],
         'banned_channels': [],
@@ -55,21 +26,21 @@ def _save_channel_list(key: str, channel_name: str, success_msg: str) -> None:
 
     if channel_name not in data[key]:
         data[key].append(channel_name)
-        data['last_updated'] = _now_iso()
-        _save_json_file(DISCOVERED_CHANNELS_FILE, data, success_msg)
+        data['last_updated'] = now_iso()
+        save_json_file(DISCOVERED_CHANNELS_FILE, data, success_msg)
 
 
 def load_channel_abbreviations() -> dict:
     """Загружает существующие аббревиатуры каналов из JSON файла."""
-    return _load_json_file(ABBREVIATIONS_FILE, {}).get('channel_abbreviations', {})
+    return load_json_file(ABBREVIATIONS_FILE, {}).get('channel_abbreviations', {})
 
 
 def save_channel_abbreviation(channel_name: str, abbreviation: str) -> None:
     """Сохраняет новую аббревиатуру канала в JSON файл."""
     abbreviations = load_channel_abbreviations()
     abbreviations[channel_name] = abbreviation
-    data = {"channel_abbreviations": abbreviations, "last_updated": _now_iso()}
-    _save_json_file(ABBREVIATIONS_FILE, data, "Error saving channel abbreviation")
+    data = {"channel_abbreviations": abbreviations, "last_updated": now_iso()}
+    save_json_file(ABBREVIATIONS_FILE, data, "Error saving channel abbreviation")
 
 
 def create_channel_abbreviation(channel_name: str) -> str:

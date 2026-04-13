@@ -1,8 +1,45 @@
+import os
 import re
+import json
+import logging
+from datetime import datetime, timezone
 from openai import OpenAI
 from config import OPENAI_API_KEY, OPENAI_DEFAULT_MAX_TOKENS, OPENAI_MODEL
 
-openai_client = OpenAI(api_key=OPENAI_API_KEY)
+logger = logging.getLogger(__name__)
+
+
+def load_json_file(filepath: str, default: dict = None) -> dict:
+    """Generic JSON file loader with error handling."""
+    if default is None:
+        default = {}
+    if not os.path.exists(filepath):
+        return default
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        logger.error(f"Error loading {filepath}: {e}")
+        return default
+
+
+def save_json_file(filepath: str, data: dict, error_msg: str) -> bool:
+    """Generic JSON file saver with error handling."""
+    try:
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        logger.error(f"{error_msg}: {e}")
+        return False
+
+
+def now_iso() -> str:
+    """Returns current UTC time in ISO format."""
+    return datetime.now(timezone.utc).isoformat()
+
+
+openai_client = None
 
 LINK_REGEX = re.compile(r"https?://\S+")
 TELEGRAM_CHANNEL_REGEX = re.compile(r"https://t\.me/([^/]+)/\d+")
@@ -71,6 +108,9 @@ async def call_openai(
     max_tokens: int = OPENAI_DEFAULT_MAX_TOKENS,
 ) -> str:
     """Универсальная функция для вызова OpenAI API."""
+    global openai_client
+    if openai_client is None:
+        openai_client = OpenAI(api_key=OPENAI_API_KEY)
     try:
         response = openai_client.chat.completions.create(
             messages=[
@@ -85,7 +125,7 @@ async def call_openai(
             return ""
         return result.strip()
     except Exception as e:
-        print(f"OpenAI API error: {e}")
+        logger.error(f"OpenAI API error: {e}")
         return ""
 
 

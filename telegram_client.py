@@ -24,12 +24,23 @@ bot_client: Any = None
 clients_loop: Optional[asyncio.AbstractEventLoop] = None
 
 
+async def _ensure_clients() -> None:
+    """Ensure Telegram clients are connected, starting them if needed."""
+    if user_client is None or not user_client.is_connected():
+        await start_clients()
+
+
+async def _ensure_bot_client() -> None:
+    """Ensure bot client is connected, starting it if needed."""
+    if bot_client is None or not bot_client.is_connected():
+        await start_clients()
+
+
 async def get_similar_channels_from_telegram(channel_username: Optional[str] = None) -> List[str]:
     """Получает список похожих каналов через Telegram API."""
     try:
         global user_client
-        if user_client is None or not user_client.is_connected():
-            await start_clients()
+        await _ensure_clients()
 
         # Если указан канал, получаем рекомендации для него
         if channel_username:
@@ -52,7 +63,7 @@ async def get_similar_channels_from_telegram(channel_username: Optional[str] = N
                 return similar_channels
 
             except Exception as e:
-                print(f"Ошибка при получении рекомендаций для канала {channel_username}: {e}")
+                logger.error("Error getting recommendations for channel %s: %s", channel_username, e)
                 return []
 
         # Если канал не указан, получаем глобальные рекомендации
@@ -67,7 +78,7 @@ async def get_similar_channels_from_telegram(channel_username: Optional[str] = N
             return similar_channels
 
     except Exception as e:
-        print(f"Ошибка при получении похожих каналов: {e}")
+        logger.error("Error getting similar channels: %s", e)
         return []
 
 
@@ -78,19 +89,17 @@ async def fetch_messages(include_today_processed_messages: bool = False) -> List
 
     # Загружаем историю обработанных сообщений
     processed_messages = load_summarization_history()
-    print(f"Загружено {len(processed_messages)} уже обработанных сообщений из истории")
+    logger.info("Loaded %d already processed messages from history", len(processed_messages))
 
     # Получаем объединенный список каналов
     all_channels = get_all_source_channels()
     random.shuffle(all_channels)
 
     # Ensure user client is running
-    global user_client
-    if user_client is None or not user_client.is_connected():
-        await start_clients()
+    await _ensure_clients()
 
     for channel in all_channels:
-        print(f"Fetching messages from {channel}...")
+        logger.info("Fetching messages from %s", channel)
         channel_msgs = []
         try:
             async for msg in user_client.iter_messages(
@@ -118,12 +127,12 @@ async def fetch_messages(include_today_processed_messages: bool = False) -> List
                         channel_msgs.append(message_info)
                         all_msgs.append(message_info)
                     else:
-                        print(f"  Пропускаем уже обработанное сообщение {msg.id} из {channel}")
+                        logger.debug("Skipping already processed message %s from %s", msg.id, channel)
 
-            print(f"  Found {len(channel_msgs)} новых сообщений from {channel}")
+            logger.info("Found %d new messages from %s", len(channel_msgs), channel)
         except Exception as e:
             logger.error(f"Error fetching messages from channel {channel}: {e}", exc_info=True)
-            print(f"  ⚠️ Error fetching messages from {channel}: {e}")
+            logger.error("Error fetching messages from %s: %s", channel, e)
             # Continue with next channel instead of failing entirely
             continue
     return all_msgs
@@ -136,18 +145,16 @@ async def fetch_group_messages(include_today_processed_messages: bool = False) -
 
     # Загружаем историю обработанных сообщений из групп
     processed_messages = load_group_summarization_history()
-    print(f"Загружено {len(processed_messages)} уже обработанных сообщений из групп из истории")
+    logger.info("Loaded %d already processed group messages from history", len(processed_messages))
 
     # Получаем список групп
     all_groups = SOURCE_GROUPS
 
     # Ensure user client is running
-    global user_client
-    if user_client is None or not user_client.is_connected():
-        await start_clients()
+    await _ensure_clients()
 
     for group in all_groups:
-        print(f"Fetching messages from group {group}...")
+        logger.info("Fetching messages from group %s", group)
         group_msgs = []
         try:
             async for msg in user_client.iter_messages(
@@ -175,12 +182,12 @@ async def fetch_group_messages(include_today_processed_messages: bool = False) -
                         group_msgs.append(message_info)
                         all_msgs.append(message_info)
                     else:
-                        print(f"  Пропускаем уже обработанное сообщение {msg.id} из группы {group}")
+                        logger.debug("Skipping already processed message %s from group %s", msg.id, group)
 
-            print(f"  Found {len(group_msgs)} новых сообщений from group {group}")
+            logger.info("Found %d new messages from group %s", len(group_msgs), group)
         except Exception as e:
             logger.error(f"Error fetching messages from group {group}: {e}", exc_info=True)
-            print(f"  ⚠️ Error fetching messages from group {group}: {e}")
+            logger.error("Error fetching messages from group %s: %s", group, e)
             # Continue with next group instead of failing entirely
             continue
     return all_msgs
@@ -191,13 +198,11 @@ async def send_message_to_target_channel(message: str) -> None:
     from config import TARGET_CHANNEL
 
     try:
-        global bot_client
-        if bot_client is None or not bot_client.is_connected():
-            await start_clients()
+        await _ensure_bot_client()
         await bot_client.send_message(TARGET_CHANNEL, message, parse_mode="html")
-        print("Message sent to target channel")
+        logger.info("Message sent to target channel")
     except Exception as e:
-        print(f"Error sending message to target channel: {e}")
+        logger.error("Error sending message to target channel: %s", e)
 
 
 async def edit_message_in_target_channel(message_id: int, new_message: str) -> None:
@@ -205,15 +210,13 @@ async def edit_message_in_target_channel(message_id: int, new_message: str) -> N
     from config import TARGET_CHANNEL
 
     try:
-        global bot_client
-        if bot_client is None or not bot_client.is_connected():
-            await start_clients()
+        await _ensure_bot_client()
         await bot_client.edit_message(
             TARGET_CHANNEL, message_id, new_message, parse_mode="html"
         )
-        print(f"Message {message_id} edited in target channel")
+        logger.info("Message %s edited in target channel", message_id)
     except Exception as e:
-        print(f"Error editing message {message_id} in target channel: {e}")
+        logger.error("Error editing message %s in target channel: %s", message_id, e)
 
 
 async def send_message_to_target_channel_with_id(message: str) -> Optional[int]:
@@ -221,16 +224,14 @@ async def send_message_to_target_channel_with_id(message: str) -> Optional[int]:
     from config import TARGET_CHANNEL
 
     try:
-        global bot_client
-        if bot_client is None or not bot_client.is_connected():
-            await start_clients()
+        await _ensure_bot_client()
         sent_message = await bot_client.send_message(
             TARGET_CHANNEL, message, parse_mode="html"
         )
-        print(f"Message sent to target channel with ID: {sent_message.id}")
+        logger.info("Message sent to target channel with ID: %s", sent_message.id)
         return sent_message.id
     except Exception as e:
-        print(f"Error sending message to target channel: {e}")
+        logger.error("Error sending message to target channel: %s", e)
         return None
 
 

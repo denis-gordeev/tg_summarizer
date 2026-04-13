@@ -1,7 +1,10 @@
 import json
 import os
+import logging
 
 from config import PROMPTS_FILE
+
+logger = logging.getLogger(__name__)
 
 
 class PromptManager:
@@ -184,7 +187,7 @@ class PromptManager:
                     custom_prompts = json.load(f)
                     self._prompts.update(custom_prompts)
             except (json.JSONDecodeError, IOError) as e:
-                print(f"Warning: Could not load or parse {prompts_file}: {e}")
+                logger.warning("Could not load or parse %s: %s", prompts_file, e)
 
     def __getattr__(self, name):
         """Allows accessing prompts as attributes."""

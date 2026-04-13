@@ -1,6 +1,9 @@
 import os
+import logging
 from pathlib import Path
 from typing import Iterable
+
+logger = logging.getLogger(__name__)
 
 
 DEFAULT_SYNC_FILES = (
@@ -21,7 +24,7 @@ def _get_s3_client():
     try:
         import boto3
     except ImportError:
-        print("boto3 is not installed; skipping S3 sync")
+        logger.error("boto3 is not installed; skipping S3 sync")
         return None
     return boto3.client("s3")
 
@@ -50,7 +53,7 @@ def _build_s3_key(prefix: str, relative_name: str) -> str:
 def download_from_s3() -> None:
     bucket = os.getenv("STATE_S3_BUCKET", "").strip()
     if not bucket:
-        print("STATE_S3_BUCKET is not set; skipping S3 download")
+        logger.debug("STATE_S3_BUCKET is not set; skipping S3 download")
         return
 
     client = _get_s3_client()
@@ -63,15 +66,15 @@ def download_from_s3() -> None:
         local_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             client.download_file(bucket, key, str(local_path))
-            print(f"Downloaded s3://{bucket}/{key} -> {local_path}")
+            logger.info("Downloaded s3://%s/%s -> %s", bucket, key, local_path)
         except Exception as exc:
-            print(f"Skipping download for s3://{bucket}/{key}: {exc}")
+            logger.debug("Skipping download for s3://%s/%s: %s", bucket, key, exc)
 
 
 def upload_to_s3() -> None:
     bucket = os.getenv("STATE_S3_BUCKET", "").strip()
     if not bucket:
-        print("STATE_S3_BUCKET is not set; skipping S3 upload")
+        logger.debug("STATE_S3_BUCKET is not set; skipping S3 upload")
         return
 
     client = _get_s3_client()
@@ -85,6 +88,6 @@ def upload_to_s3() -> None:
         key = _build_s3_key(prefix, relative_name)
         try:
             client.upload_file(str(local_path), bucket, key)
-            print(f"Uploaded {local_path} -> s3://{bucket}/{key}")
+            logger.info("Uploaded %s -> s3://%s/%s", local_path, bucket, key)
         except Exception as exc:
-            print(f"Failed to upload {local_path} to s3://{bucket}/{key}: {exc}")
+            logger.error("Failed to upload %s to s3://%s/%s: %s", local_path, bucket, key, exc)

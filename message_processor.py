@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import random
 import re
 from typing import List, Set
@@ -25,6 +26,8 @@ from channel_manager import (
     create_channel_abbreviation,
 )
 from prompts import prompts
+
+logger = logging.getLogger(__name__)
 
 
 def _calculate_channel_summary_limit(total_original_length: int) -> int:
@@ -117,10 +120,11 @@ def get_all_source_channels() -> List[str]:
 
     all_channels = list(all_channels_set)
     random.shuffle(all_channels)
-    print(
-        f"Используем {len(SOURCE_CHANNELS)} каналов из .env, "
-        f"{len(discovered_channels)} обнаруженных, {len(similar_channels)} похожих каналов "
-        f"(исключено {len(banned_channels)} заблокированных)"
+    logger.info(
+        "Using %d env channels, %d discovered, %d similar "
+        "(%d banned excluded)",
+        len(SOURCE_CHANNELS), len(discovered_channels),
+        len(similar_channels), len(banned_channels),
     )
     return all_channels
 
@@ -163,7 +167,7 @@ async def is_message_covered_in_summaries(msg: MessageInfo) -> bool:
         )
         return result.strip().upper() == "ДА"
     except Exception as e:
-        print(f"Ошибка при проверке покрытия в саммари: {e}")
+        logger.error("Error checking summary coverage: %s", e)
         return False
 
 
@@ -190,7 +194,7 @@ async def is_message_covered_in_group_summaries(msg: MessageInfo) -> bool:
         )
         return result.strip().upper() == "ДА"
     except Exception as e:
-        print(f"Ошибка при проверке покрытия в саммари групп: {e}")
+        logger.error("Error checking group summary coverage: %s", e)
         return False
 
 
@@ -216,13 +220,13 @@ async def _remove_duplicates_generic(
         links = extract_links(msg.text)
 
         if links and any(link in seen_links for link in links):
-            print(f"  Пропускаем дубликат по ссылке: {links[0]}")
+            logger.debug("Skipping link duplicate: %s", links[0])
             continue
 
         duplicate = False
         for u in unique_msgs:
             if SequenceMatcher(None, msg.text, u.text).ratio() > SIMILARITY_THRESHOLD:
-                print(f"  Пропускаем дубликат по тексту: {msg.text[:50]}...")
+                logger.debug("Skipping text duplicate: %s...", msg.text[:50])
                 duplicate = True
                 break
 
@@ -230,25 +234,25 @@ async def _remove_duplicates_generic(
             for u in unique_msgs:
                 try:
                     if await are_messages_duplicate(msg, u):
-                        print(f"  Пропускаем дубликат по LLM: {msg.text[:50]}...")
+                        logger.debug("Skipping LLM duplicate: %s...", msg.text[:50])
                         duplicate = True
                         break
                 except Exception as e:
-                    print(f"  Ошибка при проверке дубликата через LLM: {e}")
+                    logger.error("Error checking LLM duplicate: %s", e)
                     continue
 
         if not duplicate and ENABLE_SUMMARIES_DEDUPLICATION:
             try:
                 if await coverage_check_fn(msg):
-                    print(f"  Пропускаем {duplicate_label}: {msg.text[:50]}...")
+                    logger.debug("Skipping duplicate: %s...", msg.text[:50])
                     duplicate = True
             except Exception as e:
-                print(f"  Ошибка при проверке покрытия в саммари: {e}")
+                logger.error("Error checking coverage: %s", e)
 
         if not duplicate:
             unique_msgs.append(msg)
             seen_links.update(links)
-            print(f"  {unique_label}: {msg.text[:50]}...")
+            logger.debug("%s: %s...", unique_label, msg.text[:50])
 
     return unique_msgs
 
@@ -328,13 +332,12 @@ async def summarize_text(messages: List[MessageInfo]) -> str:
     if not result:
         return "Ошибка: Не удалось сгенерировать обобщение"
 
-    print(f"Длина исходного текста: {total_original_length} символов")
-    print(f"Длина саммари: {count_characters(result)} символов")
+    logger.debug("Source length: %d chars, summary: %d chars", total_original_length, count_characters(result))
 
     result = _replace_source_with_links(messages, result)
     result = enforce_summary_length(result, max_summary_length)
     if DEBUG:
-        print("result:", "=" * 100, "\n", result, "\n", "=" * 100, "\n")
+        logger.debug("Summary result:\n%s", result)
 
     return result
 
@@ -354,8 +357,7 @@ async def summarize_group_text(messages: List[MessageInfo]) -> str:
     if not result:
         return "Ошибка: Не удалось сгенерировать обобщение"
 
-    print(f"Длина исходного текста групп: {total_original_length} символов")
-    print(f"Длина саммари групп: {count_characters(result)} символов")
+    logger.debug("Group source length: %d chars, summary: %d chars", total_original_length, count_characters(result))
 
     result = _replace_source_with_links(messages, result)
 
@@ -366,7 +368,7 @@ async def summarize_group_text(messages: List[MessageInfo]) -> str:
     result = header + result
     result = enforce_summary_length(result, max_summary_length)
     if DEBUG:
-        print("group_result:", "=" * 100, "\n", result, "\n", "=" * 100, "\n")
+        logger.debug("Group summary result:\n%s", result)
     return result
 
 
@@ -386,10 +388,10 @@ async def process_messages(
     from telegram_client import send_message_to_target_channel_with_id
     from datetime import datetime, timezone
 
-    print(f"Fetched {len(messages)} new messages from {'groups' if is_group else 'channels'}")
+    logger.info("Fetched %d new messages from %s", len(messages), "groups" if is_group else "channels")
 
     if not messages:
-        print(f"No new messages found in {'groups' if is_group else 'channels'}")
+        logger.info("No new messages found in %s", "groups" if is_group else "channels")
         return
 
     all_checked_messages = []
@@ -397,20 +399,19 @@ async def process_messages(
 
     for i, msg in enumerate(messages):
         if DEBUG:
-            print(f"Checking message {i+1}/{len(messages)}...")
-            print("<" * 100)
-            print(f"msg: {msg.to_dict()}")
-            print(">" * 100)
+            logger.debug("Checking message %d/%d: %s", i + 1, len(messages), msg.to_dict())
+
         all_checked_messages.append(msg)
 
         # Проверяем, является ли сообщение NLP-релевантным
         msg.is_nlp_related, msg.is_nlp_related_reason = await is_nlp_related(msg.text)
 
-        is_nlp_related_message = "✅" if msg.is_nlp_related else "❌"
-        is_nlp_related_message += (
-            f" {msg.text} {msg.channel} {msg.message_id} \nReason: {msg.is_nlp_related_reason}"
-        )
-        print(is_nlp_related_message)
+        if DEBUG:
+            logger.debug(
+                "NLP check: %s | %s | %s | Reason: %s",
+                "✅" if msg.is_nlp_related else "❌",
+                msg.text[:80], msg.channel, msg.is_nlp_related_reason,
+            )
 
         if msg.is_nlp_related:
             if not is_group and msg.channel not in SOURCE_CHANNELS:
@@ -421,7 +422,7 @@ async def process_messages(
                 msg.is_covered_in_summaries = await is_message_covered_in_group_summaries(msg)
             else:
                 msg.is_covered_in_summaries = await is_message_covered_in_summaries(msg)
-            print(f"\tmsg.is_covered_in_summaries: {msg.is_covered_in_summaries}")
+            logger.debug("is_covered_in_summaries: %s", msg.is_covered_in_summaries)
             if msg.is_covered_in_summaries:
                 await process_covered_message(msg, is_group=is_group)
 
@@ -436,7 +437,7 @@ async def process_messages(
         message_id = None
         if send_message:
             message_id = await send_message_to_target_channel_with_id(summary)
-            print(f"{'Group' if is_group else 'Channel'} summary sent with ID: {message_id}")
+            logger.info("%s summary sent with ID: %s", "Group" if is_group else "Channel", message_id)
 
     if save_changes:
         if is_group:
@@ -447,7 +448,7 @@ async def process_messages(
             for channel in discovered_channels:
                 save_discovered_channel(channel)
             if discovered_channels:
-                print(f"Discovered {len(discovered_channels)} new channels: {discovered_channels}")
+                logger.info("Discovered %d new channels: %s", len(discovered_channels), discovered_channels)
         channels = list(set(msg.channel for msg in unique))
         if summary:
             summary_info = SummaryInfo(
@@ -459,12 +460,12 @@ async def process_messages(
             )
             if is_group:
                 save_group_summary_to_history(summary_info)
-                print(f"Group summary saved to history (groups: {channels})")
+                logger.info("Group summary saved to history (groups: %s)", channels)
                 update_group_last_run()
-                print("Group summarization completed for today")
+                logger.info("Group summarization completed for today")
             else:
                 save_summary_to_history(summary_info)
-                print(f"Channel summary saved to history (channels: {channels})")
+                logger.info("Channel summary saved to history (channels: %s)", channels)
 
 
 async def process_covered_message(msg: MessageInfo, is_group: bool = False):
@@ -477,22 +478,20 @@ async def process_covered_message(msg: MessageInfo, is_group: bool = False):
     )
 
     if not ENABLE_SUMMARY_UPDATES:
-        print(f"  Пропускаем уже освещенное сообщение: {msg.text[:50]}...")
+        logger.debug("Skipping already covered message: %s...", msg.text[:50])
         return
 
-    print(f"  Проверяем возможность обновления саммари для: {msg.text[:50]}...")
+    logger.debug("Checking summary update for: %s...", msg.text[:50])
 
     # Ищем подходящее саммари для обновления
     relevant_summary = await find_relevant_summary_for_update(msg, is_group)
     if relevant_summary:
-        print(f"  Найдено подходящее саммари для обновления")
-        print("relevant_summary:", "=" * 100, "\n", relevant_summary, "\n", "=" * 100, "\n")
+        logger.debug("Found relevant summary for update")
         updated_summary = await update_existing_summary(relevant_summary, msg, is_group)
-        print("updated_summary:", "=" * 100, "\n", updated_summary, "\n", "=" * 100, "\n")
         if updated_summary:
             await save_updated_summary(relevant_summary, updated_summary, is_group)
-            print(f"  Саммари обновлено с новым сообщением")
+            logger.info("Summary updated with new message")
         else:
-            print(f"  Не удалось обновить саммари")
+            logger.warning("Failed to update summary")
     else:
-        print(f"  Не найдено подходящее саммари для обновления")
+        logger.debug("No relevant summary found for update")

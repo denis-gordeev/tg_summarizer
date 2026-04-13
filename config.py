@@ -58,7 +58,7 @@ SOURCE_CHANNELS = set([c.strip() for c in source_channels_str.split(',') if c.st
 
 # Новые переменные для групп
 source_groups_str = os.getenv('SOURCE_GROUPS', '')
-SOURCE_GROUPS = [g.strip() for g in source_groups_str.split(',') if g.strip()]
+SOURCE_GROUPS = set([g.strip() for g in source_groups_str.split(',') if g.strip()])
 
 # File paths
 ABBREVIATIONS_FILE = os.getenv('ABBREVIATIONS_FILE', 'channel_abbreviations.json')

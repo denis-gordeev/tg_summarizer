@@ -2,6 +2,19 @@
 
 Живой список задач для автоматических раундов.
 
+## Completed in 2026-04-13 round (logging hardening & code quality)
+
+- **Критический баг**: Добавлен импорт `RESTORE_HISTORY_DAYS` в [`history_manager.py`](history_manager.py) — ранее функция восстановления истории падала с `NameError` при вызове.
+- Перенесены `_load_json_file()`, `_save_json_file()`, `now_iso()` в [`utils.py`](utils.py) как единый источник, устранено дублирование между [`history_manager.py`](history_manager.py) и [`channel_manager.py`](channel_manager.py) (~70 строк сокращено).
+- Lazy-init OpenAI клиента в [`utils.py`](utils.py): `openai_client` теперь инициализируется внутри `call_openai()`, а не при импорте модуля. Это упрощает тестирование и避免了 ошибки при отсутствии `OPENAI_API_KEY` на импорте.
+- Исправлена `save_updated_summary()` в [`history_manager.py`](history_manager.py): теперь использует `save_json_file()` вместо прямого `json.dump()`, добавлен `last_updated` timestamp.
+- Добавлен `logging.basicConfig()` в [`lambda_handler.py`](lambda_handler.py) для структурированного логирования в CloudWatch.
+- Конвертировано ~70 `print()` statements в `logging` across [`message_processor.py`](message_processor.py), [`summarizer.py`](summarizer.py), [`s3_sync.py`](s3_sync.py), [`telegram_client.py`](telegram_client.py), [`prompts.py`](prompts.py), [`history_manager.py`](history_manager.py), [`utils.py`](utils.py). DEBUG-уровень для отладочных сообщений, INFO для информационных, ERROR для ошибок.
+- Выделены хелперы `_ensure_clients()` и `_ensure_bot_client()` в [`telegram_client.py`](telegram_client.py), устранено дублирование проверки подключения клиента (~15 строк сокращено).
+- `SOURCE_GROUPS` теперь `set` вместо `list` в [`config.py`](config.py), что соответствует типу `SOURCE_CHANNELS` и предотвращает дубликаты.
+- Обновлён [`tests/test_openai_config.py`](tests/test_openai_config.py) для поддержки lazy-init OpenAI клиента.
+- Все 30 тестов проходят без ошибок.
+
 ## Completed in 2026-04-12 round 2 (code quality & refactoring)
 
 - Выделены универсальные функции `_load_json_file()`, `_save_json_file()` и `_now_iso()` в [`history_manager.py`](history_manager.py), устранено дублирование кода загрузки/сохранения JSON (~150 строк сокращено).
@@ -89,5 +102,7 @@
 
 - Настроить GitHub Actions CI/CD для автоматического деплоя Lambda при мердже в main.
 - Перенести чувствительные переменные в AWS SSM Parameter Store / Secrets Manager вместо env vars.
-- Консолидировать дублирующиеся функции в [`history_manager.py`](history_manager.py) и [`channel_manager.py`](channel_manager.py) (7 areas of code duplication identified, assessed as structurally different - extraction risky).
-- Оптимизировать дедупликацию: SequenceMatcher уже используется как primary filter, LLM только для borderline cases (already implemented, verified).
+- Оптимизировать дедупликацию: сузить band для LLM вызовов (SequenceMatcher < 0.7 — точно разные, > 0.95 — точно одинаковые, LLM только для 0.7-0.95).
+- Разделить `process_messages()` на более мелкие функции в [`message_processor.py`](message_processor.py) (120+ строк).
+- Перенести `get_all_source_channels()` из [`message_processor.py`](message_processor.py) в [`channel_manager.py`](channel_manager.py) для устранения циклического импорта.
+- Обновить `pyproject.toml`: заменить placeholder автора на реального.
