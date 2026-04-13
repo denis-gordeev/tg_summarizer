@@ -12,7 +12,8 @@ from telethon.tl.types import InputChannel  # type: ignore[reportMissingTypeStub
 
 from config import API_HASH, API_ID, BOT_TOKEN, SOURCE_GROUPS
 from history_manager import load_group_summarization_history, load_summarization_history
-from message_processor import get_all_source_channels, is_message_processed
+from channel_manager import get_all_source_channels
+from message_processor import is_message_processed
 from models import MessageInfo
 from utils import extract_links
 

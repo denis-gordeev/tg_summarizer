@@ -32,6 +32,7 @@ def _stub_dependencies():
     fake_channel_manager.load_similar_channels = lambda: []
     fake_channel_manager.load_banned_channels = lambda: []
     fake_channel_manager.create_channel_abbreviation = lambda channel: channel.lstrip("@")[:4]
+    fake_channel_manager.get_all_source_channels = lambda: []
     fake_history_manager = types.ModuleType("history_manager")
     fake_history_manager.get_recent_summaries_context = lambda: ""
     fake_history_manager.get_recent_group_summaries_context = lambda: ""

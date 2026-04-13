@@ -21,6 +21,8 @@ def _setup_stubs():
     # --- Stub config ---
     fake_config = types.ModuleType("config")
     fake_config.SIMILARITY_THRESHOLD = 0.85
+    fake_config.SIMILARITY_LLM_LOWER = 0.7
+    fake_config.SIMILARITY_LLM_UPPER = 0.95
     fake_config.ENABLE_SUMMARIES_DEDUPLICATION = False
     fake_config.OPENAI_CHANNEL_SUMMARY_MAX_TOKENS = 16000
     fake_config.OPENAI_GROUP_SUMMARY_MAX_TOKENS = 16000
@@ -59,6 +61,7 @@ def _setup_stubs():
     fake_cm.load_banned_channels = MagicMock(return_value=[])
     fake_cm.create_channel_abbreviation = lambda ch: ch.lstrip("@")[:5].upper()
     fake_cm.save_discovered_channel = MagicMock()
+    fake_cm.get_all_source_channels = lambda: []
     sys.modules["channel_manager"] = fake_cm
 
     # --- Stub prompts ---

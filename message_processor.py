@@ -8,6 +8,8 @@ from models import MessageInfo, SummaryInfo
 from utils import call_openai, extract_links, count_characters
 from config import (
     SIMILARITY_THRESHOLD,
+    SIMILARITY_LLM_LOWER,
+    SIMILARITY_LLM_UPPER,
     ENABLE_SUMMARIES_DEDUPLICATION,
     OPENAI_CHANNEL_SUMMARY_MAX_TOKENS,
     OPENAI_GROUP_SUMMARY_MAX_TOKENS,
@@ -24,6 +26,7 @@ from channel_manager import (
     load_similar_channels,
     load_banned_channels,
     create_channel_abbreviation,
+    get_all_source_channels,
 )
 from prompts import prompts
 
@@ -104,29 +107,6 @@ def enforce_summary_length(summary: str, max_visible_chars: int) -> str:
             return "\n\n".join(kept_blocks).strip()
 
     return _truncate_html_preserving_tags(summary, max_visible_chars)
-
-
-def get_all_source_channels() -> List[str]:
-    """Возвращает объединенный список каналов из .env, обнаруженных и похожих каналов."""
-    from config import SOURCE_CHANNELS
-
-    discovered_channels = set(load_discovered_channels())
-    similar_channels = set(load_similar_channels())
-    banned_channels = set(load_banned_channels())
-
-    # Исключаем заблокированные каналы
-    all_channels_set = SOURCE_CHANNELS | discovered_channels | similar_channels
-    all_channels_set = all_channels_set - banned_channels
-
-    all_channels = list(all_channels_set)
-    random.shuffle(all_channels)
-    logger.info(
-        "Using %d env channels, %d discovered, %d similar "
-        "(%d banned excluded)",
-        len(SOURCE_CHANNELS), len(discovered_channels),
-        len(similar_channels), len(banned_channels),
-    )
-    return all_channels
 
 
 def is_message_processed(msg: MessageInfo, processed_messages: Set[str]) -> bool:
@@ -212,7 +192,13 @@ async def _remove_duplicates_generic(
     unique_label: str,
     duplicate_label: str,
 ) -> List[MessageInfo]:
-    """Generic deduplication shared by channel and group message streams."""
+    """Generic deduplication shared by channel and group message streams.
+
+    Uses a three-band SequenceMatcher strategy to minimize LLM calls:
+    - ratio > SIMILARITY_LLM_UPPER (0.95): definite duplicate, no LLM
+    - ratio < SIMILARITY_LLM_LOWER (0.7): definite different, no LLM
+    - between: call LLM to decide
+    """
     unique_msgs: List[MessageInfo] = []
     seen_links = set()
 
@@ -225,16 +211,29 @@ async def _remove_duplicates_generic(
 
         duplicate = False
         for u in unique_msgs:
-            if SequenceMatcher(None, msg.text, u.text).ratio() > SIMILARITY_THRESHOLD:
-                logger.debug("Skipping text duplicate: %s...", msg.text[:50])
+            ratio = SequenceMatcher(None, msg.text, u.text).ratio()
+            if ratio > SIMILARITY_THRESHOLD:
+                logger.debug("Skipping text duplicate (ratio=%.2f): %s...", ratio, msg.text[:50])
                 duplicate = True
                 break
-
-        if not duplicate:
-            for u in unique_msgs:
+            if ratio > SIMILARITY_LLM_UPPER:
+                # Very similar but not quite — call LLM
                 try:
                     if await are_messages_duplicate(msg, u):
-                        logger.debug("Skipping LLM duplicate: %s...", msg.text[:50])
+                        logger.debug("Skipping LLM duplicate (ratio=%.2f): %s...", ratio, msg.text[:50])
+                        duplicate = True
+                        break
+                except Exception as e:
+                    logger.error("Error checking LLM duplicate: %s", e)
+                    continue
+            elif ratio < SIMILARITY_LLM_LOWER:
+                # Clearly different, no need to call LLM
+                continue
+            else:
+                # Ambiguous range — call LLM
+                try:
+                    if await are_messages_duplicate(msg, u):
+                        logger.debug("Skipping LLM duplicate (ratio=%.2f): %s...", ratio, msg.text[:50])
                         duplicate = True
                         break
                 except Exception as e:
@@ -372,11 +371,66 @@ async def summarize_group_text(messages: List[MessageInfo]) -> str:
     return result
 
 
-async def process_messages(
-    messages: List[MessageInfo], save_changes: bool, send_message: bool, is_group: bool = False
-):
-    """Processes a list of messages: filters, deduplicates, summarizes, and sends."""
-    from config import SOURCE_CHANNELS
+async def _classify_message(
+    msg: MessageInfo, is_group: bool, source_channels
+) -> tuple[set, bool]:
+    """Check NLP relevance, discover new channels, and check summary coverage.
+
+    Returns (discovered_channels_set, is_covered_in_summaries).
+    """
+    discovered = set()
+    msg.is_nlp_related, msg.is_nlp_related_reason = await is_nlp_related(msg.text)
+
+    if DEBUG:
+        logger.debug(
+            "NLP check: %s | %s | %s | Reason: %s",
+            "✅" if msg.is_nlp_related else "❌",
+            msg.text[:80], msg.channel, msg.is_nlp_related_reason,
+        )
+
+    if msg.is_nlp_related and not is_group and msg.channel not in source_channels:
+        discovered.add(msg.channel)
+
+    is_covered = False
+    if ENABLE_SUMMARIES_DEDUPLICATION and msg.is_nlp_related:
+        coverage_fn = (
+            is_message_covered_in_group_summaries if is_group
+            else is_message_covered_in_summaries
+        )
+        is_covered = await coverage_fn(msg)
+        msg.is_covered_in_summaries = is_covered
+        logger.debug("is_covered_in_summaries: %s", is_covered)
+        if is_covered:
+            await process_covered_message(msg, is_group=is_group)
+
+    return discovered, is_covered
+
+
+async def _create_summary_info(
+    summary: str, unique_messages: List[MessageInfo], message_id, is_group: bool
+) -> SummaryInfo:
+    """Create a SummaryInfo object from processed messages and summary."""
+    from datetime import datetime, timezone
+
+    channels = list(set(msg.channel for msg in unique_messages))
+    return SummaryInfo(
+        content=summary,
+        date=datetime.now(timezone.utc),
+        message_count=len(unique_messages),
+        channels=channels,
+        message_id=message_id,
+    )
+
+
+async def _save_processing_results(
+    all_checked_messages: List[MessageInfo],
+    unique_messages: List[MessageInfo],
+    summary: str,
+    message_id,
+    discovered_channels: set,
+    is_group: bool,
+) -> None:
+    """Save history, discovered channels, and summary info."""
     from history_manager import (
         save_summarization_history,
         save_group_summarization_history,
@@ -385,87 +439,73 @@ async def process_messages(
         update_group_last_run,
     )
     from channel_manager import save_discovered_channel
-    from telegram_client import send_message_to_target_channel_with_id
-    from datetime import datetime, timezone
 
-    logger.info("Fetched %d new messages from %s", len(messages), "groups" if is_group else "channels")
+    if all_checked_messages:
+        if is_group:
+            save_group_summarization_history(all_checked_messages)
+        else:
+            save_summarization_history(all_checked_messages)
+
+    if not is_group and discovered_channels:
+        for channel in discovered_channels:
+            save_discovered_channel(channel)
+        logger.info("Discovered %d new channels: %s", len(discovered_channels), discovered_channels)
+
+    if summary and unique_messages:
+        summary_info = await _create_summary_info(summary, unique_messages, message_id, is_group)
+        if is_group:
+            save_group_summary_to_history(summary_info)
+            logger.info("Group summary saved to history (groups: %s)", summary_info.channels)
+            update_group_last_run()
+            logger.info("Group summarization completed for today")
+        else:
+            save_summary_to_history(summary_info)
+            logger.info("Channel summary saved to history (channels: %s)", summary_info.channels)
+
+
+async def process_messages(
+    messages: List[MessageInfo], save_changes: bool, send_message: bool, is_group: bool = False
+):
+    """Processes a list of messages: filters, deduplicates, summarizes, and sends."""
+    from config import SOURCE_CHANNELS
+    from telegram_client import send_message_to_target_channel_with_id
+
+    stream_label = "groups" if is_group else "channels"
+    logger.info("Fetched %d new messages from %s", len(messages), stream_label)
 
     if not messages:
-        logger.info("No new messages found in %s", "groups" if is_group else "channels")
+        logger.info("No new messages found in %s", stream_label)
         return
 
-    all_checked_messages = []
-    discovered_channels = set()  # Only relevant for channels, but kept for consistency
+    all_checked_messages: List[MessageInfo] = []
+    discovered_channels: set = set()
+    unique_messages: List[MessageInfo] = []
 
-    for i, msg in enumerate(messages):
+    for msg in messages:
         if DEBUG:
-            logger.debug("Checking message %d/%d: %s", i + 1, len(messages), msg.to_dict())
+            logger.debug("Checking message: %s", msg.to_dict())
 
         all_checked_messages.append(msg)
+        disc, is_covered = await _classify_message(msg, is_group, SOURCE_CHANNELS)
+        discovered_channels.update(disc)
 
-        # Проверяем, является ли сообщение NLP-релевантным
-        msg.is_nlp_related, msg.is_nlp_related_reason = await is_nlp_related(msg.text)
+        if msg.is_nlp_related and not is_covered:
+            unique_messages.append(msg)
 
-        if DEBUG:
-            logger.debug(
-                "NLP check: %s | %s | %s | Reason: %s",
-                "✅" if msg.is_nlp_related else "❌",
-                msg.text[:80], msg.channel, msg.is_nlp_related_reason,
-            )
-
-        if msg.is_nlp_related:
-            if not is_group and msg.channel not in SOURCE_CHANNELS:
-                discovered_channels.add(msg.channel)
-        if ENABLE_SUMMARIES_DEDUPLICATION and msg.is_nlp_related:
-            msg.is_covered_in_summaries = False
-            if is_group:
-                msg.is_covered_in_summaries = await is_message_covered_in_group_summaries(msg)
-            else:
-                msg.is_covered_in_summaries = await is_message_covered_in_summaries(msg)
-            logger.debug("is_covered_in_summaries: %s", msg.is_covered_in_summaries)
-            if msg.is_covered_in_summaries:
-                await process_covered_message(msg, is_group=is_group)
-
-    unique = [
-        msg
-        for msg in all_checked_messages
-        if msg.is_nlp_related and not msg.is_covered_in_summaries
-    ]
     summary = None
-    if unique:
-        summary = await (summarize_group_text(unique) if is_group else summarize_text(unique))
-        message_id = None
+    message_id = None
+    if unique_messages:
+        summary_fn = summarize_group_text if is_group else summarize_text
+        summary = await summary_fn(unique_messages)
         if send_message:
             message_id = await send_message_to_target_channel_with_id(summary)
             logger.info("%s summary sent with ID: %s", "Group" if is_group else "Channel", message_id)
 
     if save_changes:
-        if is_group:
-            save_group_summarization_history(all_checked_messages)
-        else:
-            save_summarization_history(all_checked_messages)
-        if not is_group:  # Only save discovered channels for non-group messages
-            for channel in discovered_channels:
-                save_discovered_channel(channel)
-            if discovered_channels:
-                logger.info("Discovered %d new channels: %s", len(discovered_channels), discovered_channels)
-        channels = list(set(msg.channel for msg in unique))
-        if summary:
-            summary_info = SummaryInfo(
-                content=summary,
-                date=datetime.now(timezone.utc),
-                message_count=len(unique),
-                channels=channels,
-                message_id=message_id,
-            )
-            if is_group:
-                save_group_summary_to_history(summary_info)
-                logger.info("Group summary saved to history (groups: %s)", channels)
-                update_group_last_run()
-                logger.info("Group summarization completed for today")
-            else:
-                save_summary_to_history(summary_info)
-                logger.info("Channel summary saved to history (channels: %s)", channels)
+        await _save_processing_results(
+            all_checked_messages, unique_messages, summary, message_id,
+            discovered_channels, is_group,
+        )
 
 
 async def process_covered_message(msg: MessageInfo, is_group: bool = False):

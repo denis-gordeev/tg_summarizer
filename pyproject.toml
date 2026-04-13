@@ -3,7 +3,7 @@ name = "tg-summarizer"
 version = "0.1.0"
 description = "Автоматический сборщик и суммаризатор сообщений из Telegram-каналов с использованием OpenAI GPT."
 authors = [
-    {name = "Your Name",email = "you@example.com"}
+    {name = "Denis Gordeev",email = "degordeev@ecom.tech"}
 ]
 readme = "README.md"
 requires-python = ">=3.12"

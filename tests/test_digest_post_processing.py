@@ -39,6 +39,7 @@ def _stub_dependencies(fake_openai_response: str = "[1] New AI breakthrough"):
     fake_channel_manager.load_similar_channels = lambda: []
     fake_channel_manager.load_banned_channels = lambda: []
     fake_channel_manager.create_channel_abbreviation = lambda ch: ch.lstrip("@")[:4].upper()
+    fake_channel_manager.get_all_source_channels = lambda: ["@ai_news"]
     fake_history_manager = types.ModuleType("history_manager")
     fake_history_manager.get_recent_summaries_context = lambda: ""
     fake_history_manager.get_recent_group_summaries_context = lambda: ""

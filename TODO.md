@@ -2,6 +2,20 @@
 
 Живой список задач для автоматических раундов.
 
+## Completed in 2026-04-13 round 2 (dedup optimization & refactoring)
+
+- Оптимизирована дедупликация в [`message_processor.py`](message_processor.py): добавлена трёхзональная стратегия `SequenceMatcher` для минимизации LLM-вызовов:
+  - `ratio > SIMILARITY_LLM_UPPER` (0.95): почти дубликаты → вызов LLM
+  - `ratio < SIMILARITY_LLM_LOWER` (0.7): явно разные → без LLM
+  - Между зонами → вызов LLM
+- Добавлены константы `SIMILARITY_LLM_LOWER` и `SIMILARITY_LLM_UPPER` в [`config.py`](config.py) с возможностью переопределения через env.
+- Рефакторинг `process_messages()` в [`message_processor.py`](message_processor.py): выделены три функции — `_classify_message()`, `_create_summary_info()`, `_save_processing_results()`. Основная функция сокращена с 120+ строк до ~30, улучшена читаемость и тестируемость.
+- Перенесена `get_all_source_channels()` из [`message_processor.py`](message_processor.py) в [`channel_manager.py`](channel_manager.py) для устранения циклического импорта и логической группировки функций работы с каналами.
+- Обновлён импорт в [`telegram_client.py`](telegram_client.py): `get_all_source_channels` теперь импортируется из `channel_manager`.
+- Обновлён [`pyproject.toml`](pyproject.toml): placeholder автора заменён на реального (Denis Gordeev).
+- Обновлены тестовые стабы в [`tests/test_digest_post_processing.py`](tests/test_digest_post_processing.py), [`tests/test_process_messages_integration.py`](tests/test_process_messages_integration.py), [`tests/test_summary_length_guardrails.py`](tests/test_summary_length_guardrails.py) для поддержки новых импортов.
+- Все 30 тестов проходят без ошибок.
+
 ## Completed in 2026-04-13 round (logging hardening & code quality)
 
 - **Критический баг**: Добавлен импорт `RESTORE_HISTORY_DAYS` в [`history_manager.py`](history_manager.py) — ранее функция восстановления истории падала с `NameError` при вызове.
@@ -102,7 +116,4 @@
 
 - Настроить GitHub Actions CI/CD для автоматического деплоя Lambda при мердже в main.
 - Перенести чувствительные переменные в AWS SSM Parameter Store / Secrets Manager вместо env vars.
-- Оптимизировать дедупликацию: сузить band для LLM вызовов (SequenceMatcher < 0.7 — точно разные, > 0.95 — точно одинаковые, LLM только для 0.7-0.95).
-- Разделить `process_messages()` на более мелкие функции в [`message_processor.py`](message_processor.py) (120+ строк).
-- Перенести `get_all_source_channels()` из [`message_processor.py`](message_processor.py) в [`channel_manager.py`](channel_manager.py) для устранения циклического импорта.
-- Обновить `pyproject.toml`: заменить placeholder автора на реального.
+- Разделить `process_messages()` на более мелкие функции в [`message_processor.py`](message_processor.py) — частично выполнено, можно продолжить с `_replace_source_with_links` и `_prepare_messages_text`.

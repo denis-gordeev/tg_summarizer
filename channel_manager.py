@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import random
 import logging
 from datetime import datetime, timezone
 from config import ABBREVIATIONS_FILE, DISCOVERED_CHANNELS_FILE
@@ -107,3 +108,26 @@ def save_similar_channel(channel_name: str) -> None:
 def save_banned_channel(channel_name: str) -> None:
     """Сохраняет новый заблокированный канал в JSON файл."""
     _save_channel_list('banned_channels', channel_name, "Error saving banned channel")
+
+
+def get_all_source_channels() -> list[str]:
+    """Returns a merged list of channels from env, discovered, and similar channels."""
+    from config import SOURCE_CHANNELS
+
+    discovered_channels = set(load_discovered_channels())
+    similar_channels = set(load_similar_channels())
+    banned_channels = set(load_banned_channels())
+
+    # Exclude banned channels
+    all_channels_set = SOURCE_CHANNELS | discovered_channels | similar_channels
+    all_channels_set = all_channels_set - banned_channels
+
+    all_channels = list(all_channels_set)
+    random.shuffle(all_channels)
+    logger.info(
+        "Using %d env channels, %d discovered, %d similar "
+        "(%d banned excluded)",
+        len(SOURCE_CHANNELS), len(discovered_channels),
+        len(similar_channels), len(banned_channels),
+    )
+    return all_channels
