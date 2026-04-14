@@ -129,6 +129,9 @@
 
 ## Next actions
 
-- Настроить GitHub Actions CI/CD для автоматического деплоя Lambda при мердже в main.
-- Перенести чувствительные переменные в AWS SSM Parameter Store / Secrets Manager вместо env vars.
-- Разделить `process_messages()` на более мелкие функции в [`message_processor.py`](message_processor.py) — частично выполнено, можно продолжить с `_replace_source_with_links` и `_prepare_messages_text`.
+- **CI/CD**: Настроить GitHub Actions CI/CD для автоматического деплоя Lambda при мердже в main.
+- **Secrets management**: Перенести чувствительные переменные в AWS SSM Parameter Store / Secrets Manager вместо env vars.
+- **OpenAI retry logic**: Добавить retry с exponential backoff в `call_openai()` для обработки 429/5xx errors в Lambda.
+- **Config lazy validation**: Отложить валидацию env vars в `config.py` до момента использования (сейчас импорт падает без всех переменных).
+- **DLQ for Lambda**: Добавить SQS Dead Letter Queue в `template.yaml` для.failed Lambda invocations.
+- **Memory profiling**: Проверить использование памяти Lambda (сейчас 512 MB) и увеличить до 1024 MB при необходимости.
