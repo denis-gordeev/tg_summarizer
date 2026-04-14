@@ -4,7 +4,7 @@ import json
 import logging
 import os
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Set, Optional, Callable, TypeVar
+from typing import Any, Dict, List, Set, Optional
 
 from channel_manager import create_channel_abbreviation
 from config import (
@@ -26,8 +26,6 @@ from prompts import prompts
 from utils import call_openai, extract_links, load_json_file, save_json_file, now_iso
 
 logger = logging.getLogger(__name__)
-
-T = TypeVar("T")
 
 
 def load_summarization_history() -> Set[str]:
@@ -96,17 +94,17 @@ async def restore_summaries_from_channel() -> List[SummaryInfo]:
 
         # Получаем сообщения за последнюю неделю
         since = datetime.now(timezone.utc) - timedelta(days=RESTORE_HISTORY_DAYS)
-        logger.debug(f"Restoring summaries since {since}")
+        logger.debug("Restoring summaries since %s", since)
         summaries = []
 
-        logger.info(f"Reading messages from channel {TARGET_CHANNEL} for the last {RESTORE_HISTORY_DAYS} days...")
+        logger.info("Reading messages from channel %s for the last %d days...", TARGET_CHANNEL, RESTORE_HISTORY_DAYS)
 
         async for msg in tg.user_client.iter_messages(
             TARGET_CHANNEL, offset_date=None, min_id=0, reverse=False
         ):
             if msg.date < since:
                 break
-            logger.debug(f"Processing message: id={msg.id}, date={msg.date}")
+            logger.debug("Processing message: id=%d, date=%s", msg.id, msg.date)
             if msg.message and msg.message.strip():
                 # Все сообщения в канале - это саммари
                 # Извлекаем каналы из ссылок и аббревиатур в сообщении
@@ -124,7 +122,7 @@ async def restore_summaries_from_channel() -> List[SummaryInfo]:
                 )
                 summaries.append(summary_info)
 
-        logger.info(f"Restored {len(summaries)} summaries from channel")
+        logger.info("Restored %d summaries from channel", len(summaries))
         summaries = sorted(summaries, key=lambda x: x.date)
         # Сохраняем восстановленную историю
         if summaries:
@@ -158,7 +156,7 @@ def restore_summaries_from_channel_sync() -> List[SummaryInfo]:
             try:
                 return future.result(timeout=float(os.getenv("RESTORE_TIMEOUT_SEC", "30")))
             except Exception as wait_err:
-                logger.error(f"Restore: timeout/wait error: {wait_err}")
+                logger.error("Restore: timeout/wait error: %s", wait_err)
                 return []
         logger.debug("Restore: clients not running in separate loop")
         return []
@@ -172,11 +170,11 @@ def restore_summaries_from_channel_sync() -> List[SummaryInfo]:
             try:
                 return future.result(timeout=float(os.getenv("RESTORE_TIMEOUT_SEC", "30")))
             except Exception as wait_err:
-                logger.error(f"Restore: timeout/wait error: {wait_err}")
+                logger.error("Restore: timeout/wait error: %s", wait_err)
                 return []
         return asyncio.run(restore_summaries_from_channel())
     except Exception as e:
-        logger.error(f"Error restoring history from channel: {e}")
+        logger.error("Error restoring history from channel: %s", e)
         return []
 
 
@@ -192,7 +190,7 @@ async def restore_group_summaries_from_channel() -> List[SummaryInfo]:
         since = datetime.now(timezone.utc) - timedelta(days=RESTORE_HISTORY_DAYS)
         summaries = []
 
-        logger.info(f"Reading group summaries from channel {TARGET_CHANNEL} for the last {RESTORE_HISTORY_DAYS} days...")
+        logger.info("Reading group summaries from channel %s for the last %d days...", TARGET_CHANNEL, RESTORE_HISTORY_DAYS)
 
         async for msg in tg.user_client.iter_messages(
             TARGET_CHANNEL, offset_date=None, min_id=0, reverse=False
@@ -217,7 +215,7 @@ async def restore_group_summaries_from_channel() -> List[SummaryInfo]:
                 )
                 summaries.append(summary_info)
 
-        logger.info(f"Restored {len(summaries)} group summaries from channel")
+        logger.info("Restored %d group summaries from channel", len(summaries))
 
         summaries = sorted(summaries, key=lambda x: x.date)
         # Сохраняем восстановленную историю
@@ -229,7 +227,7 @@ async def restore_group_summaries_from_channel() -> List[SummaryInfo]:
         return summaries
 
     except Exception as e:
-        logger.error(f"Error restoring group summary history from channel: {e}")
+        logger.error("Error restoring group summary history from channel: %s", e)
         return []
 
 
@@ -254,7 +252,7 @@ def restore_group_summaries_from_channel_sync() -> List[SummaryInfo]:
             return future.result()
         return asyncio.run(restore_group_summaries_from_channel())
     except Exception as e:
-        logger.error(f"Error restoring group summary history from channel: {e}")
+        logger.error("Error restoring group summary history from channel: %s", e)
         return []
 
 
@@ -339,12 +337,12 @@ def should_run_group_summarization() -> bool:
 
         now = datetime.now(timezone.utc)
         time_since_last_run = (now - last_run).total_seconds()
-        logger.debug(f"Last run: {last_run}; now: {now}; time since last run: {time_since_last_run}")
+        logger.debug("Last run: %s; now: %s; time since last run: %.0f seconds", last_run, now, time_since_last_run)
 
         # Check if more than 24 hours have passed
         return time_since_last_run > GROUP_SUMMARIZATION_INTERVAL_SECONDS
     except (ValueError, TypeError) as e:
-        logger.error(f"Error parsing group last run time: {e}")
+        logger.error("Error parsing group last run time: %s", e)
         return False
 
 
@@ -439,7 +437,7 @@ async def find_relevant_summary_for_update(
             if 0 <= index < len(recent_summaries):
                 return recent_summaries[index]
     except Exception as e:
-        print(f"Ошибка при поиске подходящего саммари: {e}")
+        logger.error("Error finding relevant summary for update: %s", e)
 
     return None
 

@@ -3,7 +3,6 @@ import json
 import re
 import random
 import logging
-from datetime import datetime, timezone
 from config import ABBREVIATIONS_FILE, DISCOVERED_CHANNELS_FILE
 from utils import load_json_file, save_json_file, now_iso
 

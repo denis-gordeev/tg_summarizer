@@ -2,6 +2,21 @@
 
 Живой список задач для автоматических раундов.
 
+## Completed in 2026-04-14 round (Lambda hardening & test coverage)
+
+- **Lambda error handling**: Добавлен try/except в [`lambda_handler.handler()`](lambda_handler.py) — теперь ошибки суммаризации возвращают структурированный `{'status': 'error', 'error': str(e)}` вместо unhandled exception. State всё равно загружается в S3 при ошибке для сохранения частичных обновлений.
+- **Unused imports removed**: Удалены неиспользуемые импорты:
+  - `random` в [`message_processor.py`](message_processor.py)
+  - `Callable`, `TypeVar`, `T` в [`history_manager.py`](history_manager.py)
+  - `datetime`, `timezone` в [`channel_manager.py`](channel_manager.py)
+- **Logging hardening**: Конвертировано ~10 eager f-strings в [`history_manager.py`](history_manager.py) в lazy %-format (e.g. `logger.error("msg: %s", e)` вместо `logger.error(f"msg: {e}")`), что предотвращает вычисление строк при DEBUG-уровне.
+- **Print statement replaced**: Заменён module-level `print()` в [`history_manager.py`](history_manager.py) на `logger.error()` для структурированного логирования в CloudWatch.
+- **Tests added**: Создано 3 новых тестовых файла (+13 тестов, общее количество увеличено с 30 до 43):
+  - [`tests/test_history_manager.py`](tests/test_history_manager.py): тесты логики `should_run_group_summarization()` и извлечения контекста истории (2 теста)
+  - [`tests/test_channel_manager.py`](tests/test_channel_manager.py): тесты логики создания аббревиатур и слияния каналов (2 теста)
+  - [`tests/test_models.py`](tests/test_models.py): тесты сериализации/десериализации `MessageInfo` и `SummaryInfo` (9 тестов), включая регрессионный тест на восстановление `is_nlp_related_reason`
+- Все 43 теста проходят без ошибок.
+
 ## Completed in 2026-04-13 round 2 (dedup optimization & refactoring)
 
 - Оптимизирована дедупликация в [`message_processor.py`](message_processor.py): добавлена трёхзональная стратегия `SequenceMatcher` для минимизации LLM-вызовов:

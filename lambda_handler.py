@@ -48,15 +48,26 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         event.get('include_today_processed_messages'), False
     )
 
-    # Run the summarizer
-    asyncio.run(
-        run_summarizer(
-            send_message=send_message,
-            save_changes=save_changes,
-            include_today_processed_groups=include_today_processed_groups,
-            include_today_processed_messages=include_today_processed_messages,
+    try:
+        # Run the summarizer
+        asyncio.run(
+            run_summarizer(
+                send_message=send_message,
+                save_changes=save_changes,
+                include_today_processed_groups=include_today_processed_groups,
+                include_today_processed_messages=include_today_processed_messages,
+            )
         )
-    )
+    except Exception as e:
+        logger.error("Lambda execution failed: %s", e, exc_info=True)
+        # Push state to S3 even on failure to preserve partial updates
+        upload_to_s3()
+        return {
+            'status': 'error',
+            'error': str(e),
+            'send_message': send_message,
+            'save_changes': save_changes,
+        }
 
     # Push updated state back to S3
     upload_to_s3()
