@@ -2,8 +2,9 @@ import os
 import re
 import json
 import logging
+import time
 from datetime import datetime, timezone
-from openai import OpenAI
+from openai import OpenAI, APIError, RateLimitError, APIConnectionError
 from config import OPENAI_API_KEY, OPENAI_DEFAULT_MAX_TOKENS, OPENAI_MODEL
 
 logger = logging.getLogger(__name__)
@@ -19,7 +20,7 @@ def load_json_file(filepath: str, default: dict = None) -> dict:
         with open(filepath, 'r', encoding='utf-8') as f:
             return json.load(f)
     except Exception as e:
-        logger.error(f"Error loading {filepath}: {e}")
+        logger.error("Error loading %s: %s", filepath, e)
         return default
 
 
@@ -30,7 +31,7 @@ def save_json_file(filepath: str, data: dict, error_msg: str) -> bool:
             json.dump(data, f, ensure_ascii=False, indent=2)
         return True
     except Exception as e:
-        logger.error(f"{error_msg}: {e}")
+        logger.error("%s: %s", error_msg, e)
         return False
 
 
@@ -106,27 +107,48 @@ async def call_openai(
     system_prompt: str,
     user_content: str,
     max_tokens: int = OPENAI_DEFAULT_MAX_TOKENS,
+    max_retries: int = 3,
+    base_delay: float = 1.0,
 ) -> str:
-    """Универсальная функция для вызова OpenAI API."""
+    """Универсальная функция для вызова OpenAI API с retry и exponential backoff."""
     global openai_client
     if openai_client is None:
         openai_client = OpenAI(api_key=OPENAI_API_KEY)
-    try:
-        response = openai_client.chat.completions.create(
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content}
-            ],
-            model=OPENAI_MODEL,
-            max_tokens=max_tokens,
-        )
-        result = response.choices[0].message.content
-        if result is None:
+
+    for attempt in range(max_retries + 1):
+        try:
+            response = openai_client.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_content}
+                ],
+                model=OPENAI_MODEL,
+                max_tokens=max_tokens,
+            )
+            result = response.choices[0].message.content
+            if result is None:
+                return ""
+            return result.strip()
+        except (RateLimitError, APIConnectionError) as e:
+            if attempt < max_retries:
+                delay = base_delay * (2 ** attempt)
+                logger.warning("OpenAI retryable error (attempt %d/%d): %s; retrying in %.1fs", attempt + 1, max_retries + 1, e, delay)
+                time.sleep(delay)
+            else:
+                logger.error("OpenAI API error after %d retries: %s", max_retries, e)
+                return ""
+        except APIError as e:
+            if e.status_code and e.status_code >= 500 and attempt < max_retries:
+                delay = base_delay * (2 ** attempt)
+                logger.warning("OpenAI 5xx error (attempt %d/%d): %s; retrying in %.1fs", attempt + 1, max_retries + 1, e, delay)
+                time.sleep(delay)
+            else:
+                logger.error("OpenAI API error: %s", e)
+                return ""
+        except Exception as e:
+            logger.error("OpenAI API error: %s", e)
             return ""
-        return result.strip()
-    except Exception as e:
-        logger.error(f"OpenAI API error: {e}")
-        return ""
+    return ""
 
 
 def extract_links(text: str) -> list[str]:

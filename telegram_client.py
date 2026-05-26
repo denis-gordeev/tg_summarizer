@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import random
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Any
 
@@ -94,7 +93,6 @@ async def fetch_messages(include_today_processed_messages: bool = False) -> List
 
     # Получаем объединенный список каналов
     all_channels = get_all_source_channels()
-    random.shuffle(all_channels)
 
     # Ensure user client is running
     await _ensure_clients()
@@ -132,9 +130,7 @@ async def fetch_messages(include_today_processed_messages: bool = False) -> List
 
             logger.info("Found %d new messages from %s", len(channel_msgs), channel)
         except Exception as e:
-            logger.error(f"Error fetching messages from channel {channel}: {e}", exc_info=True)
-            logger.error("Error fetching messages from %s: %s", channel, e)
-            # Continue with next channel instead of failing entirely
+            logger.error("Error fetching messages from %s: %s", channel, e, exc_info=True)
             continue
     return all_msgs
 
@@ -187,9 +183,7 @@ async def fetch_group_messages(include_today_processed_messages: bool = False) -
 
             logger.info("Found %d new messages from group %s", len(group_msgs), group)
         except Exception as e:
-            logger.error(f"Error fetching messages from group {group}: {e}", exc_info=True)
-            logger.error("Error fetching messages from group %s: %s", group, e)
-            # Continue with next group instead of failing entirely
+            logger.error("Error fetching messages from group %s: %s", group, e, exc_info=True)
             continue
     return all_msgs
 

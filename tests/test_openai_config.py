@@ -21,6 +21,9 @@ def _reload_module(name: str):
     fake_dotenv.load_dotenv = lambda: None
     fake_openai = types.ModuleType("openai")
 
+    class FakeOpenAIError(Exception):
+        pass
+
     class FakeOpenAI:
         def __init__(self, api_key):
             self.api_key = api_key
@@ -29,6 +32,9 @@ def _reload_module(name: str):
             )
 
     fake_openai.OpenAI = FakeOpenAI
+    fake_openai.APIError = FakeOpenAIError
+    fake_openai.RateLimitError = type("RateLimitError", (FakeOpenAIError,), {"status_code": None})
+    fake_openai.APIConnectionError = type("APIConnectionError", (FakeOpenAIError,), {})
 
     with patch.dict(sys.modules, {"dotenv": fake_dotenv, "openai": fake_openai}):
         return importlib.import_module(name)

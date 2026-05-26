@@ -113,11 +113,16 @@ Resources:
       FunctionName: tg-summarizer
       CodeUri: .
       Handler: lambda_handler.handler
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt SummarizerDLQ.Arn
       Policies:
         - S3ReadPolicy:
             BucketName: !Ref StateBucket
         - S3WritePolicy:
             BucketName: !Ref StateBucket
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt SummarizerDLQ.QueueName
       Events:
         ScheduledRun:
           Type: Schedule
@@ -140,6 +145,12 @@ Resources:
     Condition: HasStateBucket
     Properties:
       BucketName: !Ref StateBucket
+
+  SummarizerDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${AWS::StackName}-dlq"
+      MessageRetentionPeriod: 1209600
 
   # CloudWatch Alarms for Lambda monitoring
   LambdaErrorsAlarm:

@@ -19,6 +19,9 @@ def _stub_dependencies():
     fake_dotenv.load_dotenv = lambda: None
     fake_openai = types.ModuleType("openai")
 
+    class FakeOpenAIError(Exception):
+        pass
+
     class FakeOpenAI:
         def __init__(self, api_key):
             self.api_key = api_key
@@ -27,6 +30,9 @@ def _stub_dependencies():
             )
 
     fake_openai.OpenAI = FakeOpenAI
+    fake_openai.APIError = FakeOpenAIError
+    fake_openai.RateLimitError = type("RateLimitError", (FakeOpenAIError,), {"status_code": None})
+    fake_openai.APIConnectionError = type("APIConnectionError", (FakeOpenAIError,), {})
     fake_channel_manager = types.ModuleType("channel_manager")
     fake_channel_manager.load_discovered_channels = lambda: []
     fake_channel_manager.load_similar_channels = lambda: []

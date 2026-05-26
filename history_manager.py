@@ -133,7 +133,7 @@ async def restore_summaries_from_channel() -> List[SummaryInfo]:
         return summaries
 
     except Exception as e:
-        logger.error(f"Error restoring history from channel: {e}")
+        logger.error("Error restoring history from channel: %s", e)
         return []
 
 

@@ -127,6 +127,18 @@
 - Обновлён [`AUTOWORK_INSTRUCTIONS.md`](AUTOWORK_INSTRUCTIONS.md): убрана устаревшая заметка "нет доки по Lambda" — теперь указаны ссылки на существующие `docs/aws-lambda-deployment.md`, `docs/aws-lambda-runbook.md` и `template.yaml`.
 - Все 30 тестов проходят без ошибок.
 
+## Completed in 2026-05-26 round (Lambda hardening round 2)
+
+- **Critical bug**: Added missing `logger = logging.getLogger(__name__)` in [`lambda_handler.py`](lambda_handler.py) — `logger` was used on line 62 but never defined, causing `NameError` on the error path instead of structured logging.
+- **OpenAI retry with exponential backoff**: Added retry logic in [`call_openai()`](utils.py) for `RateLimitError`, `APIConnectionError`, and 5xx `APIError`. Default: 3 retries with base delay 1s, doubling each attempt. This prevents Lambda failures on transient OpenAI API issues.
+- **Duplicate error logging fixed**: Removed duplicate `logger.error()` calls in [`telegram_client.py`](telegram_client.py) — both `fetch_messages()` and `fetch_group_messages()` were logging the same exception twice (once with f-string, once with %-format). Now uses single lazy %-format call.
+- **Lazy logging in utils.py**: Converted 2 remaining eager f-strings in `logger.error()` in [`utils.py`](utils.py) to lazy %-format (consistent with prior hardening in `history_manager.py`).
+- **Lazy logging in history_manager.py**: Converted 1 remaining eager f-string in `logger.error()` in [`history_manager.py`](history_manager.py) to lazy %-format.
+- **Double shuffle removed**: Removed redundant `random.shuffle(all_channels)` in [`telegram_client.py:fetch_messages()`](telegram_client.py) — channels are already shuffled in `get_all_source_channels()` in [`channel_manager.py`](channel_manager.py). Removed unused `import random`.
+- **SQS Dead Letter Queue**: Added `SummarizerDLQ` (SQS queue with 14-day retention) in [`template.yaml`](template.yaml) and wired it to the Lambda function's `DeadLetterQueue` config. Failed invocations are now captured for inspection instead of being silently dropped.
+- Updated test stubs in [`tests/test_openai_config.py`](tests/test_openai_config.py) and [`tests/test_summary_length_guardrails.py`](tests/test_summary_length_guardrails.py) to include `APIError`, `RateLimitError`, `APIConnectionError` in fake `openai` module.
+- All 43 tests pass without errors.
+
 ## Next actions
 
 - **CI/CD**: Настроить GitHub Actions CI/CD для автоматического деплоя Lambda при мердже в main.

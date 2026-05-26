@@ -11,6 +11,7 @@ logging.basicConfig(
     format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
 )
 
+logger = logging.getLogger(__name__)
 
 def _parse_event_flag(value: Any, default: bool) -> bool:
     if value is None:
