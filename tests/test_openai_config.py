@@ -68,6 +68,23 @@ class ConfigTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "OPENAI_DEFAULT_MAX_TOKENS"):
                 _reload_module("config")
 
+    def test_config_does_not_raise_on_import_without_env(self):
+        with patch.dict(os.environ, {}, clear=True):
+            config = _reload_module("config")
+        self.assertIsNone(config.API_ID)
+        self.assertIsNone(config.OPENAI_API_KEY)
+
+    def test_validate_config_raises_for_missing_vars(self):
+        with patch.dict(os.environ, {}, clear=True):
+            config = _reload_module("config")
+        with self.assertRaisesRegex(ValueError, "Missing required environment variables"):
+            config.validate_config()
+
+    def test_validate_config_passes_when_all_required_set(self):
+        with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+            config = _reload_module("config")
+        config.validate_config()
+
 
 class CallOpenAITests(unittest.IsolatedAsyncioTestCase):
     async def test_call_openai_uses_configured_model_and_default_token_limit(self):

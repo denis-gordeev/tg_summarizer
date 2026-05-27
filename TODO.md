@@ -139,11 +139,26 @@
 - Updated test stubs in [`tests/test_openai_config.py`](tests/test_openai_config.py) and [`tests/test_summary_length_guardrails.py`](tests/test_summary_length_guardrails.py) to include `APIError`, `RateLimitError`, `APIConnectionError` in fake `openai` module.
 - All 43 tests pass without errors.
 
+## Completed in 2026-05-27 round (config lazy validation & Lambda hardening round 3)
+
+- **Config lazy validation**: Refactored [`config.py`](config.py) — required env vars (`TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_BOT_TOKEN`, `TARGET_CHANNEL`, `OPENAI_API_KEY`) now default to `None` instead of raising `ValueError` at import time. New `validate_config()` function checks all required vars and raises a clear error listing all missing ones. Called at entry points: [`lambda_handler.handler()`](lambda_handler.py) and [`summarizer.main()`](summarizer.py). This allows importing config for testing without a full `.env` file and prevents premature failures on Lambda cold start.
+- **Lambda timeout guard**: Added wall-clock deadline tracking in [`lambda_handler.py`](lambda_handler.py) using `context.get_remaining_time_in_millis()` with a 10-second safety margin. Deadline is passed to [`run_summarizer()`](summarizer.py) as `_deadline` parameter. New `check_deadline()` and `DeadlineExceededError` in [`summarizer.py`](summarizer.py) — checked before channel processing and before group processing. When deadline is exceeded, the summarizer saves partial results and exits gracefully instead of being killed by Lambda timeout.
+- **Event loop blocking fix**: Replaced `time.sleep()` with `await asyncio.sleep()` in [`call_openai()`](utils.py) retry backoff. The previous synchronous sleep blocked the entire event loop during OpenAI retry delays, preventing any other async work from progressing.
+- **JSON format bug fix**: Fixed [`save_updated_summary()`](history_manager.py) — was saving raw list `[s.to_dict() for s in summaries]` instead of the expected `{"summaries": [...], "last_updated": "..."}` dict format, which would corrupt the file and cause parse errors on subsequent loads.
+- **Removed unused import**: Removed `import time` from [`utils.py`](utils.py) (replaced by `asyncio.sleep`).
+- **Tests added**: 4 new tests (total 47, up from 43):
+  - `test_config_does_not_raise_on_import_without_env`: verifies config import succeeds without env vars
+  - `test_validate_config_raises_for_missing_vars`: verifies `validate_config()` raises with clear message
+  - `test_validate_config_passes_when_all_required_set`: verifies `validate_config()` passes with all vars
+  - `test_handler_uses_context_remaining_time_for_deadline`: verifies Lambda context deadline calculation
+- Updated [`tests/test_lambda_handler.py`](tests/test_lambda_handler.py) to stub `config.validate_config` and verify `_deadline` parameter.
+- Updated [`tests/test_openai_config.py`](tests/test_openai_config.py) with new config validation tests.
+- All 47 tests pass without errors.
+
 ## Next actions
 
 - **CI/CD**: Настроить GitHub Actions CI/CD для автоматического деплоя Lambda при мердже в main.
-- **Secrets management**: Перенести чувствительные переменные в AWS SSM Parameter Store / Secrets Manager вместо env vars.
-- **OpenAI retry logic**: Добавить retry с exponential backoff в `call_openai()` для обработки 429/5xx errors в Lambda.
-- **Config lazy validation**: Отложить валидацию env vars в `config.py` до момента использования (сейчас импорт падает без всех переменных).
-- **DLQ for Lambda**: Добавить SQS Dead Letter Queue в `template.yaml` для.failed Lambda invocations.
+- **Secrets management**: Перенести чувствительные переменные в AWS SSM Parameter Store / Secrets Manager вместо env vars и template.yaml параметров.
 - **Memory profiling**: Проверить использование памяти Lambda (сейчас 512 MB) и увеличить до 1024 MB при необходимости.
+- **Prompt optimization**: Продолжить улучшение промптов для лаконичности саммари — текущие CHANNEL_SUMMARY_PROMPT и GROUP_SUMMARY_PROMPT можно сократить для снижения token consumption (в рамках лимита gpt-4o-mini).
+- **Dead code: restore_summaries_from_channel_sync**: Упростить сложную логику синхронизации event loop в [`history_manager.py`](history_manager.py) — текущая реализация с `run_coroutine_threadsafe` и множеством веток хрупка.

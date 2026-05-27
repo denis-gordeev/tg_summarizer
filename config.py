@@ -17,33 +17,46 @@ def _get_int_env(name: str, default: int) -> int:
     return parsed
 
 
-# Get environment variables with proper error handling
-api_id_str = os.getenv('TELEGRAM_API_ID')
-if not api_id_str:
-    raise ValueError("TELEGRAM_API_ID environment variable is required")
-API_ID = int(api_id_str)
+_REQUIRED_VARS = {
+    "TELEGRAM_API_ID": "API_ID",
+    "TELEGRAM_API_HASH": "API_HASH",
+    "TELEGRAM_BOT_TOKEN": "BOT_TOKEN",
+    "TARGET_CHANNEL": "TARGET_CHANNEL",
+    "OPENAI_API_KEY": "OPENAI_API_KEY",
+}
 
-api_hash = os.getenv('TELEGRAM_API_HASH')
-if not api_hash:
-    raise ValueError("TELEGRAM_API_HASH environment variable is required")
-API_HASH = api_hash
+_api_id_str = os.getenv('TELEGRAM_API_ID')
+API_ID = int(_api_id_str) if _api_id_str else None
 
-bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
-if not bot_token:
-    raise ValueError("TELEGRAM_BOT_TOKEN environment variable is required")
-BOT_TOKEN = bot_token
+API_HASH = os.getenv('TELEGRAM_API_HASH') or None
 
-target_channel = os.getenv('TARGET_CHANNEL')
-if not target_channel:
-    raise ValueError("TARGET_CHANNEL environment variable is required")
-TARGET_CHANNEL: int | str = target_channel
+BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN') or None
+
+_target_channel = os.getenv('TARGET_CHANNEL') or None
+TARGET_CHANNEL: int | str | None = _target_channel
 if isinstance(TARGET_CHANNEL, str) and TARGET_CHANNEL.startswith("-"):
     TARGET_CHANNEL = int(TARGET_CHANNEL)
 
-openai_api_key = os.getenv('OPENAI_API_KEY')
-if not openai_api_key:
-    raise ValueError("OPENAI_API_KEY environment variable is required")
-OPENAI_API_KEY = openai_api_key
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY') or None
+
+
+def validate_config() -> None:
+    """Validate that all required environment variables are set.
+
+    Call this at entry points (lambda handler, CLI) before doing real work.
+    Importing the module alone will NOT raise — this allows testing and
+    partial module loading without a full .env file.
+    """
+    missing = []
+    for env_name, attr_name in _REQUIRED_VARS.items():
+        if globals().get(attr_name) is None:
+            missing.append(env_name)
+    if missing:
+        raise ValueError(
+            f"Missing required environment variables: {', '.join(missing)}"
+        )
+
+
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 OPENAI_DEFAULT_MAX_TOKENS = _get_int_env("OPENAI_DEFAULT_MAX_TOKENS", 300)
 OPENAI_CHANNEL_SUMMARY_MAX_TOKENS = _get_int_env(

@@ -1,8 +1,8 @@
 import os
 import re
 import json
+import asyncio
 import logging
-import time
 from datetime import datetime, timezone
 from openai import OpenAI, APIError, RateLimitError, APIConnectionError
 from config import OPENAI_API_KEY, OPENAI_DEFAULT_MAX_TOKENS, OPENAI_MODEL
@@ -133,7 +133,7 @@ async def call_openai(
             if attempt < max_retries:
                 delay = base_delay * (2 ** attempt)
                 logger.warning("OpenAI retryable error (attempt %d/%d): %s; retrying in %.1fs", attempt + 1, max_retries + 1, e, delay)
-                time.sleep(delay)
+                await asyncio.sleep(delay)
             else:
                 logger.error("OpenAI API error after %d retries: %s", max_retries, e)
                 return ""
@@ -141,7 +141,7 @@ async def call_openai(
             if e.status_code and e.status_code >= 500 and attempt < max_retries:
                 delay = base_delay * (2 ** attempt)
                 logger.warning("OpenAI 5xx error (attempt %d/%d): %s; retrying in %.1fs", attempt + 1, max_retries + 1, e, delay)
-                time.sleep(delay)
+                await asyncio.sleep(delay)
             else:
                 logger.error("OpenAI API error: %s", e)
                 return ""

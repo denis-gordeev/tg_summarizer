@@ -1,9 +1,12 @@
 import os
 import logging
 import asyncio
+import time
 from typing import Any, Dict
 from s3_sync import download_from_s3, upload_to_s3
 from summarizer import run_summarizer
+
+SAFETY_MARGIN_SECONDS = 10
 
 # Configure structured logging for CloudWatch
 logging.basicConfig(
@@ -30,6 +33,9 @@ def _parse_event_flag(value: Any, default: bool) -> bool:
 
 
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    from config import validate_config
+    validate_config()
+
     # Ensure we can write files (sessions, history) in Lambda
     try:
         os.chdir('/tmp')
@@ -49,6 +55,12 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         event.get('include_today_processed_messages'), False
     )
 
+    # Compute a hard deadline so we never exceed Lambda timeout
+    if context is not None and hasattr(context, 'get_remaining_time_in_millis'):
+        deadline = time.monotonic() + context.get_remaining_time_in_millis() / 1000.0 - SAFETY_MARGIN_SECONDS
+    else:
+        deadline = time.monotonic() + 180 - SAFETY_MARGIN_SECONDS
+
     try:
         # Run the summarizer
         asyncio.run(
@@ -57,6 +69,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 save_changes=save_changes,
                 include_today_processed_groups=include_today_processed_groups,
                 include_today_processed_messages=include_today_processed_messages,
+                _deadline=deadline,
             )
         )
     except Exception as e:

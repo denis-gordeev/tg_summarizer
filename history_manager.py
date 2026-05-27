@@ -508,7 +508,6 @@ async def save_updated_summary(
 
     if is_group:
         summaries = load_group_summaries_history()
-        # Находим индекс оригинального саммари
         for i, summary in enumerate(summaries):
             if (
                 summary.content == original_summary.content
@@ -518,25 +517,25 @@ async def save_updated_summary(
                 summaries[i] = updated_summary
                 break
 
-        # Сохраняем обновленную историю
+        all_summaries_dict = [s.to_dict() for s in summaries]
+        data = {"summaries": all_summaries_dict, "last_updated": now_iso()}
         save_json_file(
             GROUP_SUMMARIES_HISTORY_FILE,
-            [s.to_dict() for s in summaries],
+            data,
             "Error saving updated group summary history",
         )
     else:
         summaries = load_summaries_history()
-        # Находим индекс оригинального саммари
         for i, summary in enumerate(summaries):
             if summary.content == original_summary.content:
                 summaries[i] = updated_summary
-                logger.debug("updated_summary: %s", updated_summary)
                 break
 
-        # Сохраняем обновленную историю
+        all_summaries_dict = [s.to_dict() for s in summaries]
+        data = {"summaries": all_summaries_dict, "last_updated": now_iso()}
         save_json_file(
             SUMMARIES_HISTORY_FILE,
-            [s.to_dict() for s in summaries],
+            data,
             "Error saving updated summary history",
         )
 
