@@ -84,7 +84,6 @@ GROUP_LAST_RUN_FILE = os.getenv('GROUP_LAST_RUN_FILE', 'group_last_run.json')
 PROMPTS_FILE = os.getenv("PROMPTS_FILE", "prompts.json")
 
 # Constants
-SIMILARITY_THRESHOLD = 0.9
 SIMILARITY_LLM_LOWER = float(os.getenv("SIMILARITY_LLM_LOWER", "0.7"))
 SIMILARITY_LLM_UPPER = float(os.getenv("SIMILARITY_LLM_UPPER", "0.95"))
 ENABLE_SUMMARIES_DEDUPLICATION = True

@@ -1,12 +1,12 @@
 import hashlib
 import logging
 import re
+from datetime import datetime, timezone
 from typing import List, Set
 from difflib import SequenceMatcher
 from models import MessageInfo, SummaryInfo
 from utils import call_openai, extract_links, count_characters
 from config import (
-    SIMILARITY_THRESHOLD,
     SIMILARITY_LLM_LOWER,
     SIMILARITY_LLM_UPPER,
     ENABLE_SUMMARIES_DEDUPLICATION,
@@ -211,33 +211,20 @@ async def _remove_duplicates_generic(
         duplicate = False
         for u in unique_msgs:
             ratio = SequenceMatcher(None, msg.text, u.text).ratio()
-            if ratio > SIMILARITY_THRESHOLD:
+            if ratio > SIMILARITY_LLM_UPPER:
                 logger.debug("Skipping text duplicate (ratio=%.2f): %s...", ratio, msg.text[:50])
                 duplicate = True
                 break
-            if ratio > SIMILARITY_LLM_UPPER:
-                # Very similar but not quite — call LLM
-                try:
-                    if await are_messages_duplicate(msg, u):
-                        logger.debug("Skipping LLM duplicate (ratio=%.2f): %s...", ratio, msg.text[:50])
-                        duplicate = True
-                        break
-                except Exception as e:
-                    logger.error("Error checking LLM duplicate: %s", e)
-                    continue
-            elif ratio < SIMILARITY_LLM_LOWER:
-                # Clearly different, no need to call LLM
+            if ratio < SIMILARITY_LLM_LOWER:
                 continue
-            else:
-                # Ambiguous range — call LLM
-                try:
-                    if await are_messages_duplicate(msg, u):
-                        logger.debug("Skipping LLM duplicate (ratio=%.2f): %s...", ratio, msg.text[:50])
-                        duplicate = True
-                        break
-                except Exception as e:
-                    logger.error("Error checking LLM duplicate: %s", e)
-                    continue
+            try:
+                if await are_messages_duplicate(msg, u):
+                    logger.debug("Skipping LLM duplicate (ratio=%.2f): %s...", ratio, msg.text[:50])
+                    duplicate = True
+                    break
+            except Exception as e:
+                logger.error("Error checking LLM duplicate: %s", e)
+                continue
 
         if not duplicate and ENABLE_SUMMARIES_DEDUPLICATION:
             try:
@@ -408,9 +395,6 @@ async def _classify_message(
 async def _create_summary_info(
     summary: str, unique_messages: List[MessageInfo], message_id, is_group: bool
 ) -> SummaryInfo:
-    """Create a SummaryInfo object from processed messages and summary."""
-    from datetime import datetime, timezone
-
     channels = list(set(msg.channel for msg in unique_messages))
     return SummaryInfo(
         content=summary,

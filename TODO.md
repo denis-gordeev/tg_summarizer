@@ -155,6 +155,23 @@
 - Updated [`tests/test_openai_config.py`](tests/test_openai_config.py) with new config validation tests.
 - All 47 tests pass without errors.
 
+## Completed in 2026-05-28 round (dedup bug fix & prompt optimization)
+
+- **Critical bug**: Fixed three-band dedup logic in [`message_processor.py`](message_processor.py) — `SIMILARITY_THRESHOLD` (0.9) was checked before `SIMILARITY_LLM_UPPER` (0.95), making the upper band unreachable. Messages with ratio 0.9–0.95 were incorrectly auto-marked as duplicates without LLM verification. Now: ratio > UPPER (0.95) → auto-duplicate, LOWER (0.7) < ratio ≤ UPPER → LLM check, ratio ≤ LOWER → auto-different.
+- **Removed SIMILARITY_THRESHOLD**: Deleted redundant `SIMILARITY_THRESHOLD = 0.9` from [`config.py`](config.py) — replaced by the two-band `SIMILARITY_LLM_LOWER` / `SIMILARITY_LLM_UPPER` constants. Updated [`tests/test_process_messages_integration.py`](tests/test_process_messages_integration.py) stubs accordingly.
+- **Prompt optimization**: Reduced all prompts in [`prompts.py`](prompts.py) by ~50% (token savings):
+  - `CHANNEL_SUMMARY_PROMPT`: 31 lines → 12 lines (removed redundant "ВАЖНО" prefixes, consolidated formatting rules)
+  - `GROUP_SUMMARY_PROMPT`: 33 lines → 13 lines (same consolidation, kept group-specific rule about unanswered questions)
+  - `NLP_RELEVANCE_PROMPT`: 44 lines → 24 lines (merged overlapping categories, compacted formatting)
+  - `SUMMARY_COVERAGE_CHECK_PROMPT` / `GROUP_SUMMARY_COVERAGE_CHECK_PROMPT`: removed verbose "Ты эксперт" framing, kept essential rules and examples
+  - `DUPLICATE_CHECK_PROMPT`: minor wording cleanup
+- **Clean up**: Moved `from datetime import datetime, timezone` to module-level in [`message_processor.py`](message_processor.py), removed local import in `_create_summary_info()`.
+- **Simplified `_run_async_with_loop`**: Extracted shared helper in [`history_manager.py`](history_manager.py) replacing 60+ lines of duplicated event-loop detection in `restore_summaries_from_channel_sync()` and `restore_group_summaries_from_channel_sync()` with a single 25-line function handling all three cases (no loop, same loop, different loop).
+- **Tests added**: 2 new tests (total 49, up from 47):
+  - `test_three_band_dedup_upper_threshold_uses_llm`: verifies ambiguous-ratio messages call LLM
+  - `test_three_band_dedup_near_identical_skips_llm`: verifies near-identical messages auto-deduplicate without LLM
+- All 49 tests pass without errors.
+
 ## Next actions
 
 - **CI/CD**: Настроить GitHub Actions CI/CD для автоматического деплоя Lambda при мердже в main.

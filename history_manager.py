@@ -137,45 +137,49 @@ async def restore_summaries_from_channel() -> List[SummaryInfo]:
         return []
 
 
-def restore_summaries_from_channel_sync() -> List[SummaryInfo]:
-    """Синхронная обёртка для restore_summaries_from_channel."""
+def _run_async_with_loop(coro):
+    """Run an async coroutine from sync context, handling event loop edge cases.
+
+    Three scenarios:
+    1. No running loop → asyncio.run() (fresh event loop)
+    2. Running loop matches clients_loop → skip (would deadlock)
+    3. Running loop differs from clients_loop → run_coroutine_threadsafe
+    """
     import telegram_client as tg
     tg_loop = getattr(tg, "clients_loop", None)
-    
+
     try:
         current_loop = asyncio.get_running_loop()
-        # We're inside a running event loop
-        if tg_loop and tg_loop.is_running():
-            if tg_loop is current_loop:
-                logger.debug("Restore: same event loop, skipping to avoid deadlock")
-                return []
-            logger.debug("Restore: clients running in separate loop")
-            future = asyncio.run_coroutine_threadsafe(
-                restore_summaries_from_channel(), tg_loop
-            )
-            try:
-                return future.result(timeout=float(os.getenv("RESTORE_TIMEOUT_SEC", "30")))
-            except Exception as wait_err:
-                logger.error("Restore: timeout/wait error: %s", wait_err)
-                return []
-        logger.debug("Restore: clients not running in separate loop")
-        return []
     except RuntimeError:
-        # No event loop in current thread
+        current_loop = None
+
+    if current_loop is None:
         if tg_loop and tg_loop.is_running():
-            logger.debug("Restore: clients running in separate loop (RuntimeError path)")
-            future = asyncio.run_coroutine_threadsafe(
-                restore_summaries_from_channel(), tg_loop
-            )
+            future = asyncio.run_coroutine_threadsafe(coro, tg_loop)
             try:
                 return future.result(timeout=float(os.getenv("RESTORE_TIMEOUT_SEC", "30")))
-            except Exception as wait_err:
-                logger.error("Restore: timeout/wait error: %s", wait_err)
+            except Exception as e:
+                logger.error("Restore: timeout/wait error: %s", e)
                 return []
-        return asyncio.run(restore_summaries_from_channel())
-    except Exception as e:
-        logger.error("Error restoring history from channel: %s", e)
+        return asyncio.run(coro)
+
+    if tg_loop is current_loop:
+        logger.debug("Restore: same event loop, skipping to avoid deadlock")
         return []
+
+    if tg_loop and tg_loop.is_running():
+        future = asyncio.run_coroutine_threadsafe(coro, tg_loop)
+        try:
+            return future.result(timeout=float(os.getenv("RESTORE_TIMEOUT_SEC", "30")))
+        except Exception as e:
+            logger.error("Restore: timeout/wait error: %s", e)
+            return []
+
+    return []
+
+
+def restore_summaries_from_channel_sync() -> List[SummaryInfo]:
+    return _run_async_with_loop(restore_summaries_from_channel())
 
 
 async def restore_group_summaries_from_channel() -> List[SummaryInfo]:
@@ -232,28 +236,7 @@ async def restore_group_summaries_from_channel() -> List[SummaryInfo]:
 
 
 def restore_group_summaries_from_channel_sync() -> List[SummaryInfo]:
-    """Синхронная обертка для восстановления истории групповых саммари из канала."""
-    import telegram_client as tg
-    tg_loop = getattr(tg, "clients_loop", None)
-    try:
-        asyncio.get_running_loop()
-        if tg_loop and tg_loop.is_running():
-            future = asyncio.run_coroutine_threadsafe(
-                restore_group_summaries_from_channel(), tg_loop
-            )
-            return future.result()
-        logger.debug("Restore group summaries: clients not running in separate loop")
-        return []
-    except RuntimeError:
-        if tg_loop and tg_loop.is_running():
-            future = asyncio.run_coroutine_threadsafe(
-                restore_group_summaries_from_channel(), tg_loop
-            )
-            return future.result()
-        return asyncio.run(restore_group_summaries_from_channel())
-    except Exception as e:
-        logger.error("Error restoring group summary history from channel: %s", e)
-        return []
+    return _run_async_with_loop(restore_group_summaries_from_channel())
 
 
 def save_summary_to_history(summary: SummaryInfo) -> None:

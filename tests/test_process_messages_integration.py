@@ -1,3 +1,4 @@
+import asyncio
 import importlib
 import sys
 import types
@@ -20,7 +21,6 @@ def _setup_stubs():
 
     # --- Stub config ---
     fake_config = types.ModuleType("config")
-    fake_config.SIMILARITY_THRESHOLD = 0.85
     fake_config.SIMILARITY_LLM_LOWER = 0.7
     fake_config.SIMILARITY_LLM_UPPER = 0.95
     fake_config.ENABLE_SUMMARIES_DEDUPLICATION = False
@@ -230,6 +230,43 @@ class ProcessMessagesIntegrationTests(unittest.TestCase):
             self._run_pipeline(messages, save_changes=True, send_message=True, is_group=False)
 
             fake_tg_call.assert_called_once()
+
+    def test_three_band_dedup_upper_threshold_uses_llm(self):
+        """Messages with ratio between LOWER and UPPER should call LLM, not auto-duplicate."""
+        base_text = "A detailed article about machine learning and neural networks " * 5
+        similar_text = "A detailed article about machine learning and neural networks " * 4 + "A different topic entirely about space exploration "
+
+        messages = [
+            _make_message(text=base_text, channel="@ch", message_id=1),
+            _make_message(text=similar_text, channel="@ch", message_id=2),
+        ]
+
+        self._fake_config.ENABLE_SUMMARIES_DEDUPLICATION = False
+
+        with patch.object(self.mp, "are_messages_duplicate", new_callable=AsyncMock) as mock_dup:
+            mock_dup.return_value = False
+
+            result = asyncio.run(self.mp.remove_duplicates(messages))
+
+            self.assertTrue(mock_dup.called, "LLM duplicate check should be called for ambiguous ratio")
+
+    def test_three_band_dedup_near_identical_skips_llm(self):
+        """Nearly identical messages (ratio > UPPER) should be auto-deduplicated without LLM."""
+        base_text = "This is a detailed article about transformer models in NLP research " * 5
+        near_identical = base_text + " extra"
+
+        messages = [
+            _make_message(text=base_text, channel="@ch", message_id=1),
+            _make_message(text=near_identical, channel="@ch", message_id=2),
+        ]
+
+        self._fake_config.ENABLE_SUMMARIES_DEDUPLICATION = False
+
+        with patch.object(self.mp, "are_messages_duplicate", new_callable=AsyncMock) as mock_dup:
+            result = asyncio.run(self.mp.remove_duplicates(messages))
+
+            self.assertFalse(mock_dup.called, "LLM should NOT be called for near-identical messages")
+            self.assertEqual(len(result), 1, "Near-identical message should be auto-deduplicated")
 
 
 if __name__ == "__main__":
