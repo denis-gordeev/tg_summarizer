@@ -142,8 +142,11 @@ async def call_openai(
                 delay = base_delay * (2 ** attempt)
                 logger.warning("OpenAI 5xx error (attempt %d/%d): %s; retrying in %.1fs", attempt + 1, max_retries + 1, e, delay)
                 await asyncio.sleep(delay)
+            elif e.status_code and e.status_code in (401, 403):
+                logger.error("OpenAI auth error (status %d): check OPENAI_API_KEY — %s", e.status_code, e)
+                return ""
             else:
-                logger.error("OpenAI API error: %s", e)
+                logger.error("OpenAI API error (status %s): %s", getattr(e, 'status_code', '?'), e)
                 return ""
         except Exception as e:
             logger.error("OpenAI API error: %s", e)

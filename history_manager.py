@@ -20,6 +20,8 @@ from config import (
     MAX_GROUP_SUMMARIES,
     GROUP_SUMMARIZATION_INTERVAL_SECONDS,
     RESTORE_HISTORY_DAYS,
+    COVERAGE_CHECK_MAX_SUMMARIES,
+    COVERAGE_CHECK_MAX_CHARS_PER_SUMMARY,
 )
 from models import MessageInfo, SummaryInfo
 from prompts import prompts
@@ -106,13 +108,10 @@ async def restore_summaries_from_channel() -> List[SummaryInfo]:
                 break
             logger.debug("Processing message: id=%d, date=%s", msg.id, msg.date)
             if msg.message and msg.message.strip():
-                # Все сообщения в канале - это саммари
-                # Извлекаем каналы из ссылок и аббревиатур в сообщении
                 from utils import extract_all_channels
 
                 channels = extract_all_channels(msg.text)
 
-                # Создаем SummaryInfo из сообщения
                 summary_info = SummaryInfo(
                     content=msg.text,
                     date=msg.date,
@@ -203,15 +202,12 @@ async def restore_group_summaries_from_channel() -> List[SummaryInfo]:
                 break
 
             if msg.message and msg.message.strip():
-                # Все сообщения в канале - это саммари
-                # Извлекаем каналы из ссылок и аббревиатур в сообщении
                 from utils import extract_all_channels
 
-                channels = extract_all_channels(msg.message)
+                channels = extract_all_channels(msg.text)
 
-                # Создаем SummaryInfo из сообщения
                 summary_info = SummaryInfo(
-                    content=msg.message,
+                    content=msg.text,
                     date=msg.date,
                     message_count=0,  # Не можем определить количество исходных сообщений
                     channels=channels,  # Извлекаем каналы из ссылок и аббревиатур
@@ -344,18 +340,19 @@ def get_recent_group_summaries_context(days: int = 7) -> str:
     if not summaries:
         return ""
 
-    # Фильтруем саммари за последние N дней
     cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
     recent_summaries = [s for s in summaries if s.date >= cutoff_date]
 
     if not recent_summaries:
         return ""
 
-    # Объединяем содержимое саммари
+    recent_summaries = recent_summaries[-COVERAGE_CHECK_MAX_SUMMARIES:]
+
     context_parts = []
     for summary in recent_summaries:
+        truncated = summary.content[:COVERAGE_CHECK_MAX_CHARS_PER_SUMMARY]
         context_parts.append(f"Дата: {summary.date.strftime('%Y-%m-%d')}")
-        context_parts.append(f"Содержание: {summary.content}")
+        context_parts.append(f"Содержание: {truncated}")
         context_parts.append("---")
 
     return "\n".join(context_parts)
@@ -368,14 +365,15 @@ def get_recent_summaries_context(days: int = 3) -> str:
     if not summaries:
         return ""
 
-    # Фильтруем саммари за последние N дней
     cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
     recent_summaries = [s for s in summaries if s.date >= cutoff_date]
 
     if not recent_summaries:
         return ""
 
-    return "\n\n".join([m.content for m in recent_summaries])
+    recent_summaries = recent_summaries[-COVERAGE_CHECK_MAX_SUMMARIES:]
+
+    return "\n\n".join(s.content[:COVERAGE_CHECK_MAX_CHARS_PER_SUMMARY] for s in recent_summaries)
 
 
 async def find_relevant_summary_for_update(

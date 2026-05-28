@@ -36,6 +36,10 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     from config import validate_config
     validate_config()
 
+    request_id = getattr(context, 'aws_request_id', None) if context else None
+    if request_id:
+        logger.info("Lambda invocation %s", request_id)
+
     # Ensure we can write files (sessions, history) in Lambda
     try:
         os.chdir('/tmp')
@@ -79,6 +83,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         return {
             'status': 'error',
             'error': str(e),
+            'request_id': request_id,
             'send_message': send_message,
             'save_changes': save_changes,
         }
@@ -88,6 +93,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
     return {
         'status': 'ok',
+        'request_id': request_id,
         'send_message': send_message,
         'save_changes': save_changes,
         'include_today_processed_groups': include_today_processed_groups,

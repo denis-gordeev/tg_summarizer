@@ -48,21 +48,26 @@ class HistoryContextLogicTests(unittest.TestCase):
 
     def test_recent_summaries_context_logic(self):
         """Test the context extraction logic without file I/O."""
+        max_summaries = 10
+        max_chars = 300
+
         def extract_context(summaries, days=3):
             if not summaries:
                 return ""
-            
+
             cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
             recent = [s for s in summaries if s['date'] >= cutoff_date]
-            
+
             if not recent:
                 return ""
-            
-            return "\n\n".join([s['content'] for s in recent])
-        
+
+            recent = recent[-max_summaries:]
+
+            return "\n\n".join(s['content'][:max_chars] for s in recent)
+
         # Test empty list
         self.assertEqual(extract_context([]), "")
-        
+
         # Test old summaries
         old_summaries = [
             {
@@ -71,7 +76,7 @@ class HistoryContextLogicTests(unittest.TestCase):
             }
         ]
         self.assertEqual(extract_context(old_summaries, days=3), "")
-        
+
         # Test recent summaries
         recent_summaries = [
             {
@@ -86,6 +91,49 @@ class HistoryContextLogicTests(unittest.TestCase):
         result = extract_context(recent_summaries, days=3)
         self.assertIn("Recent AI news", result)
         self.assertIn("Recent ML update", result)
+
+        # Test truncation of long content
+        long_summaries = [
+            {
+                'content': "X" * 1000,
+                'date': datetime.now(timezone.utc)
+            }
+        ]
+        result = extract_context(long_summaries, days=3)
+        self.assertEqual(len(result), max_chars)
+
+        # Test limit on number of summaries
+        many_summaries = [
+            {
+                'content': f"Summary {i}",
+                'date': datetime.now(timezone.utc) - timedelta(hours=i)
+            }
+            for i in range(20)
+        ]
+        result = extract_context(many_summaries, days=3)
+        self.assertIn("Summary 19", result)
+        self.assertNotIn("Summary 0", result)
+
+    def test_coverage_check_limits_from_config(self):
+        """Verify that COVERAGE_CHECK_MAX_SUMMARIES and COVERAGE_CHECK_MAX_CHARS_PER_SUMMARY exist in config."""
+        import importlib
+        import sys
+        import types
+        from unittest.mock import patch
+        import os
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, {}, clear=True):
+                sys.modules.pop("config", None)
+                config = importlib.import_module("config")
+
+        self.assertIsInstance(config.COVERAGE_CHECK_MAX_SUMMARIES, int)
+        self.assertIsInstance(config.COVERAGE_CHECK_MAX_CHARS_PER_SUMMARY, int)
+        self.assertGreater(config.COVERAGE_CHECK_MAX_SUMMARIES, 0)
+        self.assertGreater(config.COVERAGE_CHECK_MAX_CHARS_PER_SUMMARY, 0)
 
 
 if __name__ == '__main__':

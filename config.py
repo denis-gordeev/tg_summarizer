@@ -107,5 +107,9 @@ GROUP_SUMMARY_MIN_LENGTH = 2000
 GROUP_SUMMARY_MAX_LENGTH = 12000
 TEXT_PREVIEW_LENGTH = 50
 
+# Coverage check context limits (major cost optimization)
+COVERAGE_CHECK_MAX_SUMMARIES = int(os.getenv("COVERAGE_CHECK_MAX_SUMMARIES", "10"))
+COVERAGE_CHECK_MAX_CHARS_PER_SUMMARY = int(os.getenv("COVERAGE_CHECK_MAX_CHARS_PER_SUMMARY", "300"))
+
 # Debug mode (set DEBUG=1 in environment to enable verbose logging)
 DEBUG = os.getenv("DEBUG", "").lower() in {"1", "true", "yes"}

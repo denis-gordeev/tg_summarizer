@@ -28,12 +28,12 @@ Parameters:
   TelegramApiId:
     Type: String
     Description: Telegram API ID from my.telegram.org
-    NoEcho: false
+    NoEcho: true
   
   TelegramApiHash:
     Type: String
     Description: Telegram API Hash from my.telegram.org
-    NoEcho: false
+    NoEcho: true
   
   TelegramBotToken:
     Type: String
@@ -113,6 +113,7 @@ Resources:
       FunctionName: tg-summarizer
       CodeUri: .
       Handler: lambda_handler.handler
+      ReservedConcurrentExecutions: 1
       DeadLetterQueue:
         Type: SQS
         TargetArn: !GetAtt SummarizerDLQ.Arn

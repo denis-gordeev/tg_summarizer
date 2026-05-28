@@ -80,6 +80,7 @@ class HandlerTests(unittest.TestCase):
             result,
             {
                 "status": "ok",
+                "request_id": None,
                 "send_message": False,
                 "save_changes": True,
                 "include_today_processed_groups": True,
@@ -110,6 +111,28 @@ class HandlerTests(unittest.TestCase):
         now = time.monotonic()
         self.assertGreater(call_kwargs["_deadline"], now)
         self.assertLess(call_kwargs["_deadline"], now + 60)
+
+    def test_handler_includes_request_id_in_response(self):
+        event = {"send_message": True, "save_changes": True}
+
+        async_mock = AsyncMock()
+
+        def _run_and_close(coro):
+            coro.close()
+
+        fake_context = types.SimpleNamespace(
+            aws_request_id="test-req-123",
+            get_remaining_time_in_millis=lambda: 180000,
+        )
+
+        with patch.object(self.lambda_handler.os, "chdir"), \
+             patch.object(self.lambda_handler, "download_from_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.object(self.lambda_handler, "run_summarizer", async_mock), \
+             patch.object(self.lambda_handler.asyncio, "run", side_effect=_run_and_close):
+            result = self.lambda_handler.handler(event, context=fake_context)
+
+        self.assertEqual(result["request_id"], "test-req-123")
 
 
 if __name__ == "__main__":

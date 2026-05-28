@@ -172,10 +172,29 @@
   - `test_three_band_dedup_near_identical_skips_llm`: verifies near-identical messages auto-deduplicate without LLM
 - All 49 tests pass without errors.
 
+## Completed in 2026-05-28 round 2 (cost optimization, security hardening, prompt quality)
+
+- **Major cost optimization — coverage check context truncation**: Added `COVERAGE_CHECK_MAX_SUMMARIES` (default 10) and `COVERAGE_CHECK_MAX_CHARS_PER_SUMMARY` (default 300) in [`config.py`](config.py). Applied in [`get_recent_summaries_context()`](history_manager.py) and [`get_recent_group_summaries_context()`](history_manager.py) — previously, these functions could send up to ~200K chars (channel) and ~1.2M chars (group) as input tokens to a yes/no coverage check LLM call. Now capped at ~3000 chars, saving ~90-99% input tokens on coverage checks.
+- **Security: template.yaml NoEcho**: Set `NoEcho: true` on `TelegramApiId` and `TelegramApiHash` parameters in [`template.yaml`](template.yaml) — previously `NoEcho: false`, exposing credentials in CloudFormation console and API responses.
+- **Security: Reserved concurrency**: Added `ReservedConcurrentExecutions: 1` to Lambda function in [`template.yaml`](template.yaml) — prevents concurrent invocations that could corrupt S3 state (non-atomic read-modify-write).
+- **Prompt optimization round 2**: Further reduced token consumption in [`prompts.py`](prompts.py):
+  - `FIND_RELEVANT_SUMMARY_PROMPT`: removed unnecessary "Ты эксперт по анализу текстов" framing
+  - `CHANNEL_SUMMARY_PROMPT` / `GROUP_SUMMARY_PROMPT`: tightened emoji rule (1–5 → 1–3, removed 2 of 3 verbose example headers), merged redundant lines
+  - `NLP_RELEVANCE_PROMPT`: consolidated overlapping categories (e.g., merged "Sam Altman, Mark Zuckerberg — любые новости" into BigTech line, removed "Незнакомые термины" catch-all), reduced by ~25%
+- **Consistency fix**: Changed `restore_group_summaries_from_channel()` in [`history_manager.py`](history_manager.py) to use `msg.text` instead of `msg.message` for `content` and `extract_all_channels` — now consistent with the channel restore function. `msg.text` handles None safely.
+- **OpenAI auth error clarity**: Added distinct logging for 401/403 auth errors in [`call_openai()`](utils.py) — now logs "OpenAI auth error (status 401): check OPENAI_API_KEY" instead of generic "OpenAI API error", making Lambda CloudWatch diagnostics faster.
+- **Lambda request ID traceability**: Added `aws_request_id` to Lambda response and log output in [`lambda_handler.py`](lambda_handler.py) — enables correlating CloudWatch logs with Lambda invocation records.
+- **Tests added**: 2 new tests (total 51, up from 49):
+  - `test_handler_includes_request_id_in_response`: verifies request_id in Lambda response
+  - `test_coverage_check_limits_from_config`: verifies COVERAGE_CHECK_MAX_SUMMARIES and COVERAGE_CHECK_MAX_CHARS_PER_SUMMARY in config
+- Updated [`tests/test_lambda_handler.py`](tests/test_lambda_handler.py) for request_id in response structure.
+- Updated [`tests/test_history_manager.py`](tests/test_history_manager.py) with context truncation tests.
+- All 51 tests pass without errors.
+
 ## Next actions
 
 - **CI/CD**: Настроить GitHub Actions CI/CD для автоматического деплоя Lambda при мердже в main.
 - **Secrets management**: Перенести чувствительные переменные в AWS SSM Parameter Store / Secrets Manager вместо env vars и template.yaml параметров.
 - **Memory profiling**: Проверить использование памяти Lambda (сейчас 512 MB) и увеличить до 1024 MB при необходимости.
-- **Prompt optimization**: Продолжить улучшение промптов для лаконичности саммари — текущие CHANNEL_SUMMARY_PROMPT и GROUP_SUMMARY_PROMPT можно сократить для снижения token consumption (в рамках лимита gpt-4o-mini).
 - **Dead code: restore_summaries_from_channel_sync**: Упростить сложную логику синхронизации event loop в [`history_manager.py`](history_manager.py) — текущая реализация с `run_coroutine_threadsafe` и множеством веток хрупка.
+- **Prompt optimization round 3**: Продолжить A/B тестирование промптов — можно уменьшить `OPENAI_CHANNEL_SUMMARY_MAX_TOKENS` с 16000 до ~4000 (соответствует `SUMMARY_MAX_LENGTH` в 4000 символов при ~2-3 токенах/символ для русского), что снизит стоимость output токенов при многословных ответах модели.
