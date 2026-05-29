@@ -22,6 +22,8 @@ from config import (
     RESTORE_HISTORY_DAYS,
     COVERAGE_CHECK_MAX_SUMMARIES,
     COVERAGE_CHECK_MAX_CHARS_PER_SUMMARY,
+    UPDATE_MATCH_MAX_SUMMARIES,
+    UPDATE_MATCH_MAX_CHARS_PER_SUMMARY,
 )
 from models import MessageInfo, SummaryInfo
 from prompts import prompts
@@ -84,22 +86,21 @@ def load_summaries_history() -> List[SummaryInfo]:
     return summaries
 
 
-async def restore_summaries_from_channel() -> List[SummaryInfo]:
-    """Восстанавливает историю саммари из канала, читая сообщения за последнюю неделю."""
+async def _restore_summaries_from_channel(
+    history_file: str, label: str
+) -> List[SummaryInfo]:
+    """Restore summaries from the target Telegram channel for the last N days."""
     try:
         import telegram_client as tg
-        # Запускаем клиент если не запущен
         if tg.user_client is None or not tg.user_client.is_connected():
             logger.info("Starting Telegram client...")
             await tg.start_clients()
-            logger.info("Telegram client started")
 
-        # Получаем сообщения за последнюю неделю
         since = datetime.now(timezone.utc) - timedelta(days=RESTORE_HISTORY_DAYS)
-        logger.debug("Restoring summaries since %s", since)
+        logger.debug("Restoring %s since %s", label, since)
         summaries = []
 
-        logger.info("Reading messages from channel %s for the last %d days...", TARGET_CHANNEL, RESTORE_HISTORY_DAYS)
+        logger.info("Reading %s from channel %s for the last %d days...", label, TARGET_CHANNEL, RESTORE_HISTORY_DAYS)
 
         async for msg in tg.user_client.iter_messages(
             TARGET_CHANNEL, offset_date=None, min_id=0, reverse=False
@@ -115,35 +116,36 @@ async def restore_summaries_from_channel() -> List[SummaryInfo]:
                 summary_info = SummaryInfo(
                     content=msg.text,
                     date=msg.date,
-                    message_count=0,  # Не можем определить количество исходных сообщений
-                    channels=channels,  # Извлекаем каналы из ссылок и аббревиатур
+                    message_count=0,
+                    channels=channels,
                     message_id=msg.id,
                 )
                 summaries.append(summary_info)
 
-        logger.info("Restored %d summaries from channel", len(summaries))
+        logger.info("Restored %d %s from channel", len(summaries), label)
         summaries = sorted(summaries, key=lambda x: x.date)
-        # Сохраняем восстановленную историю
         if summaries:
             all_summaries = [summary.to_dict() for summary in summaries]
             data = {"summaries": all_summaries, "last_updated": now_iso()}
-            save_json_file(SUMMARIES_HISTORY_FILE, data, "Error saving restored summary history")
+            save_json_file(history_file, data, f"Error saving restored {label}")
 
         return summaries
 
     except Exception as e:
-        logger.error("Error restoring history from channel: %s", e)
+        logger.error("Error restoring %s from channel: %s", label, e)
         return []
 
 
-def _run_async_with_loop(coro):
-    """Run an async coroutine from sync context, handling event loop edge cases.
+async def restore_summaries_from_channel() -> List[SummaryInfo]:
+    return await _restore_summaries_from_channel(SUMMARIES_HISTORY_FILE, "summaries")
 
-    Three scenarios:
-    1. No running loop → asyncio.run() (fresh event loop)
-    2. Running loop matches clients_loop → skip (would deadlock)
-    3. Running loop differs from clients_loop → run_coroutine_threadsafe
-    """
+
+async def restore_group_summaries_from_channel() -> List[SummaryInfo]:
+    return await _restore_summaries_from_channel(GROUP_SUMMARIES_HISTORY_FILE, "group summaries")
+
+
+def _run_async_with_loop(coro):
+    """Run an async coroutine from sync context, handling event loop edge cases."""
     import telegram_client as tg
     tg_loop = getattr(tg, "clients_loop", None)
 
@@ -179,56 +181,6 @@ def _run_async_with_loop(coro):
 
 def restore_summaries_from_channel_sync() -> List[SummaryInfo]:
     return _run_async_with_loop(restore_summaries_from_channel())
-
-
-async def restore_group_summaries_from_channel() -> List[SummaryInfo]:
-    """Восстанавливает историю групповых саммари из канала."""
-    try:
-        import telegram_client as tg
-        # Запускаем клиент если не запущен
-        if tg.user_client is None or not tg.user_client.is_connected():
-            await tg.start_clients()
-
-        # Получаем сообщения за последнюю неделю
-        since = datetime.now(timezone.utc) - timedelta(days=RESTORE_HISTORY_DAYS)
-        summaries = []
-
-        logger.info("Reading group summaries from channel %s for the last %d days...", TARGET_CHANNEL, RESTORE_HISTORY_DAYS)
-
-        async for msg in tg.user_client.iter_messages(
-            TARGET_CHANNEL, offset_date=None, min_id=0, reverse=False
-        ):
-            if msg.date < since:
-                break
-
-            if msg.message and msg.message.strip():
-                from utils import extract_all_channels
-
-                channels = extract_all_channels(msg.text)
-
-                summary_info = SummaryInfo(
-                    content=msg.text,
-                    date=msg.date,
-                    message_count=0,  # Не можем определить количество исходных сообщений
-                    channels=channels,  # Извлекаем каналы из ссылок и аббревиатур
-                    message_id=msg.id,
-                )
-                summaries.append(summary_info)
-
-        logger.info("Restored %d group summaries from channel", len(summaries))
-
-        summaries = sorted(summaries, key=lambda x: x.date)
-        # Сохраняем восстановленную историю
-        if summaries:
-            all_summaries = [summary.to_dict() for summary in summaries]
-            data = {"summaries": all_summaries, "last_updated": now_iso()}
-            save_json_file(GROUP_SUMMARIES_HISTORY_FILE, data, "Error saving restored group summary history")
-
-        return summaries
-
-    except Exception as e:
-        logger.error("Error restoring group summary history from channel: %s", e)
-        return []
 
 
 def restore_group_summaries_from_channel_sync() -> List[SummaryInfo]:
@@ -391,13 +343,12 @@ async def find_relevant_summary_for_update(
     if not summaries:
         return None
 
-    # Берем последние 3 саммари для поиска
-    recent_summaries = summaries[-50:]
+    recent_summaries = summaries[-UPDATE_MATCH_MAX_SUMMARIES:]
 
-    # Создаем контекст для поиска
     summaries_text = ""
     for i, summary in enumerate(recent_summaries, 1):
-        summaries_text += f"Саммари {i}:\n{summary.content}\n\n"
+        truncated = summary.content[:UPDATE_MATCH_MAX_CHARS_PER_SUMMARY]
+        summaries_text += f"Саммари {i}:\n{truncated}\n\n"
 
     user_content = f"""Существующие саммари:
 {summaries_text}

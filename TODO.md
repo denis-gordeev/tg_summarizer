@@ -172,6 +172,19 @@
   - `test_three_band_dedup_near_identical_skips_llm`: verifies near-identical messages auto-deduplicate without LLM
 - All 49 tests pass without errors.
 
+## Completed in 2026-05-29 round (dedup bug fix, cost optimization, code dedup)
+
+- **Critical bug**: Fixed `are_messages_duplicate()` in [`message_processor.py`](message_processor.py) — was checking `answer.lower().startswith("y")` but `DUPLICATE_CHECK_PROMPT` asks "Ответь да или нет" (Russian). The LLM responds "да"/"нет", never "yes" — so LLM deduplication was **always skipped**. Changed to `answer.strip().lower().startswith("да")` and increased `max_tokens` from 1 to 3 to capture the Russian response.
+- **Cost optimization — max output tokens**: Reduced `OPENAI_CHANNEL_SUMMARY_MAX_TOKENS` and `OPENAI_GROUP_SUMMARY_MAX_TOKENS` defaults from 16000 to 4000 in [`config.py`](config.py) and [`template.yaml`](template.yaml). With `SUMMARY_MAX_LENGTH=4000` chars and ~2-3 tokens/char for Russian, 4000 tokens is sufficient. This reduces output token cost by ~75% when the model generates verbose responses.
+- **Cost optimization — update match truncation**: Added `UPDATE_MATCH_MAX_SUMMARIES` (default 5) and `UPDATE_MATCH_MAX_CHARS_PER_SUMMARY` (default 500) in [`config.py`](config.py). Applied in [`find_relevant_summary_for_update()`](history_manager.py) — previously sent last 50 full summaries as context (~50K+ chars). Now capped at ~2500 chars, saving ~95% input tokens on update match LLM calls.
+- **Code dedup**: Merged `restore_summaries_from_channel()` and `restore_group_summaries_from_channel()` in [`history_manager.py`](history_manager.py) into shared `_restore_summaries_from_channel(history_file, label)` helper. Eliminated ~50 lines of duplicated async restore logic.
+- **Tests added**: 4 new tests (total 55, up from 51):
+  - `test_are_messages_duplicate_recognizes_russian_yes`: verifies "да" is recognized as duplicate
+  - `test_are_messages_duplicate_recognizes_russian_no`: verifies "нет" is recognized as not duplicate
+  - `test_update_match_limits_from_config`: verifies UPDATE_MATCH config constants
+  - `test_find_relevant_summary_context_truncation`: verifies context truncation in update match
+- All 55 tests pass without errors.
+
 ## Completed in 2026-05-28 round 2 (cost optimization, security hardening, prompt quality)
 
 - **Major cost optimization — coverage check context truncation**: Added `COVERAGE_CHECK_MAX_SUMMARIES` (default 10) and `COVERAGE_CHECK_MAX_CHARS_PER_SUMMARY` (default 300) in [`config.py`](config.py). Applied in [`get_recent_summaries_context()`](history_manager.py) and [`get_recent_group_summaries_context()`](history_manager.py) — previously, these functions could send up to ~200K chars (channel) and ~1.2M chars (group) as input tokens to a yes/no coverage check LLM call. Now capped at ~3000 chars, saving ~90-99% input tokens on coverage checks.
@@ -196,5 +209,5 @@
 - **CI/CD**: Настроить GitHub Actions CI/CD для автоматического деплоя Lambda при мердже в main.
 - **Secrets management**: Перенести чувствительные переменные в AWS SSM Parameter Store / Secrets Manager вместо env vars и template.yaml параметров.
 - **Memory profiling**: Проверить использование памяти Lambda (сейчас 512 MB) и увеличить до 1024 MB при необходимости.
-- **Dead code: restore_summaries_from_channel_sync**: Упростить сложную логику синхронизации event loop в [`history_manager.py`](history_manager.py) — текущая реализация с `run_coroutine_threadsafe` и множеством веток хрупка.
-- **Prompt optimization round 3**: Продолжить A/B тестирование промптов — можно уменьшить `OPENAI_CHANNEL_SUMMARY_MAX_TOKENS` с 16000 до ~4000 (соответствует `SUMMARY_MAX_LENGTH` в 4000 символов при ~2-3 токенах/символ для русского), что снизит стоимость output токенов при многословных ответах модели.
+- **Dead code: _run_async_with_loop**: Упростить сложную логику синхронизации event loop в [`history_manager.py`](history_manager.py) — текущая реализация с `run_coroutine_threadsafe` и множеством веток хрупка.
+- **Prompt A/B testing**: Продолжить тестирование промптов — отслеживать качество саммари после снижения `max_tokens` до 4000 и при необходимости корректировать.

@@ -60,10 +60,10 @@ def validate_config() -> None:
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 OPENAI_DEFAULT_MAX_TOKENS = _get_int_env("OPENAI_DEFAULT_MAX_TOKENS", 300)
 OPENAI_CHANNEL_SUMMARY_MAX_TOKENS = _get_int_env(
-    "OPENAI_CHANNEL_SUMMARY_MAX_TOKENS", 16000
+    "OPENAI_CHANNEL_SUMMARY_MAX_TOKENS", 4000
 )
 OPENAI_GROUP_SUMMARY_MAX_TOKENS = _get_int_env(
-    "OPENAI_GROUP_SUMMARY_MAX_TOKENS", 16000
+    "OPENAI_GROUP_SUMMARY_MAX_TOKENS", 4000
 )
 
 source_channels_str = os.getenv('SOURCE_CHANNELS', '')
@@ -110,6 +110,8 @@ TEXT_PREVIEW_LENGTH = 50
 # Coverage check context limits (major cost optimization)
 COVERAGE_CHECK_MAX_SUMMARIES = int(os.getenv("COVERAGE_CHECK_MAX_SUMMARIES", "10"))
 COVERAGE_CHECK_MAX_CHARS_PER_SUMMARY = int(os.getenv("COVERAGE_CHECK_MAX_CHARS_PER_SUMMARY", "300"))
+UPDATE_MATCH_MAX_SUMMARIES = int(os.getenv("UPDATE_MATCH_MAX_SUMMARIES", "5"))
+UPDATE_MATCH_MAX_CHARS_PER_SUMMARY = int(os.getenv("UPDATE_MATCH_MAX_CHARS_PER_SUMMARY", "500"))
 
 # Debug mode (set DEBUG=1 in environment to enable verbose logging)
 DEBUG = os.getenv("DEBUG", "").lower() in {"1", "true", "yes"}

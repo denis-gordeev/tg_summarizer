@@ -24,8 +24,8 @@ def _setup_stubs():
     fake_config.SIMILARITY_LLM_LOWER = 0.7
     fake_config.SIMILARITY_LLM_UPPER = 0.95
     fake_config.ENABLE_SUMMARIES_DEDUPLICATION = False
-    fake_config.OPENAI_CHANNEL_SUMMARY_MAX_TOKENS = 16000
-    fake_config.OPENAI_GROUP_SUMMARY_MAX_TOKENS = 16000
+    fake_config.OPENAI_CHANNEL_SUMMARY_MAX_TOKENS = 4000
+    fake_config.OPENAI_GROUP_SUMMARY_MAX_TOKENS = 4000
     fake_config.SOURCE_CHANNELS = set()
     fake_config.DEBUG = False
     fake_config.SUMMARY_MIN_RATIO = 3
@@ -267,6 +267,46 @@ class ProcessMessagesIntegrationTests(unittest.TestCase):
 
             self.assertFalse(mock_dup.called, "LLM should NOT be called for near-identical messages")
             self.assertEqual(len(result), 1, "Near-identical message should be auto-deduplicated")
+
+
+class AreMessagesDuplicateRussianResponseTests(unittest.TestCase):
+    """Tests for are_messages_duplicate Russian response handling."""
+
+    @classmethod
+    def setUpClass(cls):
+        _setup_stubs()
+        import message_processor
+        cls.mp = message_processor
+
+    def test_are_messages_duplicate_recognizes_russian_yes(self):
+        """are_messages_duplicate should recognize 'да' (Russian yes) as duplicate."""
+        from models import MessageInfo
+        from unittest.mock import AsyncMock, patch
+
+        msg_a = MessageInfo(text="Some text about AI", channel="@ch", message_id=1,
+                            date=datetime.now(timezone.utc), link="")
+        msg_b = MessageInfo(text="Some text about AI too", channel="@ch", message_id=2,
+                            date=datetime.now(timezone.utc), link="")
+
+        with patch.object(self.mp, "call_openai", new_callable=AsyncMock) as mock_openai:
+            mock_openai.return_value = "да"
+            result = asyncio.run(self.mp.are_messages_duplicate(msg_a, msg_b))
+            self.assertTrue(result, "Russian 'да' should be recognized as duplicate")
+
+    def test_are_messages_duplicate_recognizes_russian_no(self):
+        """are_messages_duplicate should recognize 'нет' (Russian no) as not duplicate."""
+        from models import MessageInfo
+        from unittest.mock import AsyncMock, patch
+
+        msg_a = MessageInfo(text="Some text about AI", channel="@ch", message_id=1,
+                            date=datetime.now(timezone.utc), link="")
+        msg_b = MessageInfo(text="Completely different topic", channel="@ch", message_id=2,
+                            date=datetime.now(timezone.utc), link="")
+
+        with patch.object(self.mp, "call_openai", new_callable=AsyncMock) as mock_openai:
+            mock_openai.return_value = "нет"
+            result = asyncio.run(self.mp.are_messages_duplicate(msg_a, msg_b))
+            self.assertFalse(result, "Russian 'нет' should be recognized as not duplicate")
 
 
 if __name__ == "__main__":

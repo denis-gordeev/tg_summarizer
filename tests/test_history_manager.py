@@ -135,6 +135,50 @@ class HistoryContextLogicTests(unittest.TestCase):
         self.assertGreater(config.COVERAGE_CHECK_MAX_SUMMARIES, 0)
         self.assertGreater(config.COVERAGE_CHECK_MAX_CHARS_PER_SUMMARY, 0)
 
+    def test_update_match_limits_from_config(self):
+        """Verify that UPDATE_MATCH_MAX_SUMMARIES and UPDATE_MATCH_MAX_CHARS_PER_SUMMARY exist in config."""
+        import importlib
+        import sys
+        import types
+        from unittest.mock import patch
+        import os
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, {}, clear=True):
+                sys.modules.pop("config", None)
+                config = importlib.import_module("config")
+
+        self.assertIsInstance(config.UPDATE_MATCH_MAX_SUMMARIES, int)
+        self.assertIsInstance(config.UPDATE_MATCH_MAX_CHARS_PER_SUMMARY, int)
+        self.assertGreater(config.UPDATE_MATCH_MAX_SUMMARIES, 0)
+        self.assertGreater(config.UPDATE_MATCH_MAX_CHARS_PER_SUMMARY, 0)
+
+    def test_find_relevant_summary_context_truncation(self):
+        """Verify that find_relevant_summary_for_update truncates context."""
+        max_summaries = 5
+        max_chars = 500
+
+        def build_context(summaries):
+            recent = summaries[-max_summaries:]
+            parts = []
+            for i, s in enumerate(recent, 1):
+                truncated = s["content"][:max_chars]
+                parts.append(f"Саммари {i}:\n{truncated}\n\n")
+            return "".join(parts)
+
+        many_summaries = [
+            {"content": f"summary_{i}: " + "X" * 1000, "date": datetime.now(timezone.utc)}
+            for i in range(20)
+        ]
+        result = build_context(many_summaries)
+        self.assertIn("Саммари 5:", result)
+        self.assertIn("summary_19", result)
+        self.assertNotIn("summary_0", result)
+        self.assertEqual(len(result.split("Саммари")), max_summaries + 1)
+
 
 if __name__ == '__main__':
     unittest.main()

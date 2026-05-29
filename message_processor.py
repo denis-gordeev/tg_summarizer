@@ -119,8 +119,8 @@ async def are_messages_duplicate(msg_a: MessageInfo, msg_b: MessageInfo) -> bool
     """Use the LLM to see if two messages cover the same topic."""
     user_content = f"Message 1:\n{msg_a.text}\n\nMessage 2:\n{msg_b.text}"
 
-    answer = await call_openai(prompts.DUPLICATE_CHECK_PROMPT, user_content, max_tokens=1)
-    return answer.lower().startswith("y")
+    answer = await call_openai(prompts.DUPLICATE_CHECK_PROMPT, user_content, max_tokens=3)
+    return answer.strip().lower().startswith("да")
 
 
 async def is_message_covered_in_summaries(msg: MessageInfo) -> bool:

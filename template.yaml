@@ -73,12 +73,12 @@ Parameters:
   OpenAIChannelSummaryMaxTokens:
     Type: String
     Description: Max tokens for channel summaries
-    Default: "16000"
-  
+    Default: "4000"
+   
   OpenAIGroupSummaryMaxTokens:
     Type: String
     Description: Max tokens for group summaries
-    Default: "16000"
+    Default: "4000"
   
   StateBucket:
     Type: String
