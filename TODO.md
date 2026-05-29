@@ -204,10 +204,26 @@
 - Updated [`tests/test_history_manager.py`](tests/test_history_manager.py) with context truncation tests.
 - All 51 tests pass without errors.
 
+## Completed in 2026-05-29 round 2 (Lambda hardening round 4, SSM secrets, code dedup)
+
+- **Critical bug**: Fixed [`_run_async_with_loop()`](history_manager.py) — when called from within a running event loop (the common Lambda case via `asyncio.run()`), the old code silently returned `[]` due to "same loop deadlock avoidance", meaning `restore_summaries_from_channel_sync()` **never actually restored** anything. Now uses a background `threading.Thread` with `asyncio.run()` to avoid the deadlock while still executing the coroutine. Also added proper exception handling for the no-running-loop `asyncio.run()` path.
+- **Code dedup**: Merged [`fetch_messages()`](telegram_client.py) and [`fetch_group_messages()`](telegram_client.py) into shared [`_fetch_from_sources()`](telegram_client.py) helper. Eliminated ~50 lines of duplicated message-fetching logic (the two functions differed only in source list, history loader, and log labels).
+- **Code dedup**: Merged group/non-group branches in [`save_updated_summary()`](history_manager.py) into a single flow. Eliminated ~20 lines of duplicated summary-replacement logic.
+- **Lambda memory**: Increased `MemorySize` from 512 to 1024 MB in [`template.yaml`](template.yaml). Lambda allocates CPU proportionally to memory, so this also speeds up execution and reduces timeout risk.
+- **Secrets management — SSM Parameter Store**: Added optional SSM Parameter Store support for all four secrets (Telegram API ID/Hash, Bot Token, OpenAI API Key):
+  - [`config.py`](config.py): New `_get_ssm_param()` and `_get_secret()` functions resolve secrets from SSM at runtime (supports key rotation). Falls back to env vars when SSM path is not configured or unavailable. `API_ID`, `API_HASH`, `BOT_TOKEN`, and `OPENAI_API_KEY` now use `_get_secret()`.
+  - [`template.yaml`](template.yaml): New SSM path parameters (`TelegramApiIdSsmPath`, etc.) with conditional IAM policies and dual resolution (CloudFormation `{{resolve:ssm:...}}` at deploy time + runtime `boto3` for rotation).
+- **Tests added**: 6 new tests (total 61, up from 55):
+  - `test_run_async_with_loop_works_without_running_loop`: verifies basic coroutine execution
+  - `test_run_async_with_loop_inside_running_loop`: verifies the fix for the same-loop deadlock
+  - `test_run_async_with_loop_returns_empty_on_exception`: verifies graceful error handling
+  - `test_get_secret_prefers_ssm_over_env`: verifies SSM takes precedence over env var
+  - `test_get_secret_falls_back_to_env_when_ssm_empty`: verifies env var fallback when SSM path empty
+  - `test_get_secret_falls_back_to_env_when_ssm_fails`: verifies env var fallback when SSM call fails
+- All 61 tests pass without errors.
+
 ## Next actions
 
 - **CI/CD**: Настроить GitHub Actions CI/CD для автоматического деплоя Lambda при мердже в main.
-- **Secrets management**: Перенести чувствительные переменные в AWS SSM Parameter Store / Secrets Manager вместо env vars и template.yaml параметров.
-- **Memory profiling**: Проверить использование памяти Lambda (сейчас 512 MB) и увеличить до 1024 MB при необходимости.
-- **Dead code: _run_async_with_loop**: Упростить сложную логику синхронизации event loop в [`history_manager.py`](history_manager.py) — текущая реализация с `run_coroutine_threadsafe` и множеством веток хрупка.
+- **Secrets management**: Перенести реальные секреты в AWS SSM Parameter Store (инфраструктура готова — `*_SSM_PATH` env vars и IAM policies в template.yaml).
 - **Prompt A/B testing**: Продолжить тестирование промптов — отслеживать качество саммари после снижения `max_tokens` до 4000 и при необходимости корректировать.

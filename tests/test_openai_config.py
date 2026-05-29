@@ -86,6 +86,37 @@ class ConfigTests(unittest.TestCase):
         config.validate_config()
 
 
+class SsmSecretResolutionTests(unittest.TestCase):
+    def test_get_secret_prefers_ssm_over_env(self):
+        with patch.dict(os.environ, {
+            **REQUIRED_ENV,
+            "OPENAI_API_KEY_SSM_PATH": "/test/openai-key",
+        }, clear=True):
+            config = _reload_module("config")
+            with patch.object(config, "_get_ssm_param", return_value="ssm-key-value"):
+                result = config._get_secret("OPENAI_API_KEY", "OPENAI_API_KEY_SSM_PATH")
+                self.assertEqual(result, "ssm-key-value")
+
+    def test_get_secret_falls_back_to_env_when_ssm_empty(self):
+        with patch.dict(os.environ, {
+            **REQUIRED_ENV,
+            "OPENAI_API_KEY_SSM_PATH": "",
+        }, clear=True):
+            config = _reload_module("config")
+            result = config._get_secret("OPENAI_API_KEY", "OPENAI_API_KEY_SSM_PATH")
+            self.assertEqual(result, "test-key")
+
+    def test_get_secret_falls_back_to_env_when_ssm_fails(self):
+        with patch.dict(os.environ, {
+            **REQUIRED_ENV,
+            "OPENAI_API_KEY_SSM_PATH": "/test/openai-key",
+        }, clear=True):
+            config = _reload_module("config")
+            with patch.object(config, "_get_ssm_param", return_value=None):
+                result = config._get_secret("OPENAI_API_KEY", "OPENAI_API_KEY_SSM_PATH")
+                self.assertEqual(result, "test-key")
+
+
 class CallOpenAITests(unittest.IsolatedAsyncioTestCase):
     async def test_call_openai_uses_configured_model_and_default_token_limit(self):
         env = {

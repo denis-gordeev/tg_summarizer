@@ -145,7 +145,14 @@ async def restore_group_summaries_from_channel() -> List[SummaryInfo]:
 
 
 def _run_async_with_loop(coro):
-    """Run an async coroutine from sync context, handling event loop edge cases."""
+    """Run an async coroutine from sync context, handling event loop edge cases.
+
+    In Lambda, `asyncio.run()` in the handler creates a fresh loop each time,
+    and `stop_clients()` resets `clients_loop`. So the common cases are:
+    1. No running loop → use `asyncio.run()`
+    2. Running loop (e.g. called from async `fetch_messages`) → schedule
+       via `run_coroutine_threadsafe` on the Telegram client's loop.
+    """
     import telegram_client as tg
     tg_loop = getattr(tg, "clients_loop", None)
 
@@ -162,13 +169,13 @@ def _run_async_with_loop(coro):
             except Exception as e:
                 logger.error("Restore: timeout/wait error: %s", e)
                 return []
-        return asyncio.run(coro)
+        try:
+            return asyncio.run(coro)
+        except Exception as e:
+            logger.error("Restore: error running coroutine: %s", e)
+            return []
 
-    if tg_loop is current_loop:
-        logger.debug("Restore: same event loop, skipping to avoid deadlock")
-        return []
-
-    if tg_loop and tg_loop.is_running():
+    if tg_loop and tg_loop.is_running() and tg_loop is not current_loop:
         future = asyncio.run_coroutine_threadsafe(coro, tg_loop)
         try:
             return future.result(timeout=float(os.getenv("RESTORE_TIMEOUT_SEC", "30")))
@@ -176,7 +183,26 @@ def _run_async_with_loop(coro):
             logger.error("Restore: timeout/wait error: %s", e)
             return []
 
-    return []
+    import threading
+    result_box = [None]
+    exception_box = [None]
+
+    def _run_in_thread():
+        try:
+            result_box[0] = asyncio.run(coro)
+        except Exception as e:
+            exception_box[0] = e
+
+    t = threading.Thread(target=_run_in_thread, daemon=True)
+    t.start()
+    t.join(timeout=float(os.getenv("RESTORE_TIMEOUT_SEC", "30")))
+    if t.is_alive():
+        logger.error("Restore: timed out in background thread")
+        return []
+    if exception_box[0]:
+        logger.error("Restore: error in background thread: %s", exception_box[0])
+        return []
+    return result_box[0] or []
 
 
 def restore_summaries_from_channel_sync() -> List[SummaryInfo]:
@@ -432,46 +458,27 @@ async def update_existing_summary(
 async def save_updated_summary(
     original_summary: SummaryInfo, updated_summary: SummaryInfo, is_group: bool = False
 ) -> None:
-    """
-    Сохраняет обновленное саммари, заменяя оригинальное в истории.
-    Также редактирует сообщение в канале, если есть message_id.
-    """
+    """Save updated summary, replacing the original in history and editing the channel message."""
     from telegram_client import edit_message_in_target_channel
 
-    if is_group:
-        summaries = load_group_summaries_history()
-        for i, summary in enumerate(summaries):
-            if (
-                summary.content == original_summary.content
-                and summary.date == original_summary.date
-                and summary.message_count == original_summary.message_count
-            ):
-                summaries[i] = updated_summary
-                break
+    history_file = GROUP_SUMMARIES_HISTORY_FILE if is_group else SUMMARIES_HISTORY_FILE
+    summaries = load_group_summaries_history() if is_group else load_summaries_history()
 
-        all_summaries_dict = [s.to_dict() for s in summaries]
-        data = {"summaries": all_summaries_dict, "last_updated": now_iso()}
-        save_json_file(
-            GROUP_SUMMARIES_HISTORY_FILE,
-            data,
-            "Error saving updated group summary history",
-        )
-    else:
-        summaries = load_summaries_history()
-        for i, summary in enumerate(summaries):
-            if summary.content == original_summary.content:
-                summaries[i] = updated_summary
-                break
+    for i, summary in enumerate(summaries):
+        if summary.content == original_summary.content and (
+            is_group or (summary.date == original_summary.date and summary.message_count == original_summary.message_count)
+        ):
+            summaries[i] = updated_summary
+            break
 
-        all_summaries_dict = [s.to_dict() for s in summaries]
-        data = {"summaries": all_summaries_dict, "last_updated": now_iso()}
-        save_json_file(
-            SUMMARIES_HISTORY_FILE,
-            data,
-            "Error saving updated summary history",
-        )
+    all_summaries_dict = [s.to_dict() for s in summaries]
+    data = {"summaries": all_summaries_dict, "last_updated": now_iso()}
+    save_json_file(
+        history_file,
+        data,
+        "Error saving updated %s summary history" % ("group" if is_group else ""),
+    )
 
-    # Редактируем сообщение в канале, если есть message_id
     if original_summary.message_id:
         try:
             await edit_message_in_target_channel(

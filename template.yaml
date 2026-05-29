@@ -6,7 +6,7 @@ Description: >
 Globals:
   Function:
     Timeout: 180
-    MemorySize: 512
+    MemorySize: 1024
     Runtime: python3.12
     Environment:
       Variables:
@@ -19,10 +19,26 @@ Globals:
         SOURCE_GROUPS: !Ref SourceGroups
         STATE_S3_BUCKET: !Ref StateBucket
         STATE_S3_PREFIX: !Ref StatePrefix
-        TELEGRAM_API_ID: !Ref TelegramApiId
-        TELEGRAM_API_HASH: !Ref TelegramApiHash
-        TELEGRAM_BOT_TOKEN: !Ref TelegramBotToken
-        OPENAI_API_KEY: !Ref OpenAIApiKey
+        TELEGRAM_API_ID_SSM_PATH: !Ref TelegramApiIdSsmPath
+        TELEGRAM_API_HASH_SSM_PATH: !Ref TelegramApiHashSsmPath
+        TELEGRAM_BOT_TOKEN_SSM_PATH: !Ref TelegramBotTokenSsmPath
+        OPENAI_API_KEY_SSM_PATH: !Ref OpenAIApiKeySsmPath
+        TELEGRAM_API_ID: !If
+          - UseSsmTelegramApiId
+          - !Sub "{{resolve:ssm:${TelegramApiIdSsmPath}}}"
+          - !Ref TelegramApiId
+        TELEGRAM_API_HASH: !If
+          - UseSsmTelegramApiHash
+          - !Sub "{{resolve:ssm:${TelegramApiHashSsmPath}}}"
+          - !Ref TelegramApiHash
+        TELEGRAM_BOT_TOKEN: !If
+          - UseSsmTelegramBotToken
+          - !Sub "{{resolve:ssm:${TelegramBotTokenSsmPath}}}"
+          - !Ref TelegramBotToken
+        OPENAI_API_KEY: !If
+          - UseSsmOpenAIApiKey
+          - !Sub "{{resolve:ssm:${OpenAIApiKeySsmPath}}}"
+          - !Ref OpenAIApiKey
 
 Parameters:
   TelegramApiId:
@@ -102,9 +118,33 @@ Parameters:
     AllowedValues:
       - "true"
       - "false"
+  
+  TelegramApiIdSsmPath:
+    Type: String
+    Description: SSM Parameter Store path for Telegram API ID (takes precedence over TelegramApiId)
+    Default: ""
+  
+  TelegramApiHashSsmPath:
+    Type: String
+    Description: SSM Parameter Store path for Telegram API Hash (takes precedence over TelegramApiHash)
+    Default: ""
+  
+  TelegramBotTokenSsmPath:
+    Type: String
+    Description: SSM Parameter Store path for Telegram Bot Token (takes precedence over TelegramBotToken)
+    Default: ""
+  
+  OpenAIApiKeySsmPath:
+    Type: String
+    Description: SSM Parameter Store path for OpenAI API Key (takes precedence over OpenAIApiKey)
+    Default: ""
 
 Conditions:
   HasStateBucket: !Not [!Equals [!Ref StateBucket, ""]]
+  UseSsmTelegramApiId: !Not [!Equals [!Ref TelegramApiIdSsmPath, ""]]
+  UseSsmTelegramApiHash: !Not [!Equals [!Ref TelegramApiHashSsmPath, ""]]
+  UseSsmTelegramBotToken: !Not [!Equals [!Ref TelegramBotTokenSsmPath, ""]]
+  UseSsmOpenAIApiKey: !Not [!Equals [!Ref OpenAIApiKeySsmPath, ""]]
 
 Resources:
   SummarizerFunction:
@@ -124,6 +164,34 @@ Resources:
             BucketName: !Ref StateBucket
         - SQSSendMessagePolicy:
             QueueName: !GetAtt SummarizerDLQ.QueueName
+        - !If
+          - UseSsmTelegramApiId
+          - Statement:
+              - Effect: Allow
+                Action: ssm:GetParameter
+                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${TelegramApiIdSsmPath}"
+          - !Ref AWS::NoValue
+        - !If
+          - UseSsmTelegramApiHash
+          - Statement:
+              - Effect: Allow
+                Action: ssm:GetParameter
+                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${TelegramApiHashSsmPath}"
+          - !Ref AWS::NoValue
+        - !If
+          - UseSsmTelegramBotToken
+          - Statement:
+              - Effect: Allow
+                Action: ssm:GetParameter
+                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${TelegramBotTokenSsmPath}"
+          - !Ref AWS::NoValue
+        - !If
+          - UseSsmOpenAIApiKey
+          - Statement:
+              - Effect: Allow
+                Action: ssm:GetParameter
+                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${OpenAIApiKeySsmPath}"
+          - !Ref AWS::NoValue
       Events:
         ScheduledRun:
           Type: Schedule

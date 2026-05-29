@@ -1,3 +1,6 @@
+import asyncio
+import importlib
+import sys
 import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch, MagicMock
@@ -178,6 +181,97 @@ class HistoryContextLogicTests(unittest.TestCase):
         self.assertIn("summary_19", result)
         self.assertNotIn("summary_0", result)
         self.assertEqual(len(result.split("Саммари")), max_summaries + 1)
+
+
+class RunAsyncWithLoopTests(unittest.TestCase):
+    """Tests for _run_async_with_loop — verifies it works from within an event loop."""
+
+    def _import_hm_with_stubs(self):
+        import importlib
+        import sys
+        import types
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_channel_manager = types.ModuleType("channel_manager")
+        fake_channel_manager.create_channel_abbreviation = lambda ch: "AB"
+        fake_channel_manager.load_channel_abbreviations = lambda: {}
+        fake_models = types.ModuleType("models")
+        fake_models.SummaryInfo = type("FakeSummaryInfo", (), {"__init__": lambda self, **kw: None, "to_dict": lambda self: {}})
+        fake_models.MessageInfo = type("MessageInfo", (), {})
+        fake_prompts = types.ModuleType("prompts")
+        fake_prompts.prompts = types.SimpleNamespace()
+        fake_utils = types.ModuleType("utils")
+        fake_utils.call_openai = MagicMock()
+        fake_utils.extract_links = lambda text: []
+        fake_utils.load_json_file = lambda *a, **kw: {}
+        fake_utils.save_json_file = lambda *a, **kw: True
+        fake_utils.now_iso = lambda: "2026-01-01T00:00:00"
+        fake_utils.extract_all_channels = lambda text: []
+        fake_telegram_client = types.ModuleType("telegram_client")
+        fake_telegram_client.user_client = None
+        fake_telegram_client.clients_loop = None
+
+        stubs = {
+            "dotenv": fake_dotenv,
+            "channel_manager": fake_channel_manager,
+            "models": fake_models,
+            "prompts": fake_prompts,
+            "utils": fake_utils,
+            "telegram_client": fake_telegram_client,
+        }
+
+        return stubs
+
+    def test_run_async_with_loop_works_without_running_loop(self):
+        """_run_async_with_loop should work when no event loop is running."""
+        stubs = self._import_hm_with_stubs()
+        with patch.dict(sys.modules, stubs):
+            with patch.dict(os.environ, {}, clear=True):
+                sys.modules.pop("history_manager", None)
+                sys.modules.pop("config", None)
+                hm = importlib.import_module("history_manager")
+
+                async def fake_coro():
+                    return ["item1", "item2"]
+
+                result = hm._run_async_with_loop(fake_coro())
+                self.assertEqual(result, ["item1", "item2"])
+
+    def test_run_async_with_loop_inside_running_loop(self):
+        """_run_async_with_loop should work even when called from within a
+        running event loop (the common Lambda case). Previously, this silently
+        returned [] due to same-loop deadlock avoidance."""
+        stubs = self._import_hm_with_stubs()
+        with patch.dict(sys.modules, stubs):
+            with patch.dict(os.environ, {}, clear=True):
+                sys.modules.pop("history_manager", None)
+                sys.modules.pop("config", None)
+                hm = importlib.import_module("history_manager")
+
+                async def fake_coro():
+                    return ["restored"]
+
+                async def run_inside_loop():
+                    return hm._run_async_with_loop(fake_coro())
+
+                result = asyncio.run(run_inside_loop())
+                self.assertEqual(result, ["restored"])
+
+    def test_run_async_with_loop_returns_empty_on_exception(self):
+        """_run_async_with_loop should return [] when the coroutine raises."""
+        stubs = self._import_hm_with_stubs()
+        with patch.dict(sys.modules, stubs):
+            with patch.dict(os.environ, {}, clear=True):
+                sys.modules.pop("history_manager", None)
+                sys.modules.pop("config", None)
+                hm = importlib.import_module("history_manager")
+
+                async def failing_coro():
+                    raise RuntimeError("test failure")
+
+                result = hm._run_async_with_loop(failing_coro())
+                self.assertEqual(result, [])
 
 
 if __name__ == '__main__':

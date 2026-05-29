@@ -82,110 +82,73 @@ async def get_similar_channels_from_telegram(channel_username: Optional[str] = N
         return []
 
 
-async def fetch_messages(include_today_processed_messages: bool = False) -> List[MessageInfo]:
-    """Fetch messages from source channels in the last 24 hours."""
+async def _fetch_from_sources(
+    sources: List[str],
+    processed_messages: set,
+    source_label: str,
+    include_today_processed: bool = False,
+) -> List[MessageInfo]:
+    """Generic message fetcher for both channels and groups."""
     since = datetime.now(timezone.utc) - timedelta(days=1)
     all_msgs = []
 
-    # Загружаем историю обработанных сообщений
-    processed_messages = load_summarization_history()
-    logger.info("Loaded %d already processed messages from history", len(processed_messages))
-
-    # Получаем объединенный список каналов
-    all_channels = get_all_source_channels()
-
-    # Ensure user client is running
     await _ensure_clients()
 
-    for channel in all_channels:
-        logger.info("Fetching messages from %s", channel)
-        channel_msgs = []
+    for source in sources:
+        logger.info("Fetching messages from %s %s", source_label, source)
+        source_msgs = []
         try:
             async for msg in user_client.iter_messages(
-                channel, offset_date=None, min_id=0, reverse=False
+                source, offset_date=None, min_id=0, reverse=False
             ):
                 if msg.date < since:
                     break
                 if msg.message:
-                    # Извлекаем ссылки из текста сообщения
                     links = extract_links(msg.message)
                     main_link = links[0] if links else ""
 
                     message_info = MessageInfo(
                         text=msg.message,
-                        channel=channel,
+                        channel=source,
                         message_id=msg.id,
                         date=msg.date,
                         link=main_link,
                     )
 
-                    # Проверяем, не было ли сообщение уже обработано (если не игнорируем)
-                    if include_today_processed_messages or not is_message_processed(
+                    if include_today_processed or not is_message_processed(
                         message_info, processed_messages
                     ):
-                        channel_msgs.append(message_info)
+                        source_msgs.append(message_info)
                         all_msgs.append(message_info)
                     else:
-                        logger.debug("Skipping already processed message %s from %s", msg.id, channel)
+                        logger.debug("Skipping already processed message %s from %s", msg.id, source)
 
-            logger.info("Found %d new messages from %s", len(channel_msgs), channel)
+            logger.info("Found %d new messages from %s %s", len(source_msgs), source_label, source)
         except Exception as e:
-            logger.error("Error fetching messages from %s: %s", channel, e, exc_info=True)
+            logger.error("Error fetching messages from %s %s: %s", source_label, source, e, exc_info=True)
             continue
     return all_msgs
+
+
+async def fetch_messages(include_today_processed_messages: bool = False) -> List[MessageInfo]:
+    """Fetch messages from source channels in the last 24 hours."""
+    processed_messages = load_summarization_history()
+    logger.info("Loaded %d already processed messages from history", len(processed_messages))
+
+    all_channels = get_all_source_channels()
+    return await _fetch_from_sources(
+        all_channels, processed_messages, "channel", include_today_processed_messages,
+    )
 
 
 async def fetch_group_messages(include_today_processed_messages: bool = False) -> List[MessageInfo]:
     """Fetch messages from source groups in the last 24 hours."""
-    since = datetime.now(timezone.utc) - timedelta(days=1)
-    all_msgs = []
-
-    # Загружаем историю обработанных сообщений из групп
     processed_messages = load_group_summarization_history()
     logger.info("Loaded %d already processed group messages from history", len(processed_messages))
 
-    # Получаем список групп
-    all_groups = SOURCE_GROUPS
-
-    # Ensure user client is running
-    await _ensure_clients()
-
-    for group in all_groups:
-        logger.info("Fetching messages from group %s", group)
-        group_msgs = []
-        try:
-            async for msg in user_client.iter_messages(
-                group, offset_date=None, min_id=0, reverse=False
-            ):
-                if msg.date < since:
-                    break
-                if msg.message:
-                    # Извлекаем ссылки из текста сообщения
-                    links = extract_links(msg.message)
-                    main_link = links[0] if links else ""
-
-                    message_info = MessageInfo(
-                        text=msg.message,
-                        channel=group,
-                        message_id=msg.id,
-                        date=msg.date,
-                        link=main_link,
-                    )
-
-                    # Проверяем, не было ли сообщение уже обработано (если не игнорируем)
-                    if include_today_processed_messages or not is_message_processed(
-                        message_info, processed_messages
-                    ):
-                        group_msgs.append(message_info)
-                        all_msgs.append(message_info)
-                    else:
-                        logger.debug("Skipping already processed message %s from group %s", msg.id, group)
-
-            logger.info("Found %d new messages from group %s", len(group_msgs), group)
-        except Exception as e:
-            logger.error("Error fetching messages from group %s: %s", group, e, exc_info=True)
-            continue
-    return all_msgs
+    return await _fetch_from_sources(
+        list(SOURCE_GROUPS), processed_messages, "group", include_today_processed_messages,
+    )
 
 
 async def send_message_to_target_channel(message: str) -> None:

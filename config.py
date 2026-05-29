@@ -1,7 +1,34 @@
 import os
+import logging
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
+
+
+def _get_ssm_param(path: str) -> str | None:
+    """Fetch a parameter from AWS SSM Parameter Store. Returns None on failure."""
+    if not path:
+        return None
+    try:
+        import boto3
+        client = boto3.client("ssm")
+        response = client.get_parameter(Name=path, WithDecryption=True)
+        return response["Parameter"]["Value"]
+    except Exception as e:
+        logger.debug("SSM param %s not available: %s", path, e)
+        return None
+
+
+def _get_secret(env_name: str, ssm_env_name: str | None = None) -> str | None:
+    """Resolve a secret: SSM path first (if configured), then env var."""
+    ssm_path = os.getenv(ssm_env_name, "") if ssm_env_name else os.getenv(f"{env_name}_SSM_PATH", "")
+    if ssm_path:
+        value = _get_ssm_param(ssm_path)
+        if value is not None:
+            return value
+    return os.getenv(env_name) or None
 
 
 def _get_int_env(name: str, default: int) -> int:
@@ -25,19 +52,19 @@ _REQUIRED_VARS = {
     "OPENAI_API_KEY": "OPENAI_API_KEY",
 }
 
-_api_id_str = os.getenv('TELEGRAM_API_ID')
+_api_id_str = _get_secret('TELEGRAM_API_ID', 'TELEGRAM_API_ID_SSM_PATH')
 API_ID = int(_api_id_str) if _api_id_str else None
 
-API_HASH = os.getenv('TELEGRAM_API_HASH') or None
+API_HASH = _get_secret('TELEGRAM_API_HASH', 'TELEGRAM_API_HASH_SSM_PATH')
 
-BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN') or None
+BOT_TOKEN = _get_secret('TELEGRAM_BOT_TOKEN', 'TELEGRAM_BOT_TOKEN_SSM_PATH')
 
 _target_channel = os.getenv('TARGET_CHANNEL') or None
 TARGET_CHANNEL: int | str | None = _target_channel
 if isinstance(TARGET_CHANNEL, str) and TARGET_CHANNEL.startswith("-"):
     TARGET_CHANNEL = int(TARGET_CHANNEL)
 
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY') or None
+OPENAI_API_KEY = _get_secret('OPENAI_API_KEY', 'OPENAI_API_KEY_SSM_PATH')
 
 
 def validate_config() -> None:
