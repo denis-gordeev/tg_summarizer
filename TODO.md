@@ -222,6 +222,19 @@
   - `test_get_secret_falls_back_to_env_when_ssm_fails`: verifies env var fallback when SSM call fails
 - All 61 tests pass without errors.
 
+## Completed in 2026-05-30 round (Lambda hardening round 5, cost optimization)
+
+- **Bug fix**: Fixed [`save_updated_summary()`](history_manager.py) matching — was using fragile `summary.content == original_summary.content` comparison which could match wrong summary if content happens to be identical. Now matches by `message_id` first (reliable unique key), falls back to content+date+count when `message_id` is None.
+- **Lambda hardening**: Added deadline-aware fetching in [`telegram_client.py`](telegram_client.py) — [`_fetch_from_sources()`](telegram_client.py) now accepts `_deadline` parameter and checks it before each source, returning already-fetched messages if deadline is exceeded. [`fetch_messages()`](telegram_client.py) and [`fetch_group_messages()`](telegram_client.py) pass the deadline through from [`run_summarizer()`](summarizer.py). This prevents Lambda timeout during slow message fetching from Telegram API.
+- **Dead code removal**: Removed unused [`send_message_to_target_channel()`](telegram_client.py) — the function without ID return was never called; only `send_message_to_target_channel_with_id()` is used.
+- **Cost optimization — max_tokens for yes/no responses**: Reduced `max_tokens` for coverage check LLM calls in [`message_processor.py`](message_processor.py) from 10 → 5 (responses are only "ДА" or "НЕТ"). Reduced `max_tokens` for `find_relevant_summary_for_update()` in [`history_manager.py`](history_manager.py) from 5 → 3 (response is just a digit or "НЕТ").
+- **Tests added**: 3 new tests (total 64, up from 61):
+  - `test_match_by_message_id_takes_precedence`: verifies message_id-based matching in save_updated_summary
+  - `test_fallback_to_content_date_count_when_no_message_id`: verifies fallback matching when message_id is None
+  - `test_handler_passes_deadline_to_run_summarizer`: verifies deadline is passed through from Lambda handler
+- Updated test stubs in [`tests/test_process_messages_integration.py`](tests/test_process_messages_integration.py) with `FIND_RELEVANT_SUMMARY_PROMPT` and `ENABLE_SUMMARY_UPDATES` config.
+- All 64 tests pass without errors.
+
 ## Next actions
 
 - **CI/CD**: Настроить GitHub Actions CI/CD для автоматического деплоя Lambda при мердже в main.

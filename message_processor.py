@@ -142,7 +142,7 @@ async def is_message_covered_in_summaries(msg: MessageInfo) -> bool:
 
     try:
         result = await call_openai(
-            prompts.SUMMARY_COVERAGE_CHECK_PROMPT, user_content, max_tokens=10
+            prompts.SUMMARY_COVERAGE_CHECK_PROMPT, user_content, max_tokens=5
         )
         return result.strip().upper() == "ДА"
     except Exception as e:
@@ -169,7 +169,7 @@ async def is_message_covered_in_group_summaries(msg: MessageInfo) -> bool:
 
     try:
         result = await call_openai(
-            prompts.GROUP_SUMMARY_COVERAGE_CHECK_PROMPT, user_content, max_tokens=10
+            prompts.GROUP_SUMMARY_COVERAGE_CHECK_PROMPT, user_content, max_tokens=5
         )
         return result.strip().upper() == "ДА"
     except Exception as e:

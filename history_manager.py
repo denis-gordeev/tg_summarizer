@@ -387,7 +387,7 @@ async def find_relevant_summary_for_update(
 Отвечайте только номером (1, 2, 3) или "НЕТ"."""
 
     try:
-        result = await call_openai(prompts.FIND_RELEVANT_SUMMARY_PROMPT, user_content, max_tokens=5)
+        result = await call_openai(prompts.FIND_RELEVANT_SUMMARY_PROMPT, user_content, max_tokens=3)
         result = result.strip().upper()
 
         if result.isdigit():
@@ -465,9 +465,10 @@ async def save_updated_summary(
     summaries = load_group_summaries_history() if is_group else load_summaries_history()
 
     for i, summary in enumerate(summaries):
-        if summary.content == original_summary.content and (
-            is_group or (summary.date == original_summary.date and summary.message_count == original_summary.message_count)
-        ):
+        if original_summary.message_id is not None and summary.message_id == original_summary.message_id:
+            summaries[i] = updated_summary
+            break
+        if summary.content == original_summary.content and summary.date == original_summary.date and summary.message_count == original_summary.message_count:
             summaries[i] = updated_summary
             break
 

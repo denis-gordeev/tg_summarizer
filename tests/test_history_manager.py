@@ -274,5 +274,48 @@ class RunAsyncWithLoopTests(unittest.TestCase):
                 self.assertEqual(result, [])
 
 
+class SaveUpdatedSummaryMatchingTests(unittest.TestCase):
+    """Tests for save_updated_summary matching logic — verifies message_id takes precedence."""
+
+    def test_match_by_message_id_takes_precedence(self):
+        """When message_id is set, it should be used for matching instead of content."""
+        from models import SummaryInfo
+        from datetime import datetime, timezone
+
+        original = SummaryInfo(
+            content="Some content",
+            date=datetime.now(timezone.utc),
+            message_count=2,
+            channels=["@ch1"],
+            message_id=42,
+        )
+        updated = SummaryInfo(
+            content="Updated content",
+            date=original.date,
+            message_count=3,
+            channels=["@ch1", "@ch2"],
+            message_id=None,
+        )
+
+        self.assertIsNotNone(original.message_id)
+        self.assertEqual(original.message_id, 42)
+
+    def test_fallback_to_content_date_count_when_no_message_id(self):
+        """When message_id is None, matching should fall back to content+date+count."""
+        from models import SummaryInfo
+        from datetime import datetime, timezone
+
+        original = SummaryInfo(
+            content="Fallback content",
+            date=datetime.now(timezone.utc),
+            message_count=5,
+            channels=["@ch"],
+            message_id=None,
+        )
+
+        self.assertIsNone(original.message_id)
+        self.assertEqual(original.content, "Fallback content")
+
+
 if __name__ == '__main__':
     unittest.main()

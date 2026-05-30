@@ -28,6 +28,7 @@ def _setup_stubs():
     fake_config.OPENAI_GROUP_SUMMARY_MAX_TOKENS = 4000
     fake_config.SOURCE_CHANNELS = set()
     fake_config.DEBUG = False
+    fake_config.ENABLE_SUMMARY_UPDATES = True
     fake_config.SUMMARY_MIN_RATIO = 3
     fake_config.SUMMARY_MIN_LENGTH = 800
     fake_config.SUMMARY_MAX_LENGTH = 4000
@@ -73,6 +74,7 @@ def _setup_stubs():
         GROUP_SUMMARY_COVERAGE_CHECK_PROMPT="gcov",
         CHANNEL_SUMMARY_PROMPT="channel summary, max {max_summary_length} chars",
         GROUP_SUMMARY_PROMPT="group summary, max {max_summary_length} chars",
+        FIND_RELEVANT_SUMMARY_PROMPT="find",
     )
     sys.modules["prompts"] = fake_prompts
 

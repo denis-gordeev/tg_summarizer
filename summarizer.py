@@ -32,14 +32,14 @@ async def run_summarizer(
     await start_clients()
     try:
         logger.info("=== Processing Channels ===")
-        channel_messages = await fetch_messages(include_today_processed_messages)
+        channel_messages = await fetch_messages(include_today_processed_messages, _deadline=_deadline)
         check_deadline(_deadline)
         await process_messages(channel_messages, save_changes, send_message)
 
         if SOURCE_GROUPS and (should_run_group_summarization() or include_today_processed_groups):
             check_deadline(_deadline)
             logger.info("=== Processing Groups ===")
-            group_messages = await fetch_group_messages(include_today_processed_messages)
+            group_messages = await fetch_group_messages(include_today_processed_messages, _deadline=_deadline)
             await process_messages(group_messages, save_changes, send_message, is_group=True)
         else:
             logger.info("Group summarization skipped.")

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Any
 
@@ -87,6 +88,7 @@ async def _fetch_from_sources(
     processed_messages: set,
     source_label: str,
     include_today_processed: bool = False,
+    _deadline: float = 0.0,
 ) -> List[MessageInfo]:
     """Generic message fetcher for both channels and groups."""
     since = datetime.now(timezone.utc) - timedelta(days=1)
@@ -95,6 +97,9 @@ async def _fetch_from_sources(
     await _ensure_clients()
 
     for source in sources:
+        if _deadline and time.monotonic() > _deadline:
+            logger.warning("Deadline exceeded while fetching %s — returning %d messages fetched so far", source_label, len(all_msgs))
+            break
         logger.info("Fetching messages from %s %s", source_label, source)
         source_msgs = []
         try:
@@ -130,37 +135,25 @@ async def _fetch_from_sources(
     return all_msgs
 
 
-async def fetch_messages(include_today_processed_messages: bool = False) -> List[MessageInfo]:
+async def fetch_messages(include_today_processed_messages: bool = False, _deadline: float = 0.0) -> List[MessageInfo]:
     """Fetch messages from source channels in the last 24 hours."""
     processed_messages = load_summarization_history()
     logger.info("Loaded %d already processed messages from history", len(processed_messages))
 
     all_channels = get_all_source_channels()
     return await _fetch_from_sources(
-        all_channels, processed_messages, "channel", include_today_processed_messages,
+        all_channels, processed_messages, "channel", include_today_processed_messages, _deadline,
     )
 
 
-async def fetch_group_messages(include_today_processed_messages: bool = False) -> List[MessageInfo]:
+async def fetch_group_messages(include_today_processed_messages: bool = False, _deadline: float = 0.0) -> List[MessageInfo]:
     """Fetch messages from source groups in the last 24 hours."""
     processed_messages = load_group_summarization_history()
     logger.info("Loaded %d already processed group messages from history", len(processed_messages))
 
     return await _fetch_from_sources(
-        list(SOURCE_GROUPS), processed_messages, "group", include_today_processed_messages,
+        list(SOURCE_GROUPS), processed_messages, "group", include_today_processed_messages, _deadline,
     )
-
-
-async def send_message_to_target_channel(message: str) -> None:
-    """Отправляет сообщение в целевой канал."""
-    from config import TARGET_CHANNEL
-
-    try:
-        await _ensure_bot_client()
-        await bot_client.send_message(TARGET_CHANNEL, message, parse_mode="html")
-        logger.info("Message sent to target channel")
-    except Exception as e:
-        logger.error("Error sending message to target channel: %s", e)
 
 
 async def edit_message_in_target_channel(message_id: int, new_message: str) -> None:

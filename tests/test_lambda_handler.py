@@ -134,6 +134,26 @@ class HandlerTests(unittest.TestCase):
 
         self.assertEqual(result["request_id"], "test-req-123")
 
+    def test_handler_passes_deadline_to_run_summarizer(self):
+        """Verify the handler computes a deadline and passes it as _deadline kwarg."""
+        event = {"send_message": True, "save_changes": True}
+
+        async_mock = AsyncMock()
+
+        def _run_and_close(coro):
+            coro.close()
+
+        with patch.object(self.lambda_handler.os, "chdir"), \
+             patch.object(self.lambda_handler, "download_from_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.object(self.lambda_handler, "run_summarizer", async_mock) as mock_run, \
+             patch.object(self.lambda_handler.asyncio, "run", side_effect=_run_and_close):
+            self.lambda_handler.handler(event, context=None)
+
+        call_kwargs = mock_run.call_args[1]
+        self.assertIn("_deadline", call_kwargs)
+        self.assertIsInstance(call_kwargs["_deadline"], float)
+
 
 if __name__ == "__main__":
     unittest.main()
