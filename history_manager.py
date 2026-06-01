@@ -450,6 +450,7 @@ async def update_existing_summary(
         date=summary.date,
         message_count=summary.message_count + 1,
         channels=updated_channels,
+        message_id=summary.message_id,
     )
 
     return updated_summary

@@ -317,5 +317,105 @@ class SaveUpdatedSummaryMatchingTests(unittest.TestCase):
         self.assertEqual(original.content, "Fallback content")
 
 
+class UpdateExistingSummaryPreservesMessageIdTests(unittest.TestCase):
+    """Tests for update_existing_summary preserving message_id."""
+
+    def test_update_preserves_message_id(self):
+        """update_existing_summary should carry over message_id from the original summary."""
+        from models import SummaryInfo, MessageInfo
+        from datetime import datetime, timezone
+        import asyncio
+
+        original = SummaryInfo(
+            content="Original content",
+            date=datetime.now(timezone.utc),
+            message_count=2,
+            channels=["@ch1"],
+            message_id=99,
+        )
+
+        new_msg = MessageInfo(
+            text="New message text",
+            channel="@ch2",
+            message_id=200,
+            date=datetime.now(timezone.utc),
+            link="https://t.me/ch2/200",
+        )
+
+        import importlib
+        import sys
+        import types
+        from unittest.mock import MagicMock
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_channel_manager = types.ModuleType("channel_manager")
+        fake_channel_manager.create_channel_abbreviation = lambda ch: "AB"
+        fake_channel_manager.load_channel_abbreviations = lambda: {}
+        fake_models = types.ModuleType("models")
+        fake_models.SummaryInfo = SummaryInfo
+        fake_models.MessageInfo = MessageInfo
+        fake_prompts = types.ModuleType("prompts")
+        fake_prompts.prompts = types.SimpleNamespace()
+        fake_utils = types.ModuleType("utils")
+        fake_utils.call_openai = MagicMock()
+        fake_utils.extract_links = lambda text: []
+        fake_utils.load_json_file = lambda *a, **kw: {}
+        fake_utils.save_json_file = lambda *a, **kw: True
+        fake_utils.now_iso = lambda: "2026-01-01T00:00:00"
+        fake_utils.extract_all_channels = lambda text: []
+        fake_telegram_client = types.ModuleType("telegram_client")
+        fake_telegram_client.user_client = None
+        fake_telegram_client.clients_loop = None
+
+        stubs = {
+            "dotenv": fake_dotenv,
+            "channel_manager": fake_channel_manager,
+            "models": fake_models,
+            "prompts": fake_prompts,
+            "utils": fake_utils,
+            "telegram_client": fake_telegram_client,
+        }
+
+        with patch.dict(sys.modules, stubs):
+            with patch.dict(os.environ, {}, clear=True):
+                sys.modules.pop("history_manager", None)
+                sys.modules.pop("config", None)
+                hm = importlib.import_module("history_manager")
+                updated = asyncio.run(hm.update_existing_summary(original, new_msg))
+
+        self.assertEqual(updated.message_id, 99, "message_id should be preserved from original summary")
+
+
+class SsmClientCachingTests(unittest.TestCase):
+    """Tests for SSM client caching in config.py."""
+
+    def test_get_ssm_client_caches_client(self):
+        """_get_ssm_client should return the same client on subsequent calls."""
+        import importlib
+        import sys
+        import types
+        from unittest.mock import patch, MagicMock
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        fake_boto3 = types.ModuleType("boto3")
+        mock_ssm_client = MagicMock()
+        fake_boto3.client = MagicMock(return_value=mock_ssm_client)
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv, "boto3": fake_boto3}):
+            with patch.dict(os.environ, {}, clear=True):
+                sys.modules.pop("config", None)
+                config = importlib.import_module("config")
+                config._ssm_client = None
+
+                client1 = config._get_ssm_client()
+                client2 = config._get_ssm_client()
+
+                self.assertIs(client1, client2, "SSM client should be cached and reused")
+                fake_boto3.client.assert_called_once_with("ssm")
+
+
 if __name__ == '__main__':
     unittest.main()

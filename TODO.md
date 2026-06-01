@@ -222,6 +222,19 @@
   - `test_get_secret_falls_back_to_env_when_ssm_fails`: verifies env var fallback when SSM call fails
 - All 61 tests pass without errors.
 
+## Completed in 2026-06-01 round (Lambda hardening round 6, async OpenAI, bug fixes, code dedup)
+
+- **Critical fix**: Replaced sync `OpenAI` with `AsyncOpenAI` in [`utils.py`](utils.py). The sync client blocked the entire event loop during API calls (5-30s each), making deadline checks unreliable and preventing concurrent async work. Now `await openai_client.chat.completions.create(...)` properly yields control, so `check_deadline()` and Telegram client operations can progress during OpenAI wait times.
+- **Bug fix**: Fixed [`update_existing_summary()`](history_manager.py) — was not carrying over `message_id` from the original summary to the updated one. This meant subsequent edits to the same channel message would fail because `save_updated_summary()` couldn't find the message by ID.
+- **Code dedup**: Merged `is_message_covered_in_summaries()` and `is_message_covered_in_group_summaries()` in [`message_processor.py`](message_processor.py) into shared `_check_coverage()` helper. Eliminated ~20 lines of duplicated coverage-check logic (both differed only in prompt, context function, and label).
+- **Code cleanup**: Removed unused `duplicate_label` parameter from [`_remove_duplicates_generic()`](message_processor.py) — was passed by `remove_duplicates()` and `remove_group_duplicates()` but never referenced.
+- **Performance**: Cached SSM client in [`config.py`](config.py) — `_get_ssm_client()` now creates the boto3 SSM client once and reuses it, instead of creating a new client per `_get_ssm_param()` call (up to 4 calls per Lambda invocation).
+- **Tests added**: 2 new tests (total 66, up from 64):
+  - `test_update_preserves_message_id`: verifies `update_existing_summary` carries over `message_id` from original summary
+  - `test_get_ssm_client_caches_client`: verifies SSM client is cached and reused across calls
+- Updated test stubs in [`tests/test_openai_config.py`](tests/test_openai_config.py) and [`tests/test_summary_length_guardrails.py`](tests/test_summary_length_guardrails.py) to include `AsyncOpenAI` alongside `OpenAI`.
+- All 66 tests pass without errors.
+
 ## Completed in 2026-05-30 round (Lambda hardening round 5, cost optimization)
 
 - **Bug fix**: Fixed [`save_updated_summary()`](history_manager.py) matching — was using fragile `summary.content == original_summary.content` comparison which could match wrong summary if content happens to be identical. Now matches by `message_id` first (reliable unique key), falls back to content+date+count when `message_id` is None.
@@ -240,3 +253,5 @@
 - **CI/CD**: Настроить GitHub Actions CI/CD для автоматического деплоя Lambda при мердже в main.
 - **Secrets management**: Перенести реальные секреты в AWS SSM Parameter Store (инфраструктура готова — `*_SSM_PATH` env vars и IAM policies в template.yaml).
 - **Prompt A/B testing**: Продолжить тестирование промптов — отслеживать качество саммари после снижения `max_tokens` до 4000 и при необходимости корректировать.
+- **OpenAI response streaming**: Рассмотреть streaming API для снижения perceived latency (но не стоимости — `max_tokens` уже ограничен).
+- **History file read caching**: `load_summaries_history()` и `load_group_summaries_history()` вызываются многократно в рамках одного Lambda invocation — каждый раз читают файл с диска. Рассмотреть in-memory кэширование с инвалидацией при сохранении.

@@ -123,58 +123,53 @@ async def are_messages_duplicate(msg_a: MessageInfo, msg_b: MessageInfo) -> bool
     return answer.strip().lower().startswith("да")
 
 
-async def is_message_covered_in_summaries(msg: MessageInfo) -> bool:
-    """Проверяет, была ли тема сообщения уже освещена в предыдущих саммари."""
+async def _check_coverage(
+    msg: MessageInfo,
+    recent_summaries: str,
+    prompt,
+    label: str,
+) -> bool:
+    """Check if a message topic is already covered in previous summaries."""
     if not ENABLE_SUMMARIES_DEDUPLICATION:
         return False
 
-    recent_summaries = get_recent_summaries_context()
     if not recent_summaries:
         return False
 
-    user_content = f"""Предыдущие дайджесты:
-        {recent_summaries}
-
-        Новое сообщение:
-        {msg.text}
-
-        Была ли эта тема уже освещена в предыдущих дайджестах?"""
-
-    try:
-        result = await call_openai(
-            prompts.SUMMARY_COVERAGE_CHECK_PROMPT, user_content, max_tokens=5
-        )
-        return result.strip().upper() == "ДА"
-    except Exception as e:
-        logger.error("Error checking summary coverage: %s", e)
-        return False
-
-
-async def is_message_covered_in_group_summaries(msg: MessageInfo) -> bool:
-    """Проверяет, была ли тема сообщения уже освещена в предыдущих саммари групп."""
-    if not ENABLE_SUMMARIES_DEDUPLICATION:
-        return False
-
-    recent_summaries = get_recent_group_summaries_context()
-    if not recent_summaries:
-        return False
-
-    user_content = f"""Предыдущие дайджесты групп:
+    user_content = f"""Предыдущие дайджесты{label}:
 {recent_summaries}
 
 Новое сообщение:
 {msg.text}
 
-Была ли эта тема уже освещена в предыдущих дайджестах групп?"""
+Была ли эта тема уже освещена в предыдущих дайджестах{label}?"""
 
     try:
-        result = await call_openai(
-            prompts.GROUP_SUMMARY_COVERAGE_CHECK_PROMPT, user_content, max_tokens=5
-        )
+        result = await call_openai(prompt, user_content, max_tokens=5)
         return result.strip().upper() == "ДА"
     except Exception as e:
-        logger.error("Error checking group summary coverage: %s", e)
+        logger.error("Error checking %s coverage: %s", label.strip(), e)
         return False
+
+
+async def is_message_covered_in_summaries(msg: MessageInfo) -> bool:
+    """Проверяет, была ли тема сообщения уже освещена в предыдущих саммари."""
+    return await _check_coverage(
+        msg,
+        get_recent_summaries_context(),
+        prompts.SUMMARY_COVERAGE_CHECK_PROMPT,
+        "",
+    )
+
+
+async def is_message_covered_in_group_summaries(msg: MessageInfo) -> bool:
+    """Проверяет, была ли тема сообщения уже освещена в предыдущих саммари групп."""
+    return await _check_coverage(
+        msg,
+        get_recent_group_summaries_context(),
+        prompts.GROUP_SUMMARY_COVERAGE_CHECK_PROMPT,
+        " групп",
+    )
 
 
 async def is_nlp_related(text: str) -> tuple[bool, str]:
@@ -189,7 +184,6 @@ async def _remove_duplicates_generic(
     messages: List[MessageInfo],
     coverage_check_fn,
     unique_label: str,
-    duplicate_label: str,
 ) -> List[MessageInfo]:
     """Generic deduplication shared by channel and group message streams.
 
@@ -247,7 +241,6 @@ async def remove_duplicates(messages: List[MessageInfo]) -> List[MessageInfo]:
         messages,
         coverage_check_fn=is_message_covered_in_summaries,
         unique_label="Добавляем уникальное сообщение",
-        duplicate_label="сообщение, уже освещенное в саммари",
     )
 
 
@@ -257,7 +250,6 @@ async def remove_group_duplicates(messages: List[MessageInfo]) -> List[MessageIn
         messages,
         coverage_check_fn=is_message_covered_in_group_summaries,
         unique_label="Добавляем уникальное сообщение из группы",
-        duplicate_label="сообщение, уже освещенное в саммари групп",
     )
 
 

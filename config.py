@@ -6,14 +6,30 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
+_ssm_client = None
+
+
+def _get_ssm_client():
+    """Get or create a cached SSM client."""
+    global _ssm_client
+    if _ssm_client is None:
+        try:
+            import boto3
+            _ssm_client = boto3.client("ssm")
+        except Exception as e:
+            logger.debug("Could not create SSM client: %s", e)
+            return None
+    return _ssm_client
+
 
 def _get_ssm_param(path: str) -> str | None:
     """Fetch a parameter from AWS SSM Parameter Store. Returns None on failure."""
     if not path:
         return None
     try:
-        import boto3
-        client = boto3.client("ssm")
+        client = _get_ssm_client()
+        if client is None:
+            return None
         response = client.get_parameter(Name=path, WithDecryption=True)
         return response["Parameter"]["Value"]
     except Exception as e:

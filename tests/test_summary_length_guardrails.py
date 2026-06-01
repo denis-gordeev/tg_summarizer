@@ -30,6 +30,7 @@ def _stub_dependencies():
             )
 
     fake_openai.OpenAI = FakeOpenAI
+    fake_openai.AsyncOpenAI = FakeOpenAI
     fake_openai.APIError = FakeOpenAIError
     fake_openai.RateLimitError = type("RateLimitError", (FakeOpenAIError,), {"status_code": None})
     fake_openai.APIConnectionError = type("APIConnectionError", (FakeOpenAIError,), {})
