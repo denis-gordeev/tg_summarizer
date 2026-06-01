@@ -417,5 +417,172 @@ class SsmClientCachingTests(unittest.TestCase):
                 fake_boto3.client.assert_called_once_with("ssm")
 
 
+class HistoryCacheTests(unittest.TestCase):
+    """Tests for in-memory history caching."""
+
+    def _import_hm_with_stubs(self):
+        import importlib
+        import sys
+        import types
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_channel_manager = types.ModuleType("channel_manager")
+        fake_channel_manager.create_channel_abbreviation = lambda ch: "AB"
+        fake_channel_manager.load_channel_abbreviations = lambda: {}
+        fake_models = types.ModuleType("models")
+        fake_models.SummaryInfo = type("FakeSummaryInfo", (), {"__init__": lambda self, **kw: None, "to_dict": lambda self: {}})
+        fake_models.MessageInfo = type("MessageInfo", (), {})
+        fake_prompts = types.ModuleType("prompts")
+        fake_prompts.prompts = types.SimpleNamespace()
+        fake_utils = types.ModuleType("utils")
+        fake_utils.call_openai = MagicMock()
+        fake_utils.extract_links = lambda text: []
+        fake_utils.load_json_file = lambda *a, **kw: {}
+        fake_utils.save_json_file = lambda *a, **kw: True
+        fake_utils.now_iso = lambda: "2026-01-01T00:00:00"
+        fake_utils.extract_all_channels = lambda text: []
+        fake_telegram_client = types.ModuleType("telegram_client")
+        fake_telegram_client.user_client = None
+        fake_telegram_client.clients_loop = None
+
+        stubs = {
+            "dotenv": fake_dotenv,
+            "channel_manager": fake_channel_manager,
+            "models": fake_models,
+            "prompts": fake_prompts,
+            "utils": fake_utils,
+            "telegram_client": fake_telegram_client,
+        }
+
+        return stubs
+
+    def test_invalidate_cache_clears_specific_key(self):
+        """invalidate_cache with filepath should clear only that key."""
+        stubs = self._import_hm_with_stubs()
+        with patch.dict(sys.modules, stubs):
+            with patch.dict(os.environ, {}, clear=True):
+                sys.modules.pop("history_manager", None)
+                sys.modules.pop("config", None)
+                hm = importlib.import_module("history_manager")
+
+                hm._cache["file:test.json"] = ["data"]
+                hm._cache["file:other.json"] = ["other"]
+                hm.invalidate_cache("test.json")
+                self.assertNotIn("file:test.json", hm._cache)
+                self.assertIn("file:other.json", hm._cache)
+
+    def test_invalidate_cache_clears_all_without_filepath(self):
+        """invalidate_cache without filepath should clear entire cache."""
+        stubs = self._import_hm_with_stubs()
+        with patch.dict(sys.modules, stubs):
+            with patch.dict(os.environ, {}, clear=True):
+                sys.modules.pop("history_manager", None)
+                sys.modules.pop("config", None)
+                hm = importlib.import_module("history_manager")
+
+                hm._cache["file:a.json"] = ["a"]
+                hm._cache["file:b.json"] = ["b"]
+                hm.invalidate_cache()
+                self.assertEqual(len(hm._cache), 0)
+
+
+class TextHashTests(unittest.TestCase):
+    """Tests for _text_hash helper — None-safe hashing."""
+
+    def test_text_hash_with_normal_text(self):
+        """_text_hash should produce deterministic hash for normal text."""
+        import importlib
+        import sys
+        import types
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_channel_manager = types.ModuleType("channel_manager")
+        fake_channel_manager.create_channel_abbreviation = lambda ch: "AB"
+        fake_channel_manager.load_channel_abbreviations = lambda: {}
+        fake_models = types.ModuleType("models")
+        fake_models.SummaryInfo = type("FakeSummaryInfo", (), {})
+        fake_models.MessageInfo = type("MessageInfo", (), {})
+        fake_prompts = types.ModuleType("prompts")
+        fake_prompts.prompts = types.SimpleNamespace()
+        fake_utils = types.ModuleType("utils")
+        fake_utils.call_openai = MagicMock()
+        fake_utils.extract_links = lambda text: []
+        fake_utils.load_json_file = lambda *a, **kw: {}
+        fake_utils.save_json_file = lambda *a, **kw: True
+        fake_utils.now_iso = lambda: "2026-01-01T00:00:00"
+        fake_utils.extract_all_channels = lambda text: []
+        fake_telegram_client = types.ModuleType("telegram_client")
+        fake_telegram_client.user_client = None
+        fake_telegram_client.clients_loop = None
+
+        stubs = {
+            "dotenv": fake_dotenv,
+            "channel_manager": fake_channel_manager,
+            "models": fake_models,
+            "prompts": fake_prompts,
+            "utils": fake_utils,
+            "telegram_client": fake_telegram_client,
+        }
+
+        with patch.dict(sys.modules, stubs):
+            with patch.dict(os.environ, {}, clear=True):
+                sys.modules.pop("history_manager", None)
+                sys.modules.pop("config", None)
+                hm = importlib.import_module("history_manager")
+
+                h1 = hm._text_hash("hello world")
+                h2 = hm._text_hash("hello world")
+                self.assertEqual(h1, h2, "Same input should produce same hash")
+                self.assertEqual(len(h1), 16, "Hash should be 16 chars")
+
+    def test_text_hash_with_none_returns_same_as_empty(self):
+        """_text_hash should handle None gracefully, same as empty string."""
+        import importlib
+        import sys
+        import types
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_channel_manager = types.ModuleType("channel_manager")
+        fake_channel_manager.create_channel_abbreviation = lambda ch: "AB"
+        fake_channel_manager.load_channel_abbreviations = lambda: {}
+        fake_models = types.ModuleType("models")
+        fake_models.SummaryInfo = type("FakeSummaryInfo", (), {})
+        fake_models.MessageInfo = type("MessageInfo", (), {})
+        fake_prompts = types.ModuleType("prompts")
+        fake_prompts.prompts = types.SimpleNamespace()
+        fake_utils = types.ModuleType("utils")
+        fake_utils.call_openai = MagicMock()
+        fake_utils.extract_links = lambda text: []
+        fake_utils.load_json_file = lambda *a, **kw: {}
+        fake_utils.save_json_file = lambda *a, **kw: True
+        fake_utils.now_iso = lambda: "2026-01-01T00:00:00"
+        fake_utils.extract_all_channels = lambda text: []
+        fake_telegram_client = types.ModuleType("telegram_client")
+        fake_telegram_client.user_client = None
+        fake_telegram_client.clients_loop = None
+
+        stubs = {
+            "dotenv": fake_dotenv,
+            "channel_manager": fake_channel_manager,
+            "models": fake_models,
+            "prompts": fake_prompts,
+            "utils": fake_utils,
+            "telegram_client": fake_telegram_client,
+        }
+
+        with patch.dict(sys.modules, stubs):
+            with patch.dict(os.environ, {}, clear=True):
+                sys.modules.pop("history_manager", None)
+                sys.modules.pop("config", None)
+                hm = importlib.import_module("history_manager")
+
+                h_none = hm._text_hash(None)
+                h_empty = hm._text_hash("")
+                self.assertEqual(h_none, h_empty, "None and empty string should produce same hash")
+
+
 if __name__ == '__main__':
     unittest.main()

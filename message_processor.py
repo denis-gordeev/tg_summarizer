@@ -32,6 +32,10 @@ from prompts import prompts
 logger = logging.getLogger(__name__)
 
 
+def _text_hash(text: str) -> str:
+    return hashlib.sha256((text or "").encode()).hexdigest()[:16]
+
+
 def _calculate_channel_summary_limit(total_original_length: int) -> int:
     return min(max(total_original_length // SUMMARY_MIN_RATIO, SUMMARY_MIN_LENGTH), SUMMARY_MAX_LENGTH)
 
@@ -110,7 +114,7 @@ def enforce_summary_length(summary: str, max_visible_chars: int) -> str:
 
 def is_message_processed(msg: MessageInfo, processed_messages: Set[str]) -> bool:
     """Проверяет, было ли сообщение уже обработано ранее."""
-    text_hash = hashlib.sha256(msg.text.encode()).hexdigest()[:16]
+    text_hash = _text_hash(msg.text)
     msg_id = f"{msg.channel}_{msg.message_id}_{text_hash}"
     return msg_id in processed_messages
 

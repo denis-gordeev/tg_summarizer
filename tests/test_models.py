@@ -79,6 +79,41 @@ class MessageInfoTests(unittest.TestCase):
         self.assertFalse(msg.is_nlp_related)
         self.assertIsNone(msg.is_nlp_related_reason)
 
+    def test_from_dict_handles_none_text(self):
+        """Should handle None text gracefully (defensive hardening)."""
+        d = {
+            "text": None,
+            "message_id": 1,
+            "channel": "@test",
+            "date": self.test_date.isoformat(),
+            "link": "https://t.me/test/1",
+        }
+        msg = MessageInfo.from_dict(d)
+        self.assertEqual(msg.text, "")
+
+    def test_from_dict_handles_missing_text(self):
+        """Should handle missing text field gracefully."""
+        d = {
+            "message_id": 1,
+            "channel": "@test",
+            "date": self.test_date.isoformat(),
+            "link": "https://t.me/test/1",
+        }
+        msg = MessageInfo.from_dict(d)
+        self.assertEqual(msg.text, "")
+
+    def test_from_dict_handles_none_channel(self):
+        """Should handle None channel gracefully."""
+        d = {
+            "text": "Test",
+            "message_id": 1,
+            "channel": None,
+            "date": self.test_date.isoformat(),
+            "link": "",
+        }
+        msg = MessageInfo.from_dict(d)
+        self.assertEqual(msg.channel, "")
+
 
 class SummaryInfoTests(unittest.TestCase):
     """Tests for SummaryInfo serialization/deserialization."""

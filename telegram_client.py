@@ -106,6 +106,9 @@ async def _fetch_from_sources(
             async for msg in user_client.iter_messages(
                 source, offset_date=None, min_id=0, reverse=False
             ):
+                if _deadline and time.monotonic() > _deadline:
+                    logger.warning("Deadline exceeded during fetch from %s %s — returning %d messages fetched so far", source_label, source, len(all_msgs))
+                    break
                 if msg.date < since:
                     break
                 if msg.message:

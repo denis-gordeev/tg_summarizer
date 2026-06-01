@@ -96,5 +96,24 @@ class S3SyncOperationTests(unittest.TestCase):
                 os.chdir(previous_cwd)
 
 
+class S3ClientCachingTests(unittest.TestCase):
+    def test_get_s3_client_caches_client(self):
+        """_get_s3_client should return the same client on subsequent calls."""
+        import types
+        from unittest.mock import MagicMock
+
+        fake_boto3 = types.ModuleType("boto3")
+        mock_client = MagicMock()
+        fake_boto3.client = MagicMock(return_value=mock_client)
+
+        with patch.dict("sys.modules", {"boto3": fake_boto3}):
+            s3_sync._s3_client = None
+            client1 = s3_sync._get_s3_client()
+            client2 = s3_sync._get_s3_client()
+            self.assertIs(client1, client2, "S3 client should be cached and reused")
+            fake_boto3.client.assert_called_once_with("s3")
+        s3_sync._s3_client = None
+
+
 if __name__ == "__main__":
     unittest.main()

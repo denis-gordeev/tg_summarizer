@@ -222,6 +222,23 @@
   - `test_get_secret_falls_back_to_env_when_ssm_fails`: verifies env var fallback when SSM call fails
 - All 61 tests pass without errors.
 
+## Completed in 2026-06-01 round 2 (Lambda hardening round 7, caching, deadline, safety)
+
+- **S3 client caching**: Added `_s3_client` module-level cache in [`s3_sync.py`](s3_sync.py) — `_get_s3_client()` now creates the boto3 S3 client once and reuses it (mirrors the SSM client caching already done in [`config.py`](config.py)). Previously created a new client per call (2 calls per Lambda invocation: download + upload).
+- **In-memory history caching**: Added `_cache` dict and `invalidate_cache()` in [`history_manager.py`](history_manager.py). `load_summaries_history()` and `load_group_summaries_history()` now cache their results in memory, avoiding repeated disk reads within a single Lambda invocation. Cache is invalidated on every save operation (`save_summary_to_history`, `save_group_summary_to_history`, `save_updated_summary`, `_restore_summaries_from_channel`) and on S3 download (via `invalidate_cache()` call in [`s3_sync.py`](s3_sync.py)).
+- **Deadline check during message iteration**: Added deadline check inside `async for msg in user_client.iter_messages(...)` loop in [`_fetch_from_sources()`](telegram_client.py) — previously only checked before each source, not between messages. If a single channel has thousands of messages, the Lambda could now exceed its timeout mid-fetch. The new check breaks out of the iteration loop early, returning already-fetched messages.
+- **None-safe text handling**: Added `_text_hash()` helper in [`message_processor.py`](message_processor.py) and [`history_manager.py`](history_manager.py) that handles `None` text gracefully (`hashlib.sha256((text or "").encode())`). Also made [`MessageInfo.from_dict()`](models.py) defensive: `text`, `channel`, `link` default to `""` when `None` or missing, and `date` falls back to `datetime.now(timezone.utc)` when absent. Prevents `AttributeError` on `.encode()` if deserialized data has null fields.
+- **Tests added**: 8 new tests (total 74, up from 66):
+  - `test_from_dict_handles_none_text`: verifies `MessageInfo.from_dict` with `None` text
+  - `test_from_dict_handles_missing_text`: verifies `MessageInfo.from_dict` without text key
+  - `test_from_dict_handles_none_channel`: verifies `MessageInfo.from_dict` with `None` channel
+  - `test_get_s3_client_caches_client`: verifies S3 client is cached and reused
+  - `test_invalidate_cache_clears_specific_key`: verifies targeted cache invalidation
+  - `test_invalidate_cache_clears_all_without_filepath`: verifies full cache invalidation
+  - `test_text_hash_with_normal_text`: verifies deterministic hashing
+  - `test_text_hash_with_none_returns_same_as_empty`: verifies None → empty string equivalence
+- All 74 tests pass without errors.
+
 ## Completed in 2026-06-01 round (Lambda hardening round 6, async OpenAI, bug fixes, code dedup)
 
 - **Critical fix**: Replaced sync `OpenAI` with `AsyncOpenAI` in [`utils.py`](utils.py). The sync client blocked the entire event loop during API calls (5-30s each), making deadline checks unreliable and preventing concurrent async work. Now `await openai_client.chat.completions.create(...)` properly yields control, so `check_deadline()` and Telegram client operations can progress during OpenAI wait times.
@@ -254,4 +271,3 @@
 - **Secrets management**: Перенести реальные секреты в AWS SSM Parameter Store (инфраструктура готова — `*_SSM_PATH` env vars и IAM policies в template.yaml).
 - **Prompt A/B testing**: Продолжить тестирование промптов — отслеживать качество саммари после снижения `max_tokens` до 4000 и при необходимости корректировать.
 - **OpenAI response streaming**: Рассмотреть streaming API для снижения perceived latency (но не стоимости — `max_tokens` уже ограничен).
-- **History file read caching**: `load_summaries_history()` и `load_group_summaries_history()` вызываются многократно в рамках одного Lambda invocation — каждый раз читают файл с диска. Рассмотреть in-memory кэширование с инвалидацией при сохранении.

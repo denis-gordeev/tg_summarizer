@@ -20,13 +20,20 @@ DEFAULT_SYNC_FILES = (
 )
 
 
+_s3_client = None
+
+
 def _get_s3_client():
+    global _s3_client
+    if _s3_client is not None:
+        return _s3_client
     try:
         import boto3
     except ImportError:
         logger.error("boto3 is not installed; skipping S3 sync")
         return None
-    return boto3.client("s3")
+    _s3_client = boto3.client("s3")
+    return _s3_client
 
 
 def _get_sync_files() -> list[str]:
@@ -61,14 +68,23 @@ def download_from_s3() -> None:
         return
 
     prefix = os.getenv("STATE_S3_PREFIX", "")
+    downloaded = False
     for relative_name, local_path in _iter_local_files():
         key = _build_s3_key(prefix, relative_name)
         local_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             client.download_file(bucket, key, str(local_path))
             logger.info("Downloaded s3://%s/%s -> %s", bucket, key, local_path)
+            downloaded = True
         except Exception as exc:
             logger.debug("Skipping download for s3://%s/%s: %s", bucket, key, exc)
+
+    if downloaded:
+        try:
+            from history_manager import invalidate_cache
+            invalidate_cache()
+        except ImportError:
+            pass
 
 
 def upload_to_s3() -> None:

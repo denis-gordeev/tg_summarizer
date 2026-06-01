@@ -31,6 +31,23 @@ from utils import call_openai, extract_links, load_json_file, save_json_file, no
 
 logger = logging.getLogger(__name__)
 
+_cache: Dict[str, Any] = {}
+
+
+def _cache_key(filepath: str) -> str:
+    return f"file:{filepath}"
+
+
+def invalidate_cache(filepath: str = None) -> None:
+    if filepath:
+        _cache.pop(_cache_key(filepath), None)
+    else:
+        _cache.clear()
+
+
+def _text_hash(text: str) -> str:
+    return hashlib.sha256((text or "").encode()).hexdigest()[:16]
+
 
 def load_summarization_history() -> Set[str]:
     """Загружает историю уже обработанных сообщений из файла."""
@@ -38,8 +55,7 @@ def load_summarization_history() -> Set[str]:
     processed_messages = set()
     for msg_data in data.get("processed_messages", []):
         msg = MessageInfo.from_dict(msg_data)
-        text_hash = hashlib.sha256(msg.text.encode()).hexdigest()[:16]
-        msg_id = f"{msg.channel}_{msg.message_id}_{text_hash}"
+        msg_id = f"{msg.channel}_{msg.message_id}_{_text_hash(msg.text)}"
         processed_messages.add(msg_id)
     return processed_messages
 
@@ -73,6 +89,10 @@ def _parse_summaries_from_data(data: Any) -> List[SummaryInfo]:
 
 def load_summaries_history() -> List[SummaryInfo]:
     """Загружает историю созданных саммари из файла."""
+    cache_key = _cache_key(SUMMARIES_HISTORY_FILE)
+    if cache_key in _cache:
+        return _cache[cache_key]
+
     data = load_json_file(SUMMARIES_HISTORY_FILE, None)
     if data is None:
         return []
@@ -80,9 +100,10 @@ def load_summaries_history() -> List[SummaryInfo]:
     summaries = _parse_summaries_from_data(data)
     if not summaries:
         logger.info("No summaries found in history file, attempting channel restore...")
-        return restore_summaries_from_channel_sync()
+        summaries = restore_summaries_from_channel_sync()
 
     summaries = sorted(summaries, key=lambda x: x.date)
+    _cache[cache_key] = summaries
     return summaries
 
 
@@ -128,6 +149,7 @@ async def _restore_summaries_from_channel(
             all_summaries = [summary.to_dict() for summary in summaries]
             data = {"summaries": all_summaries, "last_updated": now_iso()}
             save_json_file(history_file, data, f"Error saving restored {label}")
+            invalidate_cache(history_file)
 
         return summaries
 
@@ -224,6 +246,7 @@ def save_summary_to_history(summary: SummaryInfo) -> None:
     all_summaries_dict = [s.to_dict() for s in all_summaries if isinstance(s, SummaryInfo)]
     data = {"summaries": all_summaries_dict, "last_updated": now_iso()}
     save_json_file(SUMMARIES_HISTORY_FILE, data, "Error saving summary history")
+    invalidate_cache(SUMMARIES_HISTORY_FILE)
 
 
 def load_group_summarization_history() -> Set[str]:
@@ -232,8 +255,7 @@ def load_group_summarization_history() -> Set[str]:
     processed_messages = set()
     for msg_data in data.get("processed_messages", []):
         msg = MessageInfo.from_dict(msg_data)
-        text_hash = hashlib.sha256(msg.text.encode()).hexdigest()[:16]
-        msg_id = f"{msg.channel}_{msg.message_id}_{text_hash}"
+        msg_id = f"{msg.channel}_{msg.message_id}_{_text_hash(msg.text)}"
         processed_messages.add(msg_id)
     return processed_messages
 
@@ -254,6 +276,10 @@ def save_group_summarization_history(messages: List[MessageInfo]) -> None:
 
 def load_group_summaries_history() -> List[SummaryInfo]:
     """Загружает историю созданных саммари из групп из файла."""
+    cache_key = _cache_key(GROUP_SUMMARIES_HISTORY_FILE)
+    if cache_key in _cache:
+        return _cache[cache_key]
+
     data = load_json_file(GROUP_SUMMARIES_HISTORY_FILE, None)
     if data is None:
         return []
@@ -261,6 +287,7 @@ def load_group_summaries_history() -> List[SummaryInfo]:
     summaries = _parse_summaries_from_data(data)
     if not summaries:
         return []
+    _cache[cache_key] = summaries
     return summaries
 
 
@@ -275,6 +302,7 @@ def save_group_summary_to_history(summary: SummaryInfo) -> None:
 
     data["last_updated"] = now_iso()
     save_json_file(GROUP_SUMMARIES_HISTORY_FILE, data, "Error saving group summary history")
+    invalidate_cache(GROUP_SUMMARIES_HISTORY_FILE)
 
 
 def should_run_group_summarization() -> bool:
@@ -480,6 +508,7 @@ async def save_updated_summary(
         data,
         "Error saving updated %s summary history" % ("group" if is_group else ""),
     )
+    invalidate_cache(history_file)
 
     if original_summary.message_id:
         try:

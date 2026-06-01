@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 
@@ -38,11 +38,11 @@ class MessageInfo:
     def from_dict(cls, data: dict) -> 'MessageInfo':
         """Создает объект из словаря"""
         return cls(
-            text=data['text'],
-            channel=data['channel'],
-            message_id=data['message_id'],
-            date=datetime.fromisoformat(data['date']),
-            link=data['link'],
+            text=data.get('text') or '',
+            channel=data.get('channel') or '',
+            message_id=data.get('message_id', 0),
+            date=datetime.fromisoformat(data['date']) if data.get('date') else datetime.now(timezone.utc),
+            link=data.get('link') or '',
             is_nlp_related=data.get('is_nlp_related'),
             is_nlp_related_reason=data.get('is_nlp_related_reason'),
             is_covered_in_summaries=data.get('is_covered_in_summaries')
