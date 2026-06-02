@@ -17,6 +17,7 @@ def _setup_stubs():
     fake_utils.call_openai = fake_call_openai
     fake_utils.extract_links = lambda text: []
     fake_utils.count_characters = lambda text: len(text)
+    fake_utils.text_hash = lambda text: "abc123"
     sys.modules["utils"] = fake_utils
 
     # --- Stub config ---

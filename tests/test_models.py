@@ -169,6 +169,58 @@ class SummaryInfoTests(unittest.TestCase):
         self.assertEqual(restored.channels, [])
         self.assertIsNone(restored.message_id)
 
+    def test_from_dict_handles_none_content(self):
+        """Should handle None content gracefully."""
+        d = {
+            "content": None,
+            "date": self.test_date.isoformat(),
+            "message_count": 1,
+            "channels": ["@test"],
+        }
+        summary = SummaryInfo.from_dict(d)
+        self.assertEqual(summary.content, "")
+
+    def test_from_dict_handles_missing_content(self):
+        """Should handle missing content field gracefully."""
+        d = {
+            "date": self.test_date.isoformat(),
+            "message_count": 1,
+            "channels": ["@test"],
+        }
+        summary = SummaryInfo.from_dict(d)
+        self.assertEqual(summary.content, "")
+
+    def test_from_dict_handles_none_channels(self):
+        """Should handle None channels gracefully."""
+        d = {
+            "content": "Test",
+            "date": self.test_date.isoformat(),
+            "message_count": 1,
+            "channels": None,
+        }
+        summary = SummaryInfo.from_dict(d)
+        self.assertEqual(summary.channels, [])
+
+    def test_from_dict_handles_missing_date(self):
+        """Should handle missing date field gracefully."""
+        d = {
+            "content": "Test",
+            "message_count": 1,
+            "channels": ["@test"],
+        }
+        summary = SummaryInfo.from_dict(d)
+        self.assertIsNotNone(summary.date)
+
+    def test_from_dict_handles_missing_message_count(self):
+        """Should handle missing message_count field gracefully."""
+        d = {
+            "content": "Test",
+            "date": self.test_date.isoformat(),
+            "channels": ["@test"],
+        }
+        summary = SummaryInfo.from_dict(d)
+        self.assertEqual(summary.message_count, 0)
+
 
 if __name__ == '__main__':
     unittest.main()

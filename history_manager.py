@@ -1,5 +1,4 @@
 import asyncio
-import hashlib
 import json
 import logging
 import os
@@ -27,7 +26,7 @@ from config import (
 )
 from models import MessageInfo, SummaryInfo
 from prompts import prompts
-from utils import call_openai, extract_links, load_json_file, save_json_file, now_iso
+from utils import call_openai, extract_links, load_json_file, save_json_file, now_iso, text_hash
 
 logger = logging.getLogger(__name__)
 
@@ -45,17 +44,13 @@ def invalidate_cache(filepath: str = None) -> None:
         _cache.clear()
 
 
-def _text_hash(text: str) -> str:
-    return hashlib.sha256((text or "").encode()).hexdigest()[:16]
-
-
 def load_summarization_history() -> Set[str]:
     """Загружает историю уже обработанных сообщений из файла."""
     data = load_json_file(HISTORY_FILE, {"processed_messages": []})
     processed_messages = set()
     for msg_data in data.get("processed_messages", []):
         msg = MessageInfo.from_dict(msg_data)
-        msg_id = f"{msg.channel}_{msg.message_id}_{_text_hash(msg.text)}"
+        msg_id = f"{msg.channel}_{msg.message_id}_{text_hash(msg.text)}"
         processed_messages.add(msg_id)
     return processed_messages
 
@@ -73,6 +68,7 @@ def save_summarization_history(messages: List[MessageInfo]) -> None:
 
     data = {"processed_messages": all_messages, "last_updated": now_iso()}
     save_json_file(HISTORY_FILE, data, "Error saving summarization history")
+    invalidate_cache(HISTORY_FILE)
 
 
 def _parse_summaries_from_data(data: Any) -> List[SummaryInfo]:
@@ -255,7 +251,7 @@ def load_group_summarization_history() -> Set[str]:
     processed_messages = set()
     for msg_data in data.get("processed_messages", []):
         msg = MessageInfo.from_dict(msg_data)
-        msg_id = f"{msg.channel}_{msg.message_id}_{_text_hash(msg.text)}"
+        msg_id = f"{msg.channel}_{msg.message_id}_{text_hash(msg.text)}"
         processed_messages.add(msg_id)
     return processed_messages
 
@@ -272,6 +268,7 @@ def save_group_summarization_history(messages: List[MessageInfo]) -> None:
 
     data["last_updated"] = now_iso()
     save_json_file(GROUP_HISTORY_FILE, data, "Error saving group summarization history")
+    invalidate_cache(GROUP_HISTORY_FILE)
 
 
 def load_group_summaries_history() -> List[SummaryInfo]:
@@ -404,15 +401,18 @@ async def find_relevant_summary_for_update(
         truncated = summary.content[:UPDATE_MATCH_MAX_CHARS_PER_SUMMARY]
         summaries_text += f"Саммари {i}:\n{truncated}\n\n"
 
+    num_summaries = len(recent_summaries)
+    numbers = ", ".join(str(i) for i in range(1, num_summaries + 1))
+
     user_content = f"""Существующие саммари:
 {summaries_text}
 
 Новое сообщение:
 {msg.text}
 
-В каком саммари (1, 2, 3) лучше всего добавить ссылку на это сообщение? 
+В каком саммари ({numbers}) лучше всего добавить ссылку на это сообщение? 
 Если ни одно не подходит, ответьте "НЕТ".
-Отвечайте только номером (1, 2, 3) или "НЕТ"."""
+Отвечайте только номером ({numbers}) или "НЕТ"."""
 
     try:
         result = await call_openai(prompts.FIND_RELEVANT_SUMMARY_PROMPT, user_content, max_tokens=3)

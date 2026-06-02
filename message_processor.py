@@ -1,11 +1,10 @@
-import hashlib
 import logging
 import re
 from datetime import datetime, timezone
 from typing import List, Set
 from difflib import SequenceMatcher
 from models import MessageInfo, SummaryInfo
-from utils import call_openai, extract_links, count_characters
+from utils import call_openai, extract_links, count_characters, text_hash
 from config import (
     SIMILARITY_LLM_LOWER,
     SIMILARITY_LLM_UPPER,
@@ -30,10 +29,6 @@ from channel_manager import (
 from prompts import prompts
 
 logger = logging.getLogger(__name__)
-
-
-def _text_hash(text: str) -> str:
-    return hashlib.sha256((text or "").encode()).hexdigest()[:16]
 
 
 def _calculate_channel_summary_limit(total_original_length: int) -> int:
@@ -114,8 +109,8 @@ def enforce_summary_length(summary: str, max_visible_chars: int) -> str:
 
 def is_message_processed(msg: MessageInfo, processed_messages: Set[str]) -> bool:
     """Проверяет, было ли сообщение уже обработано ранее."""
-    text_hash = _text_hash(msg.text)
-    msg_id = f"{msg.channel}_{msg.message_id}_{text_hash}"
+    text_hash_value = text_hash(msg.text)
+    msg_id = f"{msg.channel}_{msg.message_id}_{text_hash_value}"
     return msg_id in processed_messages
 
 
@@ -149,7 +144,7 @@ async def _check_coverage(
 Была ли эта тема уже освещена в предыдущих дайджестах{label}?"""
 
     try:
-        result = await call_openai(prompt, user_content, max_tokens=5)
+        result = await call_openai(prompt, user_content, max_tokens=2)
         return result.strip().upper() == "ДА"
     except Exception as e:
         logger.error("Error checking %s coverage: %s", label.strip(), e)
@@ -180,7 +175,7 @@ async def is_nlp_related(text: str) -> tuple[bool, str]:
     """Use the LLM to decide if a message is NLP related and not advertising."""
     if len(text) < 100:
         return False, "too_short"
-    answer = await call_openai(prompts.NLP_RELEVANCE_PROMPT, text, max_tokens=30)
+    answer = await call_openai(prompts.NLP_RELEVANCE_PROMPT, text, max_tokens=20)
     return answer.lower().strip().startswith("да"), answer
 
 

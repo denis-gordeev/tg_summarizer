@@ -70,11 +70,11 @@ class SummaryInfo:
     
     @classmethod
     def from_dict(cls, data: dict) -> 'SummaryInfo':
-        """Создает объект из словаря"""
+        date_str = data.get('date')
         return cls(
-            content=data['content'],
-            date=datetime.fromisoformat(data['date']),
-            message_count=data['message_count'],
-            channels=data['channels'],
-            message_id=data.get('message_id')
+            content=data.get('content') or '',
+            date=datetime.fromisoformat(date_str) if date_str else datetime.now(timezone.utc),
+            message_count=data.get('message_count', 0),
+            channels=data.get('channels') or [],
+            message_id=data.get('message_id'),
         ) 

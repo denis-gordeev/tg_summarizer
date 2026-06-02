@@ -1,3 +1,4 @@
+import hashlib
 import os
 import re
 import json
@@ -142,6 +143,11 @@ async def call_openai(
     return ""
 
 
+def text_hash(text: str) -> str:
+    """Deterministic SHA-256 hash of text (None-safe)."""
+    return hashlib.sha256((text or "").encode()).hexdigest()[:16]
+
+
 def extract_links(text: str) -> list[str]:
     """Return all URLs from a string."""
-    return LINK_REGEX.findall(text) 
+    return LINK_REGEX.findall(text)

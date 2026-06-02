@@ -62,6 +62,7 @@ def _stub_dependencies(fake_openai_response: str = "[1] New AI breakthrough"):
         return fake_openai_response
 
     fake_utils.call_openai = fake_call_openai
+    fake_utils.text_hash = lambda text: "abc123"
 
     return {
         "dotenv": fake_dotenv,

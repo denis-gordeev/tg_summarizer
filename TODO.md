@@ -265,6 +265,26 @@
 - Updated test stubs in [`tests/test_process_messages_integration.py`](tests/test_process_messages_integration.py) with `FIND_RELEVANT_SUMMARY_PROMPT` and `ENABLE_SUMMARY_UPDATES` config.
 - All 64 tests pass without errors.
 
+## Completed in 2026-06-02 round (bug fixes, code dedup, cost optimization)
+
+- **Bug fix**: Added cache invalidation in [`save_summarization_history()`](history_manager.py) and [`save_group_summarization_history()`](history_manager.py) — previously, saving updated data to disk didn't clear the in-memory cache, so subsequent reads within the same Lambda invocation returned stale data.
+- **Code dedup**: Moved `_text_hash()` from [`message_processor.py`](message_processor.py) and [`history_manager.py`](history_manager.py) to [`utils.py`](utils.py) as `text_hash()`. Eliminated duplicate implementation and removed unused `hashlib` imports from both modules.
+- **Defensive deserialization**: Made [`SummaryInfo.from_dict()`](models.py) handle `None`/missing fields (`content`, `channels`, `date`, `message_count`) gracefully — now consistent with `MessageInfo.from_dict()` which was already hardened.
+- **Cost optimization**: Reduced `max_tokens` for coverage check LLM calls in [`_check_coverage()`](message_processor.py) from 5 → 2 (responses are only "ДА"/"НЕТ"). Reduced `max_tokens` for NLP relevance check from 30 → 20. Saves ~30-40% output tokens on these yes/no classification calls.
+- **Prompt fix**: Made [`find_relevant_summary_for_update()`](history_manager.py) prompt dynamic — previously hardcoded "(1, 2, 3)" but actual count varies with `UPDATE_MATCH_MAX_SUMMARIES`. Now correctly shows available indices.
+- **Tests added**: 9 new tests (total 81, up from 74):
+  - `test_from_dict_handles_none_content`: verifies `SummaryInfo.from_dict` with `None` content
+  - `test_from_dict_handles_missing_content`: verifies `SummaryInfo.from_dict` without content key
+  - `test_from_dict_handles_none_channels`: verifies `SummaryInfo.from_dict` with `None` channels
+  - `test_from_dict_handles_missing_date`: verifies `SummaryInfo.from_dict` without date key
+  - `test_from_dict_handles_missing_message_count`: verifies `SummaryInfo.from_dict` without message_count
+  - `test_save_summarization_history_invalidates_cache`: verifies cache cleared after save
+  - `test_save_group_summarization_history_invalidates_cache`: verifies cache cleared after save
+  - `test_text_hash_with_normal_text`: verifies deterministic hashing (moved from stub-based to inline)
+  - `test_text_hash_with_none_returns_same_as_empty`: verifies None → empty string equivalence (moved from stub-based to inline)
+- Updated test stubs in [`tests/test_history_manager.py`](tests/test_history_manager.py), [`tests/test_process_messages_integration.py`](tests/test_process_messages_integration.py), [`tests/test_digest_post_processing.py`](tests/test_digest_post_processing.py) to include `text_hash` in fake `utils` module.
+- All 81 tests pass without errors.
+
 ## Next actions
 
 - **CI/CD**: Настроить GitHub Actions CI/CD для автоматического деплоя Lambda при мердже в main.
