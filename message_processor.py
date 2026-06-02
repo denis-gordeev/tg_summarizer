@@ -17,6 +17,7 @@ from config import (
     SUMMARY_MAX_LENGTH,
     GROUP_SUMMARY_MIN_LENGTH,
     GROUP_SUMMARY_MAX_LENGTH,
+    NLP_CHECK_MAX_INPUT_CHARS,
 )
 from history_manager import get_recent_summaries_context, get_recent_group_summaries_context
 from channel_manager import (
@@ -175,7 +176,8 @@ async def is_nlp_related(text: str) -> tuple[bool, str]:
     """Use the LLM to decide if a message is NLP related and not advertising."""
     if len(text) < 100:
         return False, "too_short"
-    answer = await call_openai(prompts.NLP_RELEVANCE_PROMPT, text, max_tokens=20)
+    truncated = text[:NLP_CHECK_MAX_INPUT_CHARS]
+    answer = await call_openai(prompts.NLP_RELEVANCE_PROMPT, truncated, max_tokens=20)
     return answer.lower().strip().startswith("да"), answer
 
 

@@ -35,6 +35,7 @@ def _setup_stubs():
     fake_config.SUMMARY_MAX_LENGTH = 4000
     fake_config.GROUP_SUMMARY_MIN_LENGTH = 2000
     fake_config.GROUP_SUMMARY_MAX_LENGTH = 12000
+    fake_config.NLP_CHECK_MAX_INPUT_CHARS = 2000
     sys.modules["config"] = fake_config
 
     # --- Stub history_manager ---
@@ -310,6 +311,45 @@ class AreMessagesDuplicateRussianResponseTests(unittest.TestCase):
             mock_openai.return_value = "нет"
             result = asyncio.run(self.mp.are_messages_duplicate(msg_a, msg_b))
             self.assertFalse(result, "Russian 'нет' should be recognized as not duplicate")
+
+
+class NlpCheckTruncationTests(unittest.TestCase):
+    """Tests for NLP check input truncation."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._stubs = _setup_stubs()
+        cls._fake_config, _, _ = cls._stubs
+        import message_processor
+        cls.mp = message_processor
+
+    def test_nlp_check_truncates_long_input(self):
+        """is_nlp_related should truncate input text to NLP_CHECK_MAX_INPUT_CHARS."""
+        from unittest.mock import AsyncMock, patch
+
+        long_text = "x" * 5000
+        self._fake_config.NLP_CHECK_MAX_INPUT_CHARS = 2000
+
+        with patch.object(self.mp, "call_openai", new_callable=AsyncMock) as mock_openai:
+            mock_openai.return_value = "да"
+            asyncio.run(self.mp.is_nlp_related(long_text))
+            call_args = mock_openai.call_args
+            user_content = call_args[0][1]
+            self.assertLessEqual(len(user_content), 2000)
+
+    def test_nlp_check_keeps_short_input(self):
+        """is_nlp_related should not truncate short text."""
+        from unittest.mock import AsyncMock, patch
+
+        short_text = "A" * 500
+        self._fake_config.NLP_CHECK_MAX_INPUT_CHARS = 2000
+
+        with patch.object(self.mp, "call_openai", new_callable=AsyncMock) as mock_openai:
+            mock_openai.return_value = "да"
+            asyncio.run(self.mp.is_nlp_related(short_text))
+            call_args = mock_openai.call_args
+            user_content = call_args[0][1]
+            self.assertEqual(len(user_content), 500)
 
 
 if __name__ == "__main__":

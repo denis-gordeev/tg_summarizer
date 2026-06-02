@@ -10,7 +10,7 @@ from telethon.tl.functions.channels import (  # type: ignore[reportMissingTypeSt
 )
 from telethon.tl.types import InputChannel  # type: ignore[reportMissingTypeStubs]
 
-from config import API_HASH, API_ID, BOT_TOKEN, SOURCE_GROUPS
+from config import API_HASH, API_ID, BOT_TOKEN, SOURCE_GROUPS, MAX_MESSAGES_PER_SOURCE
 from history_manager import load_group_summarization_history, load_summarization_history
 from channel_manager import get_all_source_channels
 from message_processor import is_message_processed
@@ -101,7 +101,7 @@ async def _fetch_from_sources(
             logger.warning("Deadline exceeded while fetching %s — returning %d messages fetched so far", source_label, len(all_msgs))
             break
         logger.info("Fetching messages from %s %s", source_label, source)
-        source_msgs = []
+        source_count = 0
         try:
             async for msg in user_client.iter_messages(
                 source, offset_date=None, min_id=0, reverse=False
@@ -110,6 +110,9 @@ async def _fetch_from_sources(
                     logger.warning("Deadline exceeded during fetch from %s %s — returning %d messages fetched so far", source_label, source, len(all_msgs))
                     break
                 if msg.date < since:
+                    break
+                if source_count >= MAX_MESSAGES_PER_SOURCE:
+                    logger.debug("Reached MAX_MESSAGES_PER_SOURCE (%d) for %s %s", MAX_MESSAGES_PER_SOURCE, source_label, source)
                     break
                 if msg.message:
                     links = extract_links(msg.message)
@@ -126,12 +129,12 @@ async def _fetch_from_sources(
                     if include_today_processed or not is_message_processed(
                         message_info, processed_messages
                     ):
-                        source_msgs.append(message_info)
+                        source_count += 1
                         all_msgs.append(message_info)
                     else:
                         logger.debug("Skipping already processed message %s from %s", msg.id, source)
 
-            logger.info("Found %d new messages from %s %s", len(source_msgs), source_label, source)
+            logger.info("Found %d new messages from %s %s", source_count, source_label, source)
         except Exception as e:
             logger.error("Error fetching messages from %s %s: %s", source_label, source, e, exc_info=True)
             continue
@@ -209,10 +212,16 @@ async def start_clients() -> None:
     clients_loop = current_loop
 
     if user_client is None:
-        user_client = TelegramClient("tg_summarizer_user", API_ID, API_HASH)
+        user_client = TelegramClient(
+            "tg_summarizer_user", API_ID, API_HASH,
+            connection_retries=3, retry_delay=2, timeout=15,
+        )
         user_client.parse_mode = "html"
     if bot_client is None:
-        bot_client = TelegramClient("tg_summarizer_bot", API_ID, API_HASH)
+        bot_client = TelegramClient(
+            "tg_summarizer_bot", API_ID, API_HASH,
+            connection_retries=3, retry_delay=2, timeout=15,
+        )
     if not user_client.is_connected():
         await user_client.start()
     if not bot_client.is_connected():

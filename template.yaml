@@ -14,6 +14,9 @@ Globals:
         OPENAI_DEFAULT_MAX_TOKENS: !Ref OpenAIDefaultMaxTokens
         OPENAI_CHANNEL_SUMMARY_MAX_TOKENS: !Ref OpenAIChannelSummaryMaxTokens
         OPENAI_GROUP_SUMMARY_MAX_TOKENS: !Ref OpenAIGroupSummaryMaxTokens
+        OPENAI_REQUEST_TIMEOUT: !Ref OpenAIRequestTimeout
+        NLP_CHECK_MAX_INPUT_CHARS: !Ref NlpCheckMaxInputChars
+        MAX_MESSAGES_PER_SOURCE: !Ref MaxMessagesPerSource
         TARGET_CHANNEL: !Ref TargetChannel
         SOURCE_CHANNELS: !Ref SourceChannels
         SOURCE_GROUPS: !Ref SourceGroups
@@ -95,6 +98,21 @@ Parameters:
     Type: String
     Description: Max tokens for group summaries
     Default: "4000"
+  
+  OpenAIRequestTimeout:
+    Type: String
+    Description: Timeout in seconds for each OpenAI API request
+    Default: "30"
+  
+  NlpCheckMaxInputChars:
+    Type: String
+    Description: Max chars of message text sent to NLP relevance check
+    Default: "2000"
+  
+  MaxMessagesPerSource:
+    Type: String
+    Description: Max new messages to fetch per source channel/group
+    Default: "100"
   
   StateBucket:
     Type: String

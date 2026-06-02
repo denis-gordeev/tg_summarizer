@@ -6,7 +6,7 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 from openai import AsyncOpenAI, APIError, RateLimitError, APIConnectionError
-from config import OPENAI_API_KEY, OPENAI_DEFAULT_MAX_TOKENS, OPENAI_MODEL
+from config import OPENAI_API_KEY, OPENAI_DEFAULT_MAX_TOKENS, OPENAI_MODEL, OPENAI_REQUEST_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +102,10 @@ async def call_openai(
     """Универсальная функция для вызова OpenAI API с retry и exponential backoff."""
     global openai_client
     if openai_client is None:
-        openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+        openai_client = AsyncOpenAI(
+            api_key=OPENAI_API_KEY,
+            timeout=float(OPENAI_REQUEST_TIMEOUT),
+        )
 
     for attempt in range(max_retries + 1):
         try:

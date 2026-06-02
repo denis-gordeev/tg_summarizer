@@ -108,6 +108,10 @@ OPENAI_CHANNEL_SUMMARY_MAX_TOKENS = _get_int_env(
 OPENAI_GROUP_SUMMARY_MAX_TOKENS = _get_int_env(
     "OPENAI_GROUP_SUMMARY_MAX_TOKENS", 4000
 )
+OPENAI_REQUEST_TIMEOUT = _get_int_env("OPENAI_REQUEST_TIMEOUT", 30)
+
+NLP_CHECK_MAX_INPUT_CHARS = int(os.getenv("NLP_CHECK_MAX_INPUT_CHARS", "2000"))
+MAX_MESSAGES_PER_SOURCE = int(os.getenv("MAX_MESSAGES_PER_SOURCE", "100"))
 
 source_channels_str = os.getenv('SOURCE_CHANNELS', '')
 SOURCE_CHANNELS = set([c.strip() for c in source_channels_str.split(',') if c.strip()])

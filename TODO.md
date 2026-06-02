@@ -2,6 +2,25 @@
 
 Живой список задач для автоматических раундов.
 
+## Completed in 2026-06-02 round 2 (Lambda hardening round 8, timeouts, limits, cost optimization)
+
+- **OpenAI request timeout**: Added `OPENAI_REQUEST_TIMEOUT` config (default 30s) in [`config.py`](config.py). Applied in [`call_openai()`](utils.py) — `AsyncOpenAI` client now created with `timeout=float(OPENAI_REQUEST_TIMEOUT)`. Previously, the default httpx timeout was 10 minutes, which could cause the entire Lambda invocation to time out on a single hung OpenAI request.
+- **NLP check input truncation**: Added `NLP_CHECK_MAX_INPUT_CHARS` config (default 2000) in [`config.py`](config.py). Applied in [`is_nlp_related()`](message_processor.py) — message text is now truncated to `NLP_CHECK_MAX_INPUT_CHARS` before being sent to the NLP relevance LLM call. Previously, very long messages (full articles) would waste thousands of input tokens on a yes/no classification.
+- **Message fetch limit per source**: Added `MAX_MESSAGES_PER_SOURCE` config (default 100) in [`config.py`](config.py). Applied in [`_fetch_from_sources()`](telegram_client.py) — iteration breaks when the per-source limit is reached. Previously, a very active channel could return thousands of messages, consuming excessive Lambda time and tokens.
+- **Telegram client connection timeout**: Added `connection_retries=3`, `retry_delay=2`, `timeout=15` to both `TelegramClient` constructors in [`start_clients()`](telegram_client.py). Previously, default Telethon settings could hang indefinitely on connection attempts.
+- **Code cleanup**: Replaced redundant `source_msgs` list with a simple `source_count` counter in [`_fetch_from_sources()`](telegram_client.py) — the list was only used for its length, never its contents.
+- **.env.example sync**: Updated `OPENAI_CHANNEL_SUMMARY_MAX_TOKENS` and `OPENAI_GROUP_SUMMARY_MAX_TOKENS` defaults from 16000 to 4000 in [`.env.example`](.env.example) to match the actual defaults in [`config.py`](config.py).
+- **SAM template updated**: Added `OPENAI_REQUEST_TIMEOUT`, `NLP_CHECK_MAX_INPUT_CHARS`, `MAX_MESSAGES_PER_SOURCE` parameters and env vars in [`template.yaml`](template.yaml).
+- **Tests added**: 6 new tests (total 87, up from 81):
+  - `test_call_openai_passes_timeout_to_client`: verifies `OPENAI_REQUEST_TIMEOUT` is passed to `AsyncOpenAI`
+  - `test_config_reads_request_timeout_from_env`: verifies `OPENAI_REQUEST_TIMEOUT` env var parsing
+  - `test_config_reads_nlp_check_max_input_chars_from_env`: verifies `NLP_CHECK_MAX_INPUT_CHARS` env var parsing
+  - `test_config_reads_max_messages_per_source_from_env`: verifies `MAX_MESSAGES_PER_SOURCE` env var parsing
+  - `test_nlp_check_truncates_long_input`: verifies text truncation in `is_nlp_related()`
+  - `test_nlp_check_keeps_short_input`: verifies short text is not truncated
+- Updated test stubs in [`tests/test_openai_config.py`](tests/test_openai_config.py) and [`tests/test_process_messages_integration.py`](tests/test_process_messages_integration.py) to support new config constants and `timeout` kwarg.
+- All 87 tests pass without errors.
+
 ## Completed in 2026-04-14 round (Lambda hardening & test coverage)
 
 - **Lambda error handling**: Добавлен try/except в [`lambda_handler.handler()`](lambda_handler.py) — теперь ошибки суммаризации возвращают структурированный `{'status': 'error', 'error': str(e)}` вместо unhandled exception. State всё равно загружается в S3 при ошибке для сохранения частичных обновлений.
