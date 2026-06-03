@@ -91,13 +91,13 @@ def load_summaries_history() -> List[SummaryInfo]:
 
     data = load_json_file(SUMMARIES_HISTORY_FILE, None)
     if data is None:
-        return []
+        logger.info("History file missing or corrupt, attempting channel restore...")
+        summaries = restore_summaries_from_channel_sync()
+        summaries = sorted(summaries, key=lambda x: x.date)
+        _cache[cache_key] = summaries
+        return summaries
 
     summaries = _parse_summaries_from_data(data)
-    if not summaries:
-        logger.info("No summaries found in history file, attempting channel restore...")
-        summaries = restore_summaries_from_channel_sync()
-
     summaries = sorted(summaries, key=lambda x: x.date)
     _cache[cache_key] = summaries
     return summaries
@@ -376,7 +376,14 @@ def get_recent_summaries_context(days: int = 3) -> str:
 
     recent_summaries = recent_summaries[-COVERAGE_CHECK_MAX_SUMMARIES:]
 
-    return "\n\n".join(s.content[:COVERAGE_CHECK_MAX_CHARS_PER_SUMMARY] for s in recent_summaries)
+    context_parts = []
+    for summary in recent_summaries:
+        truncated = summary.content[:COVERAGE_CHECK_MAX_CHARS_PER_SUMMARY]
+        context_parts.append(f"Дата: {summary.date.strftime('%Y-%m-%d')}")
+        context_parts.append(f"Содержание: {truncated}")
+        context_parts.append("---")
+
+    return "\n".join(context_parts)
 
 
 async def find_relevant_summary_for_update(
@@ -493,13 +500,20 @@ async def save_updated_summary(
     history_file = GROUP_SUMMARIES_HISTORY_FILE if is_group else SUMMARIES_HISTORY_FILE
     summaries = load_group_summaries_history() if is_group else load_summaries_history()
 
+    found = False
     for i, summary in enumerate(summaries):
         if original_summary.message_id is not None and summary.message_id == original_summary.message_id:
             summaries[i] = updated_summary
+            found = True
             break
         if summary.content == original_summary.content and summary.date == original_summary.date and summary.message_count == original_summary.message_count:
             summaries[i] = updated_summary
+            found = True
             break
+
+    if not found:
+        logger.warning("Could not find original summary to update — skipping save and edit")
+        return
 
     all_summaries_dict = [s.to_dict() for s in summaries]
     data = {"summaries": all_summaries_dict, "last_updated": now_iso()}

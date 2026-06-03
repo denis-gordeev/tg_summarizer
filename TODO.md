@@ -304,9 +304,24 @@
 - Updated test stubs in [`tests/test_history_manager.py`](tests/test_history_manager.py), [`tests/test_process_messages_integration.py`](tests/test_process_messages_integration.py), [`tests/test_digest_post_processing.py`](tests/test_digest_post_processing.py) to include `text_hash` in fake `utils` module.
 - All 81 tests pass without errors.
 
+## Completed in 2026-06-03 round (bug fixes, prompt optimization, context consistency)
+
+- **Bug fix**: Fixed [`load_summaries_history()`](history_manager.py) — previously triggered an expensive channel restore whenever the history file was valid but empty (`{"summaries": []}`). Now only triggers restore when the file is missing or corrupt (`data is None`), consistent with `load_group_summaries_history()` which already handled this correctly. An empty-but-valid history file (e.g., after clearing history) now returns `[]` without unnecessary API calls.
+- **Bug fix**: Fixed [`save_updated_summary()`](history_manager.py) — previously continued with save and Telegram edit even when no matching summary was found in history, leading to no-op disk writes and misleading channel edit attempts. Now tracks `found` flag and returns early with a warning log if no match is found.
+- **Consistency fix**: Unified context formatting in [`get_recent_summaries_context()`](history_manager.py) — now uses the same structured "Дата: / Содержание: / ---" format as `get_recent_group_summaries_context()`. Previously used bare `\n\n`-joined content without dates, causing inconsistent LLM coverage check behavior between channel and group paths.
+- **Prompt optimization**: Tightened [`NLP_RELEVANCE_PROMPT`](prompts.py) — consolidated overlapping categories (merged "AI/BigTech новости" and BigTech line, merged "Карьера, вакансии" into one line, removed "новые детали уже вышедших моделей/библиотек" as redundant, removed "подготовительные" from ШАД exclusion). Reduced token count by ~15%.
+- **Prompt optimization**: Tightened [`CHANNEL_SUMMARY_PROMPT`](prompts.py) and [`GROUP_SUMMARY_PROMPT`](prompts.py) — removed redundant "Кратко описывай архитектуру, методологию, результаты" instruction (already implied by "краткий дайджест"), removed "яркие" from header rule (redundant with "короткие").
+- **Tests added**: 4 new tests (total 91, up from 87):
+  - `test_no_restore_when_file_has_empty_summaries`: verifies empty-but-valid file does NOT trigger channel restore
+  - `test_restore_when_file_missing`: verifies missing/corrupt file DOES trigger channel restore
+  - `test_save_updated_summary_skips_when_no_match`: verifies no save/edit when original summary not found
+  - `test_recent_summaries_context_includes_date`: verifies channel context now includes "Дата:" like group version
+- All 91 tests pass without errors.
+
 ## Next actions
 
 - **CI/CD**: Настроить GitHub Actions CI/CD для автоматического деплоя Lambda при мердже в main.
 - **Secrets management**: Перенести реальные секреты в AWS SSM Parameter Store (инфраструктура готова — `*_SSM_PATH` env vars и IAM policies в template.yaml).
 - **Prompt A/B testing**: Продолжить тестирование промптов — отслеживать качество саммари после снижения `max_tokens` до 4000 и при необходимости корректировать.
 - **OpenAI response streaming**: Рассмотреть streaming API для снижения perceived latency (но не стоимости — `max_tokens` уже ограничен).
+- **Summary update quality**: Рассмотреть улучшение [`update_existing_summary()`](history_manager.py) — текущий подход добавляет "Другие ссылки:" в конец, что механическое и не интегрирует новую информацию в структуру саммари.
