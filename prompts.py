@@ -59,10 +59,8 @@ class PromptManager:
 - Конференции (NeurIPS, ICML, ICLR, ACL, EMNLP и т.д.), открытые проекты
 - Kaggle, хакатоны, соревнования (в т.ч. робототехника с ИИ/LLM)
 - Вакансии, пет-проекты, ИИ-экономика, увольнения в AI
-- BigTech (OpenAI, Anthropic, Google, Meta, Microsoft, Nvidia, DeepSeek и др.)
-- AI-ассистенты (ChatGPT, Claude, Gemini, Grok, Midjourney и др.), vibe coding, AI-агенты
-- LLM, промпт-инжиниринг, обучение/дообучение (LoRA и др.), диффузия
-- GPU, робототехника, стартапы, M&A, AI-мемы
+- BigTech и AI-ассистенты (OpenAI, Anthropic, Google, Meta, Microsoft, Nvidia, DeepSeek, ChatGPT, Claude, Gemini, Grok, Midjourney и др.), vibe coding, AI-агенты
+- LLM, промпт-инжиниринг, дообучение (LoRA и др.), диффузия, GPU, робототехника, стартапы, M&A, AI-мемы
 - Обсуждения AI/моделей, рынка вакансий, ШАД (не реклама и не курсы)
 
 ОТКЛОНЯЙ ('нет'):

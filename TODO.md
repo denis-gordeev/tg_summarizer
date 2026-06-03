@@ -318,10 +318,33 @@
   - `test_recent_summaries_context_includes_date`: verifies channel context now includes "Дата:" like group version
 - All 91 tests pass without errors.
 
+## Completed in 2026-06-03 round 2 (LLM update integration, deterministic classification, code dedup, prompt tightening)
+
+- **Summary update quality**: Improved [`update_existing_summary()`](history_manager.py) — replaced mechanical "Другие ссылки:" append with LLM-integrated update. The LLM now inserts the new link next to the relevant paragraph in the summary. Falls back to the append approach on LLM failure or empty response. This addresses the "Summary update quality" next action from previous round.
+- **Deterministic classification**: Added `temperature=0` parameter to all classification LLM calls in [`message_processor.py`](message_processor.py) and [`history_manager.py`](history_manager.py):
+  - `are_messages_duplicate()`: `temperature=0` for duplicate detection
+  - `_check_coverage()`: `temperature=0` for coverage check
+  - `is_nlp_related()`: `temperature=0` for NLP relevance classification
+  - `find_relevant_summary_for_update()`: `temperature=0` for summary matching
+  - Added `temperature` parameter to [`call_openai()`](utils.py) — passed through to `chat.completions.create()` when provided, omitted when `None` (default). Classification calls now produce deterministic results, reducing variance and wasted retries.
+- **Code dedup**: Merged [`get_recent_summaries_context()`](history_manager.py) and [`get_recent_group_summaries_context()`](history_manager.py) into shared [`_get_recent_summaries_context()`](history_manager.py) helper. Both functions now delegate to the same formatting logic, eliminating ~20 lines of duplicated context-building code.
+- **Prompt optimization**: Tightened [`NLP_RELEVANCE_PROMPT`](prompts.py) — merged BigTech and AI-ассистенты lines into one (redundant split), merged "обучение/дообучение" into "дообучение" (shorter). Reduced token count by ~10%.
+- **Unused imports removed**: Removed unused `import os` from [`channel_manager.py`](channel_manager.py) and unused imports (`load_discovered_channels`, `load_similar_channels`, `load_banned_channels`, `get_all_source_channels`) from [`message_processor.py`](message_processor.py).
+- **Tests added**: 7 new tests (total 98, up from 91):
+  - `test_call_openai_passes_temperature_to_api`: verifies `temperature=0` is passed to API create call
+  - `test_call_openai_omits_temperature_when_none`: verifies `temperature` is omitted when not specified
+  - `test_update_existing_summary_uses_llm`: verifies LLM is called for summary integration
+  - `test_update_existing_summary_fallback_on_llm_failure`: verifies fallback to append on LLM exception
+  - `test_update_existing_summary_fallback_on_empty_llm_response`: verifies fallback on empty LLM response
+  - `test_shared_helper_returns_empty_for_no_summaries`: verifies `_get_recent_summaries_context` returns empty for no data
+  - `test_shared_helper_truncates_long_content`: verifies content truncation in shared helper
+- All 98 tests pass without errors.
+
 ## Next actions
 
 - **CI/CD**: Настроить GitHub Actions CI/CD для автоматического деплоя Lambda при мердже в main.
 - **Secrets management**: Перенести реальные секреты в AWS SSM Parameter Store (инфраструктура готова — `*_SSM_PATH` env vars и IAM policies в template.yaml).
 - **Prompt A/B testing**: Продолжить тестирование промптов — отслеживать качество саммари после снижения `max_tokens` до 4000 и при необходимости корректировать.
 - **OpenAI response streaming**: Рассмотреть streaming API для снижения perceived latency (но не стоимости — `max_tokens` уже ограничен).
-- **Summary update quality**: Рассмотреть улучшение [`update_existing_summary()`](history_manager.py) — текущий подход добавляет "Другие ссылки:" в конец, что механическое и не интегрирует новую информацию в структуру саммари.
+- **Summary update cost**: Отслеживать стоимость LLM-вызовов в `update_existing_summary()` — если стоимость обновления одного саммари слишком высока относительно ценности, рассмотреть ограничение `max_tokens` или возврат к механическому append для коротких обновлений.
+- **Coverage check prompt**: Рассмотреть замену_coverage check промптов на JSON mode (`response_format={"type": "json_object"}`) для ещё большей детерминистичности при сохранении стоимости gpt-4o-mini.

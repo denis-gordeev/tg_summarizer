@@ -98,6 +98,7 @@ async def call_openai(
     max_tokens: int = OPENAI_DEFAULT_MAX_TOKENS,
     max_retries: int = 3,
     base_delay: float = 1.0,
+    temperature: float | None = None,
 ) -> str:
     """Универсальная функция для вызова OpenAI API с retry и exponential backoff."""
     global openai_client
@@ -107,16 +108,20 @@ async def call_openai(
             timeout=float(OPENAI_REQUEST_TIMEOUT),
         )
 
+    kwargs = {
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
+        ],
+        "model": OPENAI_MODEL,
+        "max_tokens": max_tokens,
+    }
+    if temperature is not None:
+        kwargs["temperature"] = temperature
+
     for attempt in range(max_retries + 1):
         try:
-            response = await openai_client.chat.completions.create(
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_content}
-                ],
-                model=OPENAI_MODEL,
-                max_tokens=max_tokens,
-            )
+            response = await openai_client.chat.completions.create(**kwargs)
             result = response.choices[0].message.content
             if result is None:
                 return ""

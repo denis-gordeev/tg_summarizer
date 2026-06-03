@@ -3,7 +3,7 @@ import json
 import logging
 import os
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Set, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from channel_manager import create_channel_abbreviation
 from config import (
@@ -23,6 +23,7 @@ from config import (
     COVERAGE_CHECK_MAX_CHARS_PER_SUMMARY,
     UPDATE_MATCH_MAX_SUMMARIES,
     UPDATE_MATCH_MAX_CHARS_PER_SUMMARY,
+    OPENAI_CHANNEL_SUMMARY_MAX_TOKENS,
 )
 from models import MessageInfo, SummaryInfo
 from prompts import prompts
@@ -337,53 +338,40 @@ def update_group_last_run() -> None:
     save_json_file(GROUP_LAST_RUN_FILE, data, "Error updating group last run")
 
 
-def get_recent_group_summaries_context(days: int = 7) -> str:
-    """Получает контекст последних саммари из групп для дедупликации."""
-    summaries = load_group_summaries_history()
+def _get_recent_summaries_context(
+    summaries: list, days: int, max_summaries: int, max_chars: int,
+) -> str:
+    """Shared helper to build truncated context from recent summaries."""
     if not summaries:
         return ""
-
     cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
     recent_summaries = [s for s in summaries if s.date >= cutoff_date]
-
     if not recent_summaries:
         return ""
-
-    recent_summaries = recent_summaries[-COVERAGE_CHECK_MAX_SUMMARIES:]
-
+    recent_summaries = recent_summaries[-max_summaries:]
     context_parts = []
     for summary in recent_summaries:
-        truncated = summary.content[:COVERAGE_CHECK_MAX_CHARS_PER_SUMMARY]
+        truncated = summary.content[:max_chars]
         context_parts.append(f"Дата: {summary.date.strftime('%Y-%m-%d')}")
         context_parts.append(f"Содержание: {truncated}")
         context_parts.append("---")
-
     return "\n".join(context_parts)
 
 
 def get_recent_summaries_context(days: int = 3) -> str:
     """Возвращает контекст последних саммари для дедупликации."""
     summaries = load_summaries_history()
-    summaries = sorted(summaries, key=lambda x: x.date)
-    if not summaries:
-        return ""
+    return _get_recent_summaries_context(
+        summaries, days, COVERAGE_CHECK_MAX_SUMMARIES, COVERAGE_CHECK_MAX_CHARS_PER_SUMMARY,
+    )
 
-    cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
-    recent_summaries = [s for s in summaries if s.date >= cutoff_date]
 
-    if not recent_summaries:
-        return ""
-
-    recent_summaries = recent_summaries[-COVERAGE_CHECK_MAX_SUMMARIES:]
-
-    context_parts = []
-    for summary in recent_summaries:
-        truncated = summary.content[:COVERAGE_CHECK_MAX_CHARS_PER_SUMMARY]
-        context_parts.append(f"Дата: {summary.date.strftime('%Y-%m-%d')}")
-        context_parts.append(f"Содержание: {truncated}")
-        context_parts.append("---")
-
-    return "\n".join(context_parts)
+def get_recent_group_summaries_context(days: int = 7) -> str:
+    """Получает контекст последних саммари из групп для дедупликации."""
+    summaries = load_group_summaries_history()
+    return _get_recent_summaries_context(
+        summaries, days, COVERAGE_CHECK_MAX_SUMMARIES, COVERAGE_CHECK_MAX_CHARS_PER_SUMMARY,
+    )
 
 
 async def find_relevant_summary_for_update(
@@ -422,7 +410,7 @@ async def find_relevant_summary_for_update(
 Отвечайте только номером ({numbers}) или "НЕТ"."""
 
     try:
-        result = await call_openai(prompts.FIND_RELEVANT_SUMMARY_PROMPT, user_content, max_tokens=3)
+        result = await call_openai(prompts.FIND_RELEVANT_SUMMARY_PROMPT, user_content, max_tokens=3, temperature=0)
         result = result.strip().upper()
 
         if result.isdigit():
@@ -439,56 +427,45 @@ async def update_existing_summary(
     summary: SummaryInfo, new_message: MessageInfo, is_group: bool = False
 ) -> SummaryInfo:
     """
-    Обновляет существующее саммари, добавляя блок "Другие ссылки:" с новой ссылкой.
+    Обновляет существующее саммари, интегрируя новую информацию через LLM.
     """
-    # Создаем ссылку для нового сообщения
     links = extract_links(new_message.text)
     telegram_link = new_message.get_telegram_link()
     channel_abbr = create_channel_abbreviation(new_message.channel)
 
     if links:
-        new_link = (
-            f'<a href="{links[0]}">[новое]</a> ' f'<a href="{telegram_link}">[{channel_abbr}]</a>'
-        )
+        new_link = f'<a href="{links[0]}">[новое]</a> <a href="{telegram_link}">[{channel_abbr}]</a>'
     else:
         new_link = f'<a href="{telegram_link}">[{channel_abbr}]</a>'
 
-    # Ищем подходящее место для вставки блока "Другие ссылки:"
-    # Обычно это в конце саммари или после последнего блока с ссылками
-    content = summary.content
+    update_prompt = f"""Вставь ссылку на новое сообщение в подходящее место саммари.
+Не переписывай всё саммари — только добавь ссылку {new_link} рядом с релевантным абзацем.
+Если нет подходящего места — добавь строку "Другие ссылки: {new_link}" в конец.
+Ответь только обновлённое саммари."""
 
-    # Проверяем, есть ли уже блок "Другие ссылки:"
-    if "Другие ссылки:" in content:
-        # Если есть, добавляем новую ссылку к существующему блоку
-        lines = content.split("\n")
-        updated_lines = []
-        for line in lines:
-            if line.strip().startswith("Другие ссылки:"):
-                # Добавляем новую ссылку к существующему блоку
-                updated_lines.append(line + f", {new_link}")
-            else:
-                updated_lines.append(line)
-        updated_content = "\n".join(updated_lines)
-    else:
-        # Если нет, добавляем новый блок в конец
-        updated_content = content + f"\n\nДругие ссылки: {new_link}"
+    user_content = f"Саммари:\n{summary.content}\n\nНовое сообщение:\n{new_message.text}"
 
-    # Создаем обновленное саммари
+    try:
+        updated_content = await call_openai(update_prompt, user_content, max_tokens=OPENAI_CHANNEL_SUMMARY_MAX_TOKENS)
+        if not updated_content:
+            updated_content = summary.content + f"\n\nДругие ссылки: {new_link}"
+    except Exception as e:
+        logger.error("Error updating summary via LLM: %s; falling back to append", e)
+        updated_content = summary.content + f"\n\nДругие ссылки: {new_link}"
+
     updated_channels = (
         summary.channels + [new_message.channel]
         if new_message.channel not in summary.channels
         else summary.channels
     )
 
-    updated_summary = SummaryInfo(
+    return SummaryInfo(
         content=updated_content,
         date=summary.date,
         message_count=summary.message_count + 1,
         channels=updated_channels,
         message_id=summary.message_id,
     )
-
-    return updated_summary
 
 
 async def save_updated_summary(

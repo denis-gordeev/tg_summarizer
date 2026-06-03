@@ -250,6 +250,106 @@ class CallOpenAITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, "ok")
         self.assertAlmostEqual(captured_kwargs.get("timeout"), 25.0)
 
+    async def test_call_openai_passes_temperature_to_api(self):
+        """Verify that call_openai passes temperature kwarg to the API create call."""
+        import importlib
+        import sys
+        import types
+        from unittest.mock import AsyncMock, patch
+
+        captured_create_kwargs = {}
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_openai = types.ModuleType("openai")
+
+        class FakeAsyncOpenAI:
+            def __init__(self, api_key, **kwargs):
+                self.api_key = api_key
+
+                async def _create(**kwargs):
+                    captured_create_kwargs.update(kwargs)
+                    return type(
+                        "Response", (),
+                        {"choices": [type("Choice", (), {"message": type("Message", (), {"content": "ok"})()})()]},
+                    )()
+
+                self.chat = types.SimpleNamespace(
+                    completions=types.SimpleNamespace(create=_create)
+                )
+
+        class FakeOpenAIError(Exception):
+            pass
+
+        fake_openai.AsyncOpenAI = FakeAsyncOpenAI
+        fake_openai.OpenAI = FakeAsyncOpenAI
+        fake_openai.APIError = FakeOpenAIError
+        fake_openai.RateLimitError = type("RateLimitError", (FakeOpenAIError,), {"status_code": None})
+        fake_openai.APIConnectionError = type("APIConnectionError", (FakeOpenAIError,), {})
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv, "openai": fake_openai}):
+            with patch.dict(os.environ, {
+                **REQUIRED_ENV,
+            }, clear=True):
+                sys.modules.pop("config", None)
+                sys.modules.pop("utils", None)
+                config = importlib.import_module("config")
+                utils = importlib.import_module("utils")
+
+        result = await utils.call_openai("system", "user", temperature=0)
+        self.assertEqual(result, "ok")
+        self.assertEqual(captured_create_kwargs.get("temperature"), 0)
+
+    async def test_call_openai_omits_temperature_when_none(self):
+        """Verify that call_openai omits temperature when not specified."""
+        import importlib
+        import sys
+        import types
+        from unittest.mock import AsyncMock, patch
+
+        captured_create_kwargs = {}
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_openai = types.ModuleType("openai")
+
+        class FakeAsyncOpenAI:
+            def __init__(self, api_key, **kwargs):
+                self.api_key = api_key
+
+                async def _create(**kwargs):
+                    captured_create_kwargs.update(kwargs)
+                    return type(
+                        "Response", (),
+                        {"choices": [type("Choice", (), {"message": type("Message", (), {"content": "ok"})()})()]},
+                    )()
+
+                self.chat = types.SimpleNamespace(
+                    completions=types.SimpleNamespace(create=_create)
+                )
+
+        class FakeOpenAIError(Exception):
+            pass
+
+        fake_openai.AsyncOpenAI = FakeAsyncOpenAI
+        fake_openai.OpenAI = FakeAsyncOpenAI
+        fake_openai.APIError = FakeOpenAIError
+        fake_openai.RateLimitError = type("RateLimitError", (FakeOpenAIError,), {"status_code": None})
+        fake_openai.APIConnectionError = type("APIConnectionError", (FakeOpenAIError,), {})
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv, "openai": fake_openai}):
+            with patch.dict(os.environ, {
+                **REQUIRED_ENV,
+            }, clear=True):
+                sys.modules.pop("config", None)
+                sys.modules.pop("utils", None)
+                config = importlib.import_module("config")
+                utils = importlib.import_module("utils")
+
+        result = await utils.call_openai("system", "user")
+        self.assertEqual(result, "ok")
+        self.assertNotIn("temperature", captured_create_kwargs)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -817,5 +817,284 @@ class ContextFormattingConsistencyTests(unittest.TestCase):
         self.assertIn("AI breakthrough", result)
 
 
+class SharedContextHelperTests(unittest.TestCase):
+    """Tests for _get_recent_summaries_context shared helper."""
+
+    def test_shared_helper_returns_empty_for_no_summaries(self):
+        from datetime import datetime, timedelta, timezone
+
+        class FakeSummary:
+            def __init__(self, content, date):
+                self.content = content
+                self.date = date
+
+        def _get_recent_summaries_context(summaries, days, max_summaries, max_chars):
+            if not summaries:
+                return ""
+            cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
+            recent = [s for s in summaries if s.date >= cutoff_date]
+            if not recent:
+                return ""
+            recent = recent[-max_summaries:]
+            parts = []
+            for s in recent:
+                truncated = s.content[:max_chars]
+                parts.append(f"Дата: {s.date.strftime('%Y-%m-%d')}")
+                parts.append(f"Содержание: {truncated}")
+                parts.append("---")
+            return "\n".join(parts)
+
+        self.assertEqual(_get_recent_summaries_context([], days=7, max_summaries=10, max_chars=300), "")
+
+        recent = [FakeSummary("AI news", datetime.now(timezone.utc) - timedelta(hours=1))]
+        result = _get_recent_summaries_context(recent, days=7, max_summaries=10, max_chars=300)
+        self.assertIn("Дата:", result)
+        self.assertIn("AI news", result)
+
+    def test_shared_helper_truncates_long_content(self):
+        from datetime import datetime, timedelta, timezone
+
+        class FakeSummary:
+            def __init__(self, content, date):
+                self.content = content
+                self.date = date
+
+        def _get_recent_summaries_context(summaries, days, max_summaries, max_chars):
+            if not summaries:
+                return ""
+            cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
+            recent = [s for s in summaries if s.date >= cutoff_date]
+            if not recent:
+                return ""
+            recent = recent[-max_summaries:]
+            parts = []
+            for s in recent:
+                truncated = s.content[:max_chars]
+                parts.append(f"Дата: {s.date.strftime('%Y-%m-%d')}")
+                parts.append(f"Содержание: {truncated}")
+                parts.append("---")
+            return "\n".join(parts)
+
+        long_content = "x" * 500
+        recent = [FakeSummary(long_content, datetime.now(timezone.utc) - timedelta(hours=1))]
+        result = _get_recent_summaries_context(recent, days=7, max_summaries=10, max_chars=100)
+        self.assertIn("Содержание: " + "x" * 100, result)
+        self.assertNotIn("x" * 101, result)
+
+
+class UpdateExistingSummaryLLMTests(unittest.TestCase):
+    """Tests for update_existing_summary LLM integration."""
+
+    def test_update_existing_summary_uses_llm(self):
+        """update_existing_summary should call LLM to integrate new info."""
+        import types
+        import importlib
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        fake_channel_manager = types.ModuleType("channel_manager")
+        fake_channel_manager.create_channel_abbreviation = lambda ch: "AB"
+        fake_channel_manager.load_channel_abbreviations = lambda: {}
+
+        class FakeSummaryInfo:
+            def __init__(self, content="", date=None, message_count=0, channels=None, message_id=None):
+                self.content = content
+                self.date = date or datetime.now(timezone.utc)
+                self.message_count = message_count
+                self.channels = channels or []
+                self.message_id = message_id
+
+            def to_dict(self):
+                return {"content": self.content, "date": self.date.isoformat() if self.date else "",
+                        "message_count": self.message_count, "channels": self.channels, "message_id": self.message_id}
+
+        class FakeMessageInfo:
+            def __init__(self, text="", channel="", message_id=0, date=None, link=""):
+                self.text = text
+                self.channel = channel
+                self.message_id = message_id
+                self.date = date or datetime.now(timezone.utc)
+                self.link = link
+
+            def get_telegram_link(self):
+                return f"https://t.me/{self.channel.lstrip('@')}/{self.message_id}"
+
+        fake_models = types.ModuleType("models")
+        fake_models.SummaryInfo = FakeSummaryInfo
+        fake_models.MessageInfo = FakeMessageInfo
+        fake_prompts = types.ModuleType("prompts")
+        fake_prompts.prompts = types.SimpleNamespace()
+        fake_utils = types.ModuleType("utils")
+        fake_utils.call_openai = AsyncMock(return_value="Updated summary with new link")
+        fake_utils.extract_links = lambda text: ["https://example.com"]
+        fake_utils.load_json_file = lambda *a, **kw: {"summaries": [], "last_updated": ""}
+        fake_utils.save_json_file = MagicMock(return_value=True)
+        fake_utils.now_iso = lambda: "2026-01-01T00:00:00"
+        fake_utils.text_hash = lambda text: "abc123"
+
+        stubs = {
+            "dotenv": fake_dotenv,
+            "channel_manager": fake_channel_manager,
+            "models": fake_models,
+            "prompts": fake_prompts,
+            "utils": fake_utils,
+        }
+
+        with patch.dict(sys.modules, stubs):
+            with patch.dict(os.environ, {}, clear=True):
+                sys.modules.pop("history_manager", None)
+                sys.modules.pop("config", None)
+                hm = importlib.import_module("history_manager")
+
+                summary = FakeSummaryInfo(content="Original summary", message_id=1)
+                msg = FakeMessageInfo(text="New info", channel="@test", message_id=42)
+
+                async def _test():
+                    result = await hm.update_existing_summary(summary, msg)
+                    return result
+
+                updated = asyncio.run(_test())
+                self.assertEqual(updated.content, "Updated summary with new link")
+                fake_utils.call_openai.assert_called_once()
+
+    def test_update_existing_summary_fallback_on_llm_failure(self):
+        """update_existing_summary should fall back to append on LLM failure."""
+        import types
+        import importlib
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        fake_channel_manager = types.ModuleType("channel_manager")
+        fake_channel_manager.create_channel_abbreviation = lambda ch: "AB"
+        fake_channel_manager.load_channel_abbreviations = lambda: {}
+
+        class FakeSummaryInfo:
+            def __init__(self, content="", date=None, message_count=0, channels=None, message_id=None):
+                self.content = content
+                self.date = date or datetime.now(timezone.utc)
+                self.message_count = message_count
+                self.channels = channels or []
+                self.message_id = message_id
+
+        class FakeMessageInfo:
+            def __init__(self, text="", channel="", message_id=0, date=None, link=""):
+                self.text = text
+                self.channel = channel
+                self.message_id = message_id
+                self.date = date or datetime.now(timezone.utc)
+                self.link = link
+
+            def get_telegram_link(self):
+                return f"https://t.me/{self.channel.lstrip('@')}/{self.message_id}"
+
+        fake_models = types.ModuleType("models")
+        fake_models.SummaryInfo = FakeSummaryInfo
+        fake_models.MessageInfo = FakeMessageInfo
+        fake_prompts = types.ModuleType("prompts")
+        fake_prompts.prompts = types.SimpleNamespace()
+        fake_utils = types.ModuleType("utils")
+        fake_utils.call_openai = AsyncMock(side_effect=Exception("LLM error"))
+        fake_utils.extract_links = lambda text: ["https://example.com"]
+        fake_utils.load_json_file = lambda *a, **kw: {"summaries": [], "last_updated": ""}
+        fake_utils.save_json_file = MagicMock(return_value=True)
+        fake_utils.now_iso = lambda: "2026-01-01T00:00:00"
+        fake_utils.text_hash = lambda text: "abc123"
+
+        stubs = {
+            "dotenv": fake_dotenv,
+            "channel_manager": fake_channel_manager,
+            "models": fake_models,
+            "prompts": fake_prompts,
+            "utils": fake_utils,
+        }
+
+        with patch.dict(sys.modules, stubs):
+            with patch.dict(os.environ, {}, clear=True):
+                sys.modules.pop("history_manager", None)
+                sys.modules.pop("config", None)
+                hm = importlib.import_module("history_manager")
+
+                summary = FakeSummaryInfo(content="Original summary", message_id=1)
+                msg = FakeMessageInfo(text="New info", channel="@test", message_id=42)
+
+                async def _test():
+                    result = await hm.update_existing_summary(summary, msg)
+                    return result
+
+                updated = asyncio.run(_test())
+                self.assertIn("Original summary", updated.content)
+                self.assertIn("Другие ссылки:", updated.content)
+
+    def test_update_existing_summary_fallback_on_empty_llm_response(self):
+        """update_existing_summary should fall back to append on empty LLM response."""
+        import types
+        import importlib
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        fake_channel_manager = types.ModuleType("channel_manager")
+        fake_channel_manager.create_channel_abbreviation = lambda ch: "AB"
+        fake_channel_manager.load_channel_abbreviations = lambda: {}
+
+        class FakeSummaryInfo:
+            def __init__(self, content="", date=None, message_count=0, channels=None, message_id=None):
+                self.content = content
+                self.date = date or datetime.now(timezone.utc)
+                self.message_count = message_count
+                self.channels = channels or []
+                self.message_id = message_id
+
+        class FakeMessageInfo:
+            def __init__(self, text="", channel="", message_id=0, date=None, link=""):
+                self.text = text
+                self.channel = channel
+                self.message_id = message_id
+                self.date = date or datetime.now(timezone.utc)
+                self.link = link
+
+            def get_telegram_link(self):
+                return f"https://t.me/{self.channel.lstrip('@')}/{self.message_id}"
+
+        fake_models = types.ModuleType("models")
+        fake_models.SummaryInfo = FakeSummaryInfo
+        fake_models.MessageInfo = FakeMessageInfo
+        fake_prompts = types.ModuleType("prompts")
+        fake_prompts.prompts = types.SimpleNamespace()
+        fake_utils = types.ModuleType("utils")
+        fake_utils.call_openai = AsyncMock(return_value="")
+        fake_utils.extract_links = lambda text: ["https://example.com"]
+        fake_utils.load_json_file = lambda *a, **kw: {"summaries": [], "last_updated": ""}
+        fake_utils.save_json_file = MagicMock(return_value=True)
+        fake_utils.now_iso = lambda: "2026-01-01T00:00:00"
+        fake_utils.text_hash = lambda text: "abc123"
+
+        stubs = {
+            "dotenv": fake_dotenv,
+            "channel_manager": fake_channel_manager,
+            "models": fake_models,
+            "prompts": fake_prompts,
+            "utils": fake_utils,
+        }
+
+        with patch.dict(sys.modules, stubs):
+            with patch.dict(os.environ, {}, clear=True):
+                sys.modules.pop("history_manager", None)
+                sys.modules.pop("config", None)
+                hm = importlib.import_module("history_manager")
+
+                summary = FakeSummaryInfo(content="Original summary", message_id=1)
+                msg = FakeMessageInfo(text="New info", channel="@test", message_id=42)
+
+                async def _test():
+                    result = await hm.update_existing_summary(summary, msg)
+                    return result
+
+                updated = asyncio.run(_test())
+                self.assertIn("Другие ссылки:", updated.content)
+
+
 if __name__ == '__main__':
     unittest.main()

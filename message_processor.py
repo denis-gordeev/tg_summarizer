@@ -21,11 +21,7 @@ from config import (
 )
 from history_manager import get_recent_summaries_context, get_recent_group_summaries_context
 from channel_manager import (
-    load_discovered_channels,
-    load_similar_channels,
-    load_banned_channels,
     create_channel_abbreviation,
-    get_all_source_channels,
 )
 from prompts import prompts
 
@@ -119,7 +115,7 @@ async def are_messages_duplicate(msg_a: MessageInfo, msg_b: MessageInfo) -> bool
     """Use the LLM to see if two messages cover the same topic."""
     user_content = f"Message 1:\n{msg_a.text}\n\nMessage 2:\n{msg_b.text}"
 
-    answer = await call_openai(prompts.DUPLICATE_CHECK_PROMPT, user_content, max_tokens=3)
+    answer = await call_openai(prompts.DUPLICATE_CHECK_PROMPT, user_content, max_tokens=3, temperature=0)
     return answer.strip().lower().startswith("да")
 
 
@@ -145,7 +141,7 @@ async def _check_coverage(
 Была ли эта тема уже освещена в предыдущих дайджестах{label}?"""
 
     try:
-        result = await call_openai(prompt, user_content, max_tokens=2)
+        result = await call_openai(prompt, user_content, max_tokens=2, temperature=0)
         return result.strip().upper() == "ДА"
     except Exception as e:
         logger.error("Error checking %s coverage: %s", label.strip(), e)
@@ -177,7 +173,7 @@ async def is_nlp_related(text: str) -> tuple[bool, str]:
     if len(text) < 100:
         return False, "too_short"
     truncated = text[:NLP_CHECK_MAX_INPUT_CHARS]
-    answer = await call_openai(prompts.NLP_RELEVANCE_PROMPT, truncated, max_tokens=20)
+    answer = await call_openai(prompts.NLP_RELEVANCE_PROMPT, truncated, max_tokens=20, temperature=0)
     return answer.lower().strip().startswith("да"), answer
 
 
