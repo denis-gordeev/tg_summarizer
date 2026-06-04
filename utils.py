@@ -103,6 +103,9 @@ async def call_openai(
     """Универсальная функция для вызова OpenAI API с retry и exponential backoff."""
     global openai_client
     if openai_client is None:
+        if not OPENAI_API_KEY:
+            logger.error("OPENAI_API_KEY is not set — cannot create OpenAI client")
+            return ""
         openai_client = AsyncOpenAI(
             api_key=OPENAI_API_KEY,
             timeout=float(OPENAI_REQUEST_TIMEOUT),

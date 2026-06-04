@@ -40,6 +40,8 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     if request_id:
         logger.info("Lambda invocation %s", request_id)
 
+    start_time = time.monotonic()
+
     # Ensure we can write files (sessions, history) in Lambda
     try:
         os.chdir('/tmp')
@@ -77,7 +79,8 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             )
         )
     except Exception as e:
-        logger.error("Lambda execution failed: %s", e, exc_info=True)
+        elapsed = time.monotonic() - start_time
+        logger.error("Lambda execution failed after %.1fs: %s", elapsed, e, exc_info=True)
         # Push state to S3 even on failure to preserve partial updates
         upload_to_s3()
         return {
@@ -90,6 +93,9 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
     # Push updated state back to S3
     upload_to_s3()
+
+    elapsed = time.monotonic() - start_time
+    logger.info("Lambda completed in %.1fs", elapsed)
 
     return {
         'status': 'ok',

@@ -15,6 +15,7 @@ Globals:
         OPENAI_CHANNEL_SUMMARY_MAX_TOKENS: !Ref OpenAIChannelSummaryMaxTokens
         OPENAI_GROUP_SUMMARY_MAX_TOKENS: !Ref OpenAIGroupSummaryMaxTokens
         OPENAI_REQUEST_TIMEOUT: !Ref OpenAIRequestTimeout
+        UPDATE_SUMMARY_MAX_TOKENS: !Ref UpdateSummaryMaxTokens
         NLP_CHECK_MAX_INPUT_CHARS: !Ref NlpCheckMaxInputChars
         MAX_MESSAGES_PER_SOURCE: !Ref MaxMessagesPerSource
         TARGET_CHANNEL: !Ref TargetChannel
@@ -103,7 +104,12 @@ Parameters:
     Type: String
     Description: Timeout in seconds for each OpenAI API request
     Default: "30"
-  
+   
+  UpdateSummaryMaxTokens:
+    Type: String
+    Description: Max tokens for summary update LLM calls (link insertion)
+    Default: "500"
+   
   NlpCheckMaxInputChars:
     Type: String
     Description: Max chars of message text sent to NLP relevance check

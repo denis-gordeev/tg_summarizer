@@ -340,11 +340,28 @@
   - `test_shared_helper_truncates_long_content`: verifies content truncation in shared helper
 - All 98 tests pass without errors.
 
+## Completed in 2026-06-04 round (Lambda hardening round 9, bug fixes, cost optimization, observability)
+
+- **Bug fix**: Fixed [`load_group_summaries_history()`](history_manager.py) — previously returned `[]` when file was missing or corrupt, unlike [`load_summaries_history()`](history_manager.py) which restores from channel. Now both functions consistently attempt channel restore when `data is None`, preventing data loss after group history file corruption.
+- **Cost optimization**: Added `UPDATE_SUMMARY_MAX_TOKENS` config (default 500) in [`config.py`](config.py). Applied in [`update_existing_summary()`](history_manager.py) — previously used `OPENAI_CHANNEL_SUMMARY_MAX_TOKENS` (4000) for a simple link insertion, wasting ~87% output tokens. 500 tokens is sufficient for inserting one link into an existing summary.
+- **Lambda duration logging**: Added `time.monotonic()` tracking in [`lambda_handler.handler()`](lambda_handler.py) — now logs `"Lambda completed in X.Xs"` on success and `"Lambda execution failed after X.Xs"` on error. Enables CloudWatch-based performance monitoring and timeout trend detection.
+- **OpenAI API key early validation**: Added check in [`call_openai()`](utils.py) — returns `""` immediately with clear error log when `OPENAI_API_KEY` is not set, instead of creating an `AsyncOpenAI` client that would fail with a confusing 401 error.
+- **SAM template updated**: Added `UpdateSummaryMaxTokens` parameter and env var in [`template.yaml`](template.yaml).
+- **`.env.example` synced**: Added `UPDATE_SUMMARY_MAX_TOKENS=500` in [`.env.example`](.env.example).
+- **Tests added**: 7 new tests (total 105, up from 98):
+  - `test_config_reads_update_summary_max_tokens_from_env`: verifies `UPDATE_SUMMARY_MAX_TOKENS` env var parsing
+  - `test_call_openai_returns_empty_when_api_key_missing`: verifies early return when API key is None
+  - `test_handler_logs_duration_on_success`: verifies completion duration log
+  - `test_handler_logs_duration_on_error`: verifies error path includes duration
+  - `test_no_restore_when_file_has_empty_summaries` (group): verifies empty-but-valid group file does NOT trigger restore
+  - `test_restore_when_file_missing` (group): verifies missing group file DOES trigger restore
+  - `test_update_existing_summary_uses_update_max_tokens`: verifies `UPDATE_SUMMARY_MAX_TOKENS` (500) used instead of 4000
+- All 105 tests pass without errors.
+
 ## Next actions
 
 - **CI/CD**: Настроить GitHub Actions CI/CD для автоматического деплоя Lambda при мердже в main.
 - **Secrets management**: Перенести реальные секреты в AWS SSM Parameter Store (инфраструктура готова — `*_SSM_PATH` env vars и IAM policies в template.yaml).
 - **Prompt A/B testing**: Продолжить тестирование промптов — отслеживать качество саммари после снижения `max_tokens` до 4000 и при необходимости корректировать.
 - **OpenAI response streaming**: Рассмотреть streaming API для снижения perceived latency (но не стоимости — `max_tokens` уже ограничен).
-- **Summary update cost**: Отслеживать стоимость LLM-вызовов в `update_existing_summary()` — если стоимость обновления одного саммари слишком высока относительно ценности, рассмотреть ограничение `max_tokens` или возврат к механическому append для коротких обновлений.
-- **Coverage check prompt**: Рассмотреть замену_coverage check промптов на JSON mode (`response_format={"type": "json_object"}`) для ещё большей детерминистичности при сохранении стоимости gpt-4o-mini.
+- **Coverage check prompt**: Рассмотреть замену coverage check промптов на JSON mode (`response_format={"type": "json_object"}`) для ещё большей детерминистичности при сохранении стоимости gpt-4o-mini.

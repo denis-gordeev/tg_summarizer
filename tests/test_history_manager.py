@@ -1,6 +1,7 @@
 import asyncio
 import importlib
 import sys
+import types
 import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch, MagicMock, AsyncMock
@@ -705,6 +706,87 @@ class LoadSummariesHistoryRestoreTests(unittest.TestCase):
                     mock_restore.assert_called_once()
 
 
+class LoadGroupSummariesHistoryRestoreTests(unittest.TestCase):
+    """Tests for load_group_summaries_history — channel restore on missing/corrupt file."""
+
+    def _import_hm_with_stubs(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_channel_manager = types.ModuleType("channel_manager")
+        fake_channel_manager.create_channel_abbreviation = lambda ch: "AB"
+        fake_channel_manager.load_channel_abbreviations = lambda: {}
+
+        class FakeSummaryInfo:
+            def __init__(self, content="", date=None, message_count=0, channels=None, message_id=None):
+                self.content = content
+                self.date = date or datetime.now(timezone.utc)
+                self.message_count = message_count
+                self.channels = channels or []
+                self.message_id = message_id
+
+            def to_dict(self):
+                return {"content": self.content, "date": self.date.isoformat() if self.date else "",
+                        "message_count": self.message_count, "channels": self.channels, "message_id": self.message_id}
+
+        fake_models = types.ModuleType("models")
+        fake_models.SummaryInfo = FakeSummaryInfo
+        fake_models.MessageInfo = type("MessageInfo", (), {})
+        fake_prompts = types.ModuleType("prompts")
+        fake_prompts.prompts = types.SimpleNamespace()
+        fake_utils = types.ModuleType("utils")
+        fake_utils.call_openai = MagicMock()
+        fake_utils.extract_links = lambda text: []
+        fake_utils.load_json_file = lambda *a, **kw: {}
+        fake_utils.save_json_file = lambda *a, **kw: True
+        fake_utils.now_iso = lambda: "2026-01-01T00:00:00"
+        fake_utils.extract_all_channels = lambda text: []
+        fake_utils.text_hash = lambda text: "abc123"
+        fake_telegram_client = types.ModuleType("telegram_client")
+        fake_telegram_client.user_client = None
+        fake_telegram_client.clients_loop = None
+
+        stubs = {
+            "dotenv": fake_dotenv,
+            "channel_manager": fake_channel_manager,
+            "models": fake_models,
+            "prompts": fake_prompts,
+            "utils": fake_utils,
+            "telegram_client": fake_telegram_client,
+        }
+        return stubs
+
+    def test_no_restore_when_file_has_empty_summaries(self):
+        """load_group_summaries_history should NOT trigger restore for a valid but empty file."""
+        stubs = self._import_hm_with_stubs()
+        stubs["utils"].load_json_file = lambda path, default=None: {"summaries": [], "last_updated": "2026-01-01"}
+
+        with patch.dict(sys.modules, stubs):
+            with patch.dict(os.environ, {}, clear=True):
+                sys.modules.pop("history_manager", None)
+                sys.modules.pop("config", None)
+                hm = importlib.import_module("history_manager")
+
+                with patch.object(hm, "restore_group_summaries_from_channel_sync", return_value=["restored"]) as mock_restore:
+                    result = hm.load_group_summaries_history()
+                    mock_restore.assert_not_called()
+                    self.assertEqual(result, [])
+
+    def test_restore_when_file_missing(self):
+        """load_group_summaries_history should trigger restore when file is missing/corrupt."""
+        stubs = self._import_hm_with_stubs()
+        stubs["utils"].load_json_file = lambda path, default=None: None
+
+        with patch.dict(sys.modules, stubs):
+            with patch.dict(os.environ, {}, clear=True):
+                sys.modules.pop("history_manager", None)
+                sys.modules.pop("config", None)
+                hm = importlib.import_module("history_manager")
+
+                with patch.object(hm, "restore_group_summaries_from_channel_sync", return_value=[]) as mock_restore:
+                    hm.load_group_summaries_history()
+                    mock_restore.assert_called_once()
+
+
 class SaveUpdatedSummaryNoMatchTests(unittest.TestCase):
     """Tests for save_updated_summary — should skip save/edit when no match found."""
 
@@ -957,6 +1039,75 @@ class UpdateExistingSummaryLLMTests(unittest.TestCase):
                 updated = asyncio.run(_test())
                 self.assertEqual(updated.content, "Updated summary with new link")
                 fake_utils.call_openai.assert_called_once()
+
+    def test_update_existing_summary_uses_update_max_tokens(self):
+        """update_existing_summary should use UPDATE_SUMMARY_MAX_TOKENS, not full channel max."""
+        import types
+        import importlib
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        fake_channel_manager = types.ModuleType("channel_manager")
+        fake_channel_manager.create_channel_abbreviation = lambda ch: "AB"
+        fake_channel_manager.load_channel_abbreviations = lambda: {}
+
+        class FakeSummaryInfo:
+            def __init__(self, content="", date=None, message_count=0, channels=None, message_id=None):
+                self.content = content
+                self.date = date or datetime.now(timezone.utc)
+                self.message_count = message_count
+                self.channels = channels or []
+                self.message_id = message_id
+
+        class FakeMessageInfo:
+            def __init__(self, text="", channel="", message_id=0, date=None, link=""):
+                self.text = text
+                self.channel = channel
+                self.message_id = message_id
+                self.date = date or datetime.now(timezone.utc)
+                self.link = link
+
+            def get_telegram_link(self):
+                return f"https://t.me/{self.channel.lstrip('@')}/{self.message_id}"
+
+        fake_models = types.ModuleType("models")
+        fake_models.SummaryInfo = FakeSummaryInfo
+        fake_models.MessageInfo = FakeMessageInfo
+        fake_prompts = types.ModuleType("prompts")
+        fake_prompts.prompts = types.SimpleNamespace()
+        fake_utils = types.ModuleType("utils")
+        fake_utils.call_openai = AsyncMock(return_value="Updated")
+        fake_utils.extract_links = lambda text: []
+        fake_utils.load_json_file = lambda *a, **kw: {"summaries": [], "last_updated": ""}
+        fake_utils.save_json_file = MagicMock(return_value=True)
+        fake_utils.now_iso = lambda: "2026-01-01T00:00:00"
+        fake_utils.text_hash = lambda text: "abc123"
+
+        stubs = {
+            "dotenv": fake_dotenv,
+            "channel_manager": fake_channel_manager,
+            "models": fake_models,
+            "prompts": fake_prompts,
+            "utils": fake_utils,
+        }
+
+        with patch.dict(sys.modules, stubs):
+            with patch.dict(os.environ, {}, clear=True):
+                sys.modules.pop("history_manager", None)
+                sys.modules.pop("config", None)
+                hm = importlib.import_module("history_manager")
+
+                summary = FakeSummaryInfo(content="Original", message_id=1)
+                msg = FakeMessageInfo(text="New info", channel="@test", message_id=42)
+
+                async def _test():
+                    return await hm.update_existing_summary(summary, msg)
+
+                asyncio.run(_test())
+
+                call_kwargs = fake_utils.call_openai.call_args
+                self.assertEqual(call_kwargs.kwargs.get("max_tokens"), 500)
 
     def test_update_existing_summary_fallback_on_llm_failure(self):
         """update_existing_summary should fall back to append on LLM failure."""

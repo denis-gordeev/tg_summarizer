@@ -1,3 +1,4 @@
+import asyncio
 import importlib
 import sys
 import time
@@ -153,6 +154,42 @@ class HandlerTests(unittest.TestCase):
         call_kwargs = mock_run.call_args[1]
         self.assertIn("_deadline", call_kwargs)
         self.assertIsInstance(call_kwargs["_deadline"], float)
+
+    def test_handler_logs_duration_on_success(self):
+        """Handler should log completion duration on success."""
+        event = {"send_message": True, "save_changes": True}
+
+        async_mock = AsyncMock()
+
+        def _run_and_close(coro):
+            coro.close()
+
+        with patch.object(self.lambda_handler.os, "chdir"), \
+             patch.object(self.lambda_handler, "download_from_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.object(self.lambda_handler, "run_summarizer", async_mock), \
+             patch.object(self.lambda_handler.asyncio, "run", side_effect=_run_and_close), \
+             patch.object(self.lambda_handler.logger, "info") as mock_log:
+            self.lambda_handler.handler(event, context=None)
+
+        duration_logs = [call for call in mock_log.call_args_list
+                         if "completed" in str(call).lower()]
+        self.assertTrue(len(duration_logs) > 0, "Expected a completion duration log message")
+
+    def test_handler_logs_duration_on_error(self):
+        """Handler should log duration when execution fails."""
+        event = {"send_message": True, "save_changes": True}
+
+        async def _raise(**kwargs):
+            raise RuntimeError("test error")
+
+        with patch.object(self.lambda_handler.os, "chdir"), \
+             patch.object(self.lambda_handler, "download_from_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.object(self.lambda_handler, "run_summarizer", _raise):
+            result = self.lambda_handler.handler(event, context=None)
+
+        self.assertEqual(result["status"], "error")
 
 
 if __name__ == "__main__":

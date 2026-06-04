@@ -3,7 +3,7 @@ import os
 import sys
 import types
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, MagicMock, patch
 
 
 REQUIRED_ENV = {
@@ -112,6 +112,15 @@ class ConfigTests(unittest.TestCase):
         with patch.dict(os.environ, env, clear=True):
             config = _reload_module("config")
         self.assertEqual(config.MAX_MESSAGES_PER_SOURCE, 50)
+
+    def test_config_reads_update_summary_max_tokens_from_env(self):
+        env = {
+            **REQUIRED_ENV,
+            "UPDATE_SUMMARY_MAX_TOKENS": "750",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            config = _reload_module("config")
+        self.assertEqual(config.UPDATE_SUMMARY_MAX_TOKENS, 750)
 
 
 class SsmSecretResolutionTests(unittest.TestCase):
@@ -349,6 +358,36 @@ class CallOpenAITests(unittest.IsolatedAsyncioTestCase):
         result = await utils.call_openai("system", "user")
         self.assertEqual(result, "ok")
         self.assertNotIn("temperature", captured_create_kwargs)
+
+    async def test_call_openai_returns_empty_when_api_key_missing(self):
+        """call_openai should return '' early when OPENAI_API_KEY is not set."""
+        import importlib
+        import sys
+        import types
+        from unittest.mock import MagicMock, patch
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_openai = types.ModuleType("openai")
+
+        class FakeOpenAIError(Exception):
+            pass
+
+        fake_openai.AsyncOpenAI = MagicMock()
+        fake_openai.APIError = FakeOpenAIError
+        fake_openai.RateLimitError = type("RateLimitError", (FakeOpenAIError,), {"status_code": None})
+        fake_openai.APIConnectionError = type("APIConnectionError", (FakeOpenAIError,), {})
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv, "openai": fake_openai}):
+            with patch.dict(os.environ, {}, clear=True):
+                sys.modules.pop("config", None)
+                sys.modules.pop("utils", None)
+                config = importlib.import_module("config")
+                utils = importlib.import_module("utils")
+
+        result = await utils.call_openai("system", "user")
+        self.assertEqual(result, "")
+        fake_openai.AsyncOpenAI.assert_not_called()
 
 
 if __name__ == "__main__":

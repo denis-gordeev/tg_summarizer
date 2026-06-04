@@ -23,7 +23,7 @@ from config import (
     COVERAGE_CHECK_MAX_CHARS_PER_SUMMARY,
     UPDATE_MATCH_MAX_SUMMARIES,
     UPDATE_MATCH_MAX_CHARS_PER_SUMMARY,
-    OPENAI_CHANNEL_SUMMARY_MAX_TOKENS,
+    UPDATE_SUMMARY_MAX_TOKENS,
 )
 from models import MessageInfo, SummaryInfo
 from prompts import prompts
@@ -280,7 +280,11 @@ def load_group_summaries_history() -> List[SummaryInfo]:
 
     data = load_json_file(GROUP_SUMMARIES_HISTORY_FILE, None)
     if data is None:
-        return []
+        logger.info("Group history file missing or corrupt, attempting channel restore...")
+        summaries = restore_group_summaries_from_channel_sync()
+        summaries = sorted(summaries, key=lambda x: x.date)
+        _cache[cache_key] = summaries
+        return summaries
 
     summaries = _parse_summaries_from_data(data)
     if not summaries:
@@ -446,7 +450,7 @@ async def update_existing_summary(
     user_content = f"Саммари:\n{summary.content}\n\nНовое сообщение:\n{new_message.text}"
 
     try:
-        updated_content = await call_openai(update_prompt, user_content, max_tokens=OPENAI_CHANNEL_SUMMARY_MAX_TOKENS)
+        updated_content = await call_openai(update_prompt, user_content, max_tokens=UPDATE_SUMMARY_MAX_TOKENS)
         if not updated_content:
             updated_content = summary.content + f"\n\nДругие ссылки: {new_link}"
     except Exception as e:
