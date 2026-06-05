@@ -19,6 +19,8 @@ Globals:
         UPDATE_SUMMARY_MAX_TOKENS: !Ref UpdateSummaryMaxTokens
         NLP_CHECK_MAX_INPUT_CHARS: !Ref NlpCheckMaxInputChars
         MAX_MESSAGES_PER_SOURCE: !Ref MaxMessagesPerSource
+        SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE: !Ref SummaryMaxInputCharsPerMessage
+        NLP_CONCURRENT_CHECKS: !Ref NlpConcurrentChecks
         TARGET_CHANNEL: !Ref TargetChannel
         SOURCE_CHANNELS: !Ref SourceChannels
         SOURCE_GROUPS: !Ref SourceGroups
@@ -125,6 +127,16 @@ Parameters:
     Type: String
     Description: Max new messages to fetch per source channel/group
     Default: "100"
+   
+  SummaryMaxInputCharsPerMessage:
+    Type: String
+    Description: Max chars of each message sent to summary LLM
+    Default: "3000"
+   
+  NlpConcurrentChecks:
+    Type: String
+    Description: Max concurrent NLP relevance checks (OpenAI API calls)
+    Default: "5"
   
   StateBucket:
     Type: String

@@ -37,6 +37,8 @@ def _setup_stubs():
     fake_config.GROUP_SUMMARY_MIN_LENGTH = 2000
     fake_config.GROUP_SUMMARY_MAX_LENGTH = 12000
     fake_config.NLP_CHECK_MAX_INPUT_CHARS = 2000
+    fake_config.SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE = 3000
+    fake_config.NLP_CONCURRENT_CHECKS = 5
     sys.modules["config"] = fake_config
 
     # --- Stub history_manager ---

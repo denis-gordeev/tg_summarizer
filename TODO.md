@@ -377,6 +377,33 @@
 - Updated test stubs in [`tests/test_process_messages_integration.py`](tests/test_process_messages_integration.py) to include `OPENAI_SUMMARY_TEMPERATURE`.
 - All 112 tests pass without errors.
 
+## Completed in 2026-06-05 round 2 (Lambda hardening round 11, quality, dedup, cost, performance)
+
+- **Bug fix**: Fixed [`load_group_summaries_history()`](history_manager.py) — previously returned `[]` without caching when the file had valid but empty data (`{"summaries": []}`). Every subsequent call re-read the file from disk. Now caches empty results consistently with [`load_summaries_history()`](history_manager.py), and adds `sorted()` for consistency.
+- **Intra-batch dedup**: Added [`_remove_intra_batch_duplicates()`](message_processor.py) — lightweight SequenceMatcher-only dedup that removes obvious text duplicates (ratio > 0.95) and link duplicates within a single batch, without LLM calls. Applied in [`process_messages()`](message_processor.py) before summarization. Previously, two channels posting the same news would both be included in full, wasting input tokens and producing redundant summaries. Now near-identical messages are collapsed before the LLM sees them, directly improving summary conciseness (per AUTOWORK_INSTRUCTIONS goal).
+- **Code dedup**: Merged [`save_summary_to_history()`](history_manager.py) and [`save_group_summary_to_history()`](history_manager.py) into shared [`_save_summary_to_history_file()`](history_manager.py) helper. The channel version previously loaded and re-serialized all existing `SummaryInfo` objects on every save; the new helper uses raw JSON append (like the group version already did), which is more efficient and avoids unnecessary parse/serialize overhead.
+- **Cost optimization — summary input truncation**: Added `SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE` config (default 3000) in [`config.py`](config.py). Applied in [`_prepare_messages_text()`](message_processor.py) — each message's text is now truncated before being sent to the summary LLM. Previously, a single very long message (full article) could consume the entire input token budget, leaving little room for other messages and producing incomplete summaries.
+- **Performance — parallel NLP classification**: Added `NLP_CONCURRENT_CHECKS` config (default 5) in [`config.py`](config.py). Refactored [`process_messages()`](message_processor.py) to use `asyncio.gather` with a semaphore for NLP relevance checks — all messages are now classified concurrently (up to `NLP_CONCURRENT_CHECKS` at a time), reducing wall-clock time from N × OpenAI latency to ~N/5 × latency. Coverage checks and state-mutating operations remain sequential for safety.
+- **Dead code removed**: Removed [`_classify_message()`](message_processor.py) — its logic was inlined into `process_messages()` to enable the parallel NLP check split (parallel NLP phase, then sequential coverage/update phase).
+- **SAM template updated**: Added `SummaryMaxInputCharsPerMessage` and `NlpConcurrentChecks` parameters and env vars in [`template.yaml`](template.yaml).
+- **`.env.example` synced**: Added `SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE=3000` and `NLP_CONCURRENT_CHECKS=5` in [`.env.example`](.env.example).
+- **Tests added**: 13 new tests (total 125, up from 112):
+  - `test_load_group_summaries_caches_empty_results`: verifies empty group summaries are cached (not re-read from disk)
+  - `test_save_summary_to_history_file_appends_and_truncates`: verifies shared save helper appends and truncates
+  - `test_removes_identical_messages`: verifies intra-batch dedup removes identical messages
+  - `test_keeps_different_messages`: verifies intra-batch dedup keeps different messages
+  - `test_removes_link_duplicates`: verifies intra-batch dedup removes same-link messages
+  - `test_keeps_different_links`: verifies intra-batch dedup keeps different-link messages
+  - `test_empty_input_returns_empty`: verifies intra-batch dedup handles empty input
+  - `test_long_message_is_truncated`: verifies _prepare_messages_text truncates long messages
+  - `test_short_message_is_not_truncated`: verifies _prepare_messages_text keeps short messages
+  - `test_config_reads_summary_max_input_chars_from_env`: verifies `SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE` env var parsing
+  - `test_config_summary_max_input_chars_default`: verifies default is 3000
+  - `test_config_reads_nlp_concurrent_checks_from_env`: verifies `NLP_CONCURRENT_CHECKS` env var parsing
+  - `test_config_nlp_concurrent_checks_default`: verifies default is 5
+- Updated test stubs in [`tests/test_process_messages_integration.py`](tests/test_process_messages_integration.py) to include `SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE` and `NLP_CONCURRENT_CHECKS`.
+- All 125 tests pass without errors.
+
 ## Next actions
 
 - **CI/CD**: Настроить GitHub Actions CI/CD для автоматического деплоя Lambda при мердже в main.
@@ -384,3 +411,5 @@
 - **Prompt A/B testing**: Продолжить тестирование промптов — отслеживать качество саммари после снижения `max_tokens` до 4000 и при необходимости корректировать.
 - **OpenAI response streaming**: Рассмотреть streaming API для снижения perceived latency (но не стоимости — `max_tokens` уже ограничен).
 - **Coverage check prompt**: Рассмотреть замену coverage check промптов на JSON mode (`response_format={"type": "json_object"}`) для ещё большей детерминистичности при сохранении стоимости gpt-4o-mini.
+- **Parallel coverage checks**: Рассмотреть параллелизацию coverage check (после NLP классификации) аналогично параллельной NLP проверке — с `asyncio.Semaphore` и `asyncio.gather`.
+- **Intra-batch LLM dedup**: Рассмотреть добавление LLM-проверки для сообщений с ratio между SIMILARITY_LLM_LOWER (0.7) и SIMILARITY_LLM_UPPER (0.95) внутри `_remove_intra_batch_duplicates` — позволит ловить больше дубликатов за дополнительные токены.

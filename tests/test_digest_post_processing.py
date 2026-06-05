@@ -299,5 +299,81 @@ class DigestEndToEndTests(unittest.TestCase):
         self.assertEqual(len(raw_refs), 0, f"Found unreplaced references: {raw_refs}")
 
 
+class IntraBatchDedupTests(unittest.TestCase):
+    """Tests for _remove_intra_batch_duplicates."""
+
+    def test_removes_identical_messages(self):
+        stub_modules = _stub_dependencies()
+        mp = _import_message_processor(stub_modules)
+        msgs = _make_messages(
+            channels=["@a", "@b"],
+            texts=["GPT-5 announced today", "GPT-5 announced today"],
+        )
+        result = mp._remove_intra_batch_duplicates(msgs)
+        self.assertEqual(len(result), 1)
+
+    def test_keeps_different_messages(self):
+        stub_modules = _stub_dependencies()
+        mp = _import_message_processor(stub_modules)
+        msgs = _make_messages(
+            channels=["@a", "@b"],
+            texts=["GPT-5 announced today", "BERT update released"],
+        )
+        result = mp._remove_intra_batch_duplicates(msgs)
+        self.assertEqual(len(result), 2)
+
+    def test_removes_link_duplicates(self):
+        stub_modules = _stub_dependencies()
+        mp = _import_message_processor(stub_modules)
+        msgs = _make_messages(
+            channels=["@a", "@b"],
+            texts=[
+                "New model https://arxiv.org/abs/2401.12345",
+                "Same model discussed https://arxiv.org/abs/2401.12345",
+            ],
+        )
+        result = mp._remove_intra_batch_duplicates(msgs)
+        self.assertEqual(len(result), 1)
+
+    def test_keeps_different_links(self):
+        stub_modules = _stub_dependencies()
+        mp = _import_message_processor(stub_modules)
+        msgs = _make_messages(
+            channels=["@a", "@b"],
+            texts=[
+                "New model https://arxiv.org/abs/2401.11111",
+                "Other model https://arxiv.org/abs/2401.22222",
+            ],
+        )
+        result = mp._remove_intra_batch_duplicates(msgs)
+        self.assertEqual(len(result), 2)
+
+    def test_empty_input_returns_empty(self):
+        stub_modules = _stub_dependencies()
+        mp = _import_message_processor(stub_modules)
+        result = mp._remove_intra_batch_duplicates([])
+        self.assertEqual(result, [])
+
+
+class SummaryInputTruncationTests(unittest.TestCase):
+    """Tests for _prepare_messages_text truncation via SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE."""
+
+    def test_long_message_is_truncated(self):
+        stub_modules = _stub_dependencies()
+        mp = _import_message_processor(stub_modules)
+        long_text = "A" * 5000
+        msgs = _make_messages(channels=["@a"], texts=[long_text])
+        text_output, total_length = mp._prepare_messages_text(msgs)
+        self.assertNotIn("A" * 5000, text_output)
+
+    def test_short_message_is_not_truncated(self):
+        stub_modules = _stub_dependencies()
+        mp = _import_message_processor(stub_modules)
+        short_text = "Short message about AI"
+        msgs = _make_messages(channels=["@a"], texts=[short_text])
+        text_output, total_length = mp._prepare_messages_text(msgs)
+        self.assertIn(short_text, text_output)
+
+
 if __name__ == "__main__":
     unittest.main()

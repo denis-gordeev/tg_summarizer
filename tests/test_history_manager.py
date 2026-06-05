@@ -1430,5 +1430,169 @@ class SharedLoadSaveHelperTests(unittest.TestCase):
                 self.assertEqual(saved_data["test.json"]["processed_messages"][0]["text"], "new")
 
 
+class GroupSummariesCacheEmptyTests(unittest.TestCase):
+    """Tests that load_group_summaries_history caches empty results."""
+
+    def _import_hm_with_stubs(self):
+        import importlib
+        import sys
+        import types
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        fake_channel_manager = types.ModuleType("channel_manager")
+        fake_channel_manager.create_channel_abbreviation = lambda ch: "AB"
+        fake_channel_manager.load_channel_abbreviations = lambda: {}
+
+        class FakeSummaryInfo:
+            def __init__(self, content="", date=None, message_count=0, channels=None, message_id=None):
+                self.content = content
+                self.date = date or datetime.now(timezone.utc)
+                self.message_count = message_count
+                self.channels = channels or []
+                self.message_id = message_id
+
+            def to_dict(self):
+                return {"content": self.content, "date": self.date.isoformat(),
+                        "message_count": self.message_count, "channels": self.channels,
+                        "message_id": self.message_id}
+
+        class FakeMessageInfo:
+            def __init__(self, text="", channel="", message_id=0, date=None, link=""):
+                self.text = text
+                self.channel = channel
+                self.message_id = message_id
+                self.date = date or datetime.now(timezone.utc)
+                self.link = link
+
+            def to_dict(self):
+                return {"text": self.text, "channel": self.channel, "message_id": self.message_id}
+
+        fake_models = types.ModuleType("models")
+        fake_models.SummaryInfo = FakeSummaryInfo
+        fake_models.MessageInfo = FakeMessageInfo
+        fake_prompts = types.ModuleType("prompts")
+        fake_prompts.prompts = types.SimpleNamespace()
+        fake_utils = types.ModuleType("utils")
+        fake_utils.call_openai = MagicMock()
+        fake_utils.extract_links = lambda text: []
+        fake_utils.load_json_file = lambda *a, **kw: {"summaries": [], "last_updated": ""}
+        fake_utils.save_json_file = MagicMock(return_value=True)
+        fake_utils.now_iso = lambda: "2026-01-01T00:00:00"
+        fake_utils.extract_all_channels = lambda text: []
+        fake_utils.text_hash = lambda text: "abc123"
+        fake_telegram_client = types.ModuleType("telegram_client")
+        fake_telegram_client.user_client = None
+        fake_telegram_client.clients_loop = None
+
+        stubs = {
+            "dotenv": fake_dotenv,
+            "channel_manager": fake_channel_manager,
+            "models": fake_models,
+            "prompts": fake_prompts,
+            "utils": fake_utils,
+            "telegram_client": fake_telegram_client,
+        }
+
+        return stubs
+
+    def test_load_group_summaries_caches_empty_results(self):
+        stubs = self._import_hm_with_stubs()
+        with patch.dict(sys.modules, stubs):
+            with patch.dict(os.environ, {}, clear=True):
+                sys.modules.pop("history_manager", None)
+                sys.modules.pop("config", None)
+                hm = importlib.import_module("history_manager")
+
+                result1 = hm.load_group_summaries_history()
+                self.assertEqual(result1, [])
+
+                cache_key = hm._cache_key(hm.GROUP_SUMMARIES_HISTORY_FILE)
+                self.assertIn(cache_key, hm._cache)
+
+
+class SharedSaveSummaryHelperTests(unittest.TestCase):
+    """Tests for _save_summary_to_history_file shared helper."""
+
+    def _import_hm_with_stubs(self):
+        import importlib
+        import sys
+        import types
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        fake_channel_manager = types.ModuleType("channel_manager")
+        fake_channel_manager.create_channel_abbreviation = lambda ch: "AB"
+        fake_channel_manager.load_channel_abbreviations = lambda: {}
+
+        class FakeSummaryInfo:
+            def __init__(self, content="", date=None, message_count=0, channels=None, message_id=None):
+                self.content = content
+                self.date = date or datetime.now(timezone.utc)
+                self.message_count = message_count
+                self.channels = channels or []
+                self.message_id = message_id
+
+            def to_dict(self):
+                return {"content": self.content, "date": self.date.isoformat(),
+                        "message_count": self.message_count, "channels": self.channels,
+                        "message_id": self.message_id}
+
+        fake_models = types.ModuleType("models")
+        fake_models.SummaryInfo = FakeSummaryInfo
+        fake_models.MessageInfo = type("FakeMessageInfo", (), {"__init__": lambda self, **kw: None, "to_dict": lambda self: {}})
+        fake_prompts = types.ModuleType("prompts")
+        fake_prompts.prompts = types.SimpleNamespace()
+        fake_utils = types.ModuleType("utils")
+        fake_utils.call_openai = MagicMock()
+        fake_utils.extract_links = lambda text: []
+        fake_utils.load_json_file = lambda *a, **kw: {"summaries": [], "last_updated": ""}
+        fake_utils.save_json_file = MagicMock(return_value=True)
+        fake_utils.now_iso = lambda: "2026-01-01T00:00:00"
+        fake_utils.text_hash = lambda text: "abc123"
+        fake_telegram_client = types.ModuleType("telegram_client")
+        fake_telegram_client.user_client = None
+        fake_telegram_client.clients_loop = None
+
+        stubs = {
+            "dotenv": fake_dotenv,
+            "channel_manager": fake_channel_manager,
+            "models": fake_models,
+            "prompts": fake_prompts,
+            "utils": fake_utils,
+            "telegram_client": fake_telegram_client,
+        }
+
+        return stubs
+
+    def test_save_summary_to_history_file_appends_and_truncates(self):
+        stubs = self._import_hm_with_stubs()
+        saved_data = {}
+
+        def fake_save(filepath, data, error_msg):
+            saved_data[filepath] = data
+            return True
+
+        stubs["utils"].save_json_file = fake_save
+
+        with patch.dict(sys.modules, stubs):
+            with patch.dict(os.environ, {}, clear=True):
+                sys.modules.pop("history_manager", None)
+                sys.modules.pop("config", None)
+                hm = importlib.import_module("history_manager")
+
+                FakeSI = stubs["models"].SummaryInfo
+                summary = FakeSI(content="Test summary")
+
+                hm._save_summary_to_history_file(
+                    summary, "test_summaries.json", max_summaries=1, error_msg="test"
+                )
+
+                self.assertEqual(len(saved_data["test_summaries.json"]["summaries"]), 1)
+                self.assertEqual(saved_data["test_summaries.json"]["summaries"][0]["content"], "Test summary")
+
+
 if __name__ == '__main__':
     unittest.main()

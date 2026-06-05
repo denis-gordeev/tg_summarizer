@@ -113,6 +113,8 @@ OPENAI_SUMMARY_TEMPERATURE = float(os.getenv("OPENAI_SUMMARY_TEMPERATURE", "0.3"
 
 NLP_CHECK_MAX_INPUT_CHARS = int(os.getenv("NLP_CHECK_MAX_INPUT_CHARS", "2000"))
 MAX_MESSAGES_PER_SOURCE = int(os.getenv("MAX_MESSAGES_PER_SOURCE", "100"))
+SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE = int(os.getenv("SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE", "3000"))
+NLP_CONCURRENT_CHECKS = int(os.getenv("NLP_CONCURRENT_CHECKS", "5"))
 
 source_channels_str = os.getenv('SOURCE_CHANNELS', '')
 SOURCE_CHANNELS = set([c.strip() for c in source_channels_str.split(',') if c.strip()])

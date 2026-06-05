@@ -244,18 +244,24 @@ def restore_group_summaries_from_channel_sync() -> List[SummaryInfo]:
     return _run_async_with_loop(restore_group_summaries_from_channel())
 
 
+def _save_summary_to_history_file(
+    summary: SummaryInfo, filepath: str, max_summaries: int, error_msg: str
+) -> None:
+    data = load_json_file(filepath, {"summaries": [], "last_updated": ""})
+    data["summaries"].append(summary.to_dict())
+    if len(data["summaries"]) > max_summaries:
+        data["summaries"] = data["summaries"][-max_summaries:]
+    data["last_updated"] = now_iso()
+    save_json_file(filepath, data, error_msg)
+    invalidate_cache(filepath)
+
+
 def save_summary_to_history(summary: SummaryInfo) -> None:
     """Сохраняет новое саммари в историю."""
-    existing_summaries = load_summaries_history()
-    all_summaries = existing_summaries + [summary]
-
-    if len(all_summaries) > MAX_CHANNEL_SUMMARIES:
-        all_summaries = all_summaries[-MAX_CHANNEL_SUMMARIES:]
-
-    all_summaries_dict = [s.to_dict() for s in all_summaries if isinstance(s, SummaryInfo)]
-    data = {"summaries": all_summaries_dict, "last_updated": now_iso()}
-    save_json_file(SUMMARIES_HISTORY_FILE, data, "Error saving summary history")
-    invalidate_cache(SUMMARIES_HISTORY_FILE)
+    _save_summary_to_history_file(
+        summary, SUMMARIES_HISTORY_FILE, MAX_CHANNEL_SUMMARIES,
+        "Error saving summary history",
+    )
 
 
 def load_group_summarization_history() -> Set[str]:
@@ -286,24 +292,17 @@ def load_group_summaries_history() -> List[SummaryInfo]:
         return summaries
 
     summaries = _parse_summaries_from_data(data)
-    if not summaries:
-        return []
+    summaries = sorted(summaries, key=lambda x: x.date)
     _cache[cache_key] = summaries
     return summaries
 
 
 def save_group_summary_to_history(summary: SummaryInfo) -> None:
     """Сохраняет саммари из групп в историю."""
-    data = load_json_file(GROUP_SUMMARIES_HISTORY_FILE, {"summaries": [], "last_updated": ""})
-
-    data["summaries"].append(summary.to_dict())
-
-    if len(data["summaries"]) > MAX_GROUP_SUMMARIES:
-        data["summaries"] = data["summaries"][-MAX_GROUP_SUMMARIES:]
-
-    data["last_updated"] = now_iso()
-    save_json_file(GROUP_SUMMARIES_HISTORY_FILE, data, "Error saving group summary history")
-    invalidate_cache(GROUP_SUMMARIES_HISTORY_FILE)
+    _save_summary_to_history_file(
+        summary, GROUP_SUMMARIES_HISTORY_FILE, MAX_GROUP_SUMMARIES,
+        "Error saving group summary history",
+    )
 
 
 def should_run_group_summarization() -> bool:

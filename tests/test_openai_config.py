@@ -404,5 +404,75 @@ class CallOpenAITests(unittest.IsolatedAsyncioTestCase):
         fake_openai.AsyncOpenAI.assert_not_called()
 
 
+class NewConfigConstantsTests(unittest.TestCase):
+    """Tests for SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE and NLP_CONCURRENT_CHECKS config."""
+
+    def test_config_reads_summary_max_input_chars_from_env(self):
+        import importlib
+        import sys
+        import types
+        from unittest.mock import patch
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, {
+                **REQUIRED_ENV,
+                "SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE": "5000",
+            }, clear=True):
+                sys.modules.pop("config", None)
+                config = importlib.import_module("config")
+                self.assertEqual(config.SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE, 5000)
+
+    def test_config_summary_max_input_chars_default(self):
+        import importlib
+        import sys
+        import types
+        from unittest.mock import patch
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+                sys.modules.pop("config", None)
+                config = importlib.import_module("config")
+                self.assertEqual(config.SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE, 3000)
+
+    def test_config_reads_nlp_concurrent_checks_from_env(self):
+        import importlib
+        import sys
+        import types
+        from unittest.mock import patch
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, {
+                **REQUIRED_ENV,
+                "NLP_CONCURRENT_CHECKS": "10",
+            }, clear=True):
+                sys.modules.pop("config", None)
+                config = importlib.import_module("config")
+                self.assertEqual(config.NLP_CONCURRENT_CHECKS, 10)
+
+    def test_config_nlp_concurrent_checks_default(self):
+        import importlib
+        import sys
+        import types
+        from unittest.mock import patch
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+                sys.modules.pop("config", None)
+                config = importlib.import_module("config")
+                self.assertEqual(config.NLP_CONCURRENT_CHECKS, 5)
+
+
 if __name__ == "__main__":
     unittest.main()

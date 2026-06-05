@@ -19,6 +19,8 @@ from config import (
     GROUP_SUMMARY_MIN_LENGTH,
     GROUP_SUMMARY_MAX_LENGTH,
     NLP_CHECK_MAX_INPUT_CHARS,
+    SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE,
+    NLP_CONCURRENT_CHECKS,
 )
 from history_manager import get_recent_summaries_context, get_recent_group_summaries_context
 from channel_manager import (
@@ -234,6 +236,36 @@ async def _remove_duplicates_generic(
     return unique_msgs
 
 
+def _remove_intra_batch_duplicates(messages: List[MessageInfo]) -> List[MessageInfo]:
+    """Remove obvious duplicates within a batch using SequenceMatcher only.
+
+    No LLM calls — catches near-identical messages (ratio > SIMILARITY_LLM_UPPER)
+    and link duplicates. Ambiguous cases are left for the summary LLM to consolidate.
+    """
+    unique_msgs: List[MessageInfo] = []
+    seen_links = set()
+
+    for msg in messages:
+        links = extract_links(msg.text)
+        if links and any(link in seen_links for link in links):
+            logger.debug("Skipping intra-batch link duplicate: %s", links[0])
+            continue
+
+        duplicate = False
+        for u in unique_msgs:
+            ratio = SequenceMatcher(None, msg.text, u.text).ratio()
+            if ratio > SIMILARITY_LLM_UPPER:
+                logger.debug("Skipping intra-batch text duplicate (ratio=%.2f)", ratio)
+                duplicate = True
+                break
+
+        if not duplicate:
+            unique_msgs.append(msg)
+            seen_links.update(links)
+
+    return unique_msgs
+
+
 async def remove_duplicates(messages: List[MessageInfo]) -> List[MessageInfo]:
     return await _remove_duplicates_generic(
         messages,
@@ -284,11 +316,12 @@ def _prepare_messages_text(messages: List[MessageInfo]) -> tuple[str, int]:
     total_original_length = 0
     for i, msg in enumerate(messages, 1):
         links = extract_links(msg.text)
-        source_info = f"[{i}] {msg.text}"
+        truncated_text = msg.text[:SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE]
+        source_info = f"[{i}] {truncated_text}"
         if links:
             source_info += f" (Ссылки: {', '.join(links)})"
         messages_with_sources.append(source_info)
-        total_original_length += count_characters(msg.text)
+        total_original_length += count_characters(truncated_text)
     return "\n\n".join(messages_with_sources), total_original_length
 
 
@@ -349,41 +382,6 @@ async def summarize_group_text(messages: List[MessageInfo]) -> str:
     return result
 
 
-async def _classify_message(
-    msg: MessageInfo, is_group: bool, source_channels
-) -> tuple[set, bool]:
-    """Check NLP relevance, discover new channels, and check summary coverage.
-
-    Returns (discovered_channels_set, is_covered_in_summaries).
-    """
-    discovered = set()
-    msg.is_nlp_related, msg.is_nlp_related_reason = await is_nlp_related(msg.text)
-
-    if DEBUG:
-        logger.debug(
-            "NLP check: %s | %s | %s | Reason: %s",
-            "✅" if msg.is_nlp_related else "❌",
-            msg.text[:80], msg.channel, msg.is_nlp_related_reason,
-        )
-
-    if msg.is_nlp_related and not is_group and msg.channel not in source_channels:
-        discovered.add(msg.channel)
-
-    is_covered = False
-    if ENABLE_SUMMARIES_DEDUPLICATION and msg.is_nlp_related:
-        coverage_fn = (
-            is_message_covered_in_group_summaries if is_group
-            else is_message_covered_in_summaries
-        )
-        is_covered = await coverage_fn(msg)
-        msg.is_covered_in_summaries = is_covered
-        logger.debug("is_covered_in_summaries: %s", is_covered)
-        if is_covered:
-            await process_covered_message(msg, is_group=is_group)
-
-    return discovered, is_covered
-
-
 async def _create_summary_info(
     summary: str, unique_messages: List[MessageInfo], message_id, is_group: bool
 ) -> SummaryInfo:
@@ -442,6 +440,7 @@ async def process_messages(
     messages: List[MessageInfo], save_changes: bool, send_message: bool, is_group: bool = False
 ):
     """Processes a list of messages: filters, deduplicates, summarizes, and sends."""
+    import asyncio
     from config import SOURCE_CHANNELS
     from telegram_client import send_message_to_target_channel_with_id
 
@@ -456,19 +455,52 @@ async def process_messages(
     discovered_channels: set = set()
     unique_messages: List[MessageInfo] = []
 
-    for msg in messages:
+    sem = asyncio.Semaphore(NLP_CONCURRENT_CHECKS)
+
+    async def _check_nlp(text: str) -> tuple[bool, str]:
+        async with sem:
+            return await is_nlp_related(text)
+
+    nlp_results = await asyncio.gather(*[_check_nlp(msg.text) for msg in messages])
+
+    for msg, (is_related, reason) in zip(messages, nlp_results):
         if DEBUG:
             logger.debug("Checking message: %s", msg.to_dict())
 
         all_checked_messages.append(msg)
-        disc, is_covered = await _classify_message(msg, is_group, SOURCE_CHANNELS)
-        discovered_channels.update(disc)
+        msg.is_nlp_related = is_related
+        msg.is_nlp_related_reason = reason
+
+        if DEBUG:
+            logger.debug(
+                "NLP check: %s | %s | %s | Reason: %s",
+                "✅" if msg.is_nlp_related else "❌",
+                msg.text[:80], msg.channel, msg.is_nlp_related_reason,
+            )
+
+        if msg.is_nlp_related and not is_group and msg.channel not in SOURCE_CHANNELS:
+            discovered_channels.add(msg.channel)
+
+        is_covered = False
+        if ENABLE_SUMMARIES_DEDUPLICATION and msg.is_nlp_related:
+            coverage_fn = (
+                is_message_covered_in_group_summaries if is_group
+                else is_message_covered_in_summaries
+            )
+            is_covered = await coverage_fn(msg)
+            msg.is_covered_in_summaries = is_covered
+            logger.debug("is_covered_in_summaries: %s", is_covered)
+            if is_covered:
+                await process_covered_message(msg, is_group=is_group)
 
         if msg.is_nlp_related and not is_covered:
             unique_messages.append(msg)
 
     summary = None
     message_id = None
+    if unique_messages:
+        unique_messages = _remove_intra_batch_duplicates(unique_messages)
+        logger.info("After intra-batch dedup: %d unique messages from %s", len(unique_messages), stream_label)
     if unique_messages:
         summary_fn = summarize_group_text if is_group else summarize_text
         summary = await summary_fn(unique_messages)
