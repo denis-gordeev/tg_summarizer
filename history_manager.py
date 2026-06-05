@@ -45,9 +45,9 @@ def invalidate_cache(filepath: str = None) -> None:
         _cache.clear()
 
 
-def load_summarization_history() -> Set[str]:
-    """Загружает историю уже обработанных сообщений из файла."""
-    data = load_json_file(HISTORY_FILE, {"processed_messages": []})
+def _load_processed_messages(filepath: str) -> Set[str]:
+    """Load processed message IDs from a history file."""
+    data = load_json_file(filepath, {"processed_messages": []})
     processed_messages = set()
     for msg_data in data.get("processed_messages", []):
         msg = MessageInfo.from_dict(msg_data)
@@ -56,20 +56,32 @@ def load_summarization_history() -> Set[str]:
     return processed_messages
 
 
+def _save_processed_messages(
+    filepath: str, messages: List[MessageInfo], max_messages: int, error_msg: str
+) -> None:
+    """Append messages to a processed-messages history file, truncating to max_messages."""
+    data = load_json_file(filepath, {"processed_messages": []})
+    existing = data.get("processed_messages", [])
+    for msg in messages:
+        existing.append(msg.to_dict())
+    if len(existing) > max_messages:
+        existing = existing[-max_messages:]
+    data = {"processed_messages": existing, "last_updated": now_iso()}
+    save_json_file(filepath, data, error_msg)
+    invalidate_cache(filepath)
+
+
+def load_summarization_history() -> Set[str]:
+    """Загружает историю уже обработанных сообщений из файла."""
+    return _load_processed_messages(HISTORY_FILE)
+
+
 def save_summarization_history(messages: List[MessageInfo]) -> None:
     """Сохраняет обработанные сообщения в историю."""
-    existing_data = load_json_file(HISTORY_FILE, {"processed_messages": []})
-    existing_messages = existing_data.get("processed_messages", [])
-
-    new_messages = [msg.to_dict() for msg in messages]
-    all_messages = existing_messages + new_messages
-
-    if len(all_messages) > MAX_CHANNEL_HISTORY_MESSAGES:
-        all_messages = all_messages[-MAX_CHANNEL_HISTORY_MESSAGES:]
-
-    data = {"processed_messages": all_messages, "last_updated": now_iso()}
-    save_json_file(HISTORY_FILE, data, "Error saving summarization history")
-    invalidate_cache(HISTORY_FILE)
+    _save_processed_messages(
+        HISTORY_FILE, messages, MAX_CHANNEL_HISTORY_MESSAGES,
+        "Error saving summarization history",
+    )
 
 
 def _parse_summaries_from_data(data: Any) -> List[SummaryInfo]:
@@ -248,28 +260,15 @@ def save_summary_to_history(summary: SummaryInfo) -> None:
 
 def load_group_summarization_history() -> Set[str]:
     """Загружает историю уже обработанных сообщений из групп из файла."""
-    data = load_json_file(GROUP_HISTORY_FILE, {"processed_messages": []})
-    processed_messages = set()
-    for msg_data in data.get("processed_messages", []):
-        msg = MessageInfo.from_dict(msg_data)
-        msg_id = f"{msg.channel}_{msg.message_id}_{text_hash(msg.text)}"
-        processed_messages.add(msg_id)
-    return processed_messages
+    return _load_processed_messages(GROUP_HISTORY_FILE)
 
 
 def save_group_summarization_history(messages: List[MessageInfo]) -> None:
     """Сохраняет историю обработанных сообщений из групп в файл."""
-    data = load_json_file(GROUP_HISTORY_FILE, {"processed_messages": [], "last_updated": ""})
-
-    for msg in messages:
-        data["processed_messages"].append(msg.to_dict())
-
-    if len(data["processed_messages"]) > MAX_GROUP_HISTORY_MESSAGES:
-        data["processed_messages"] = data["processed_messages"][-MAX_GROUP_HISTORY_MESSAGES:]
-
-    data["last_updated"] = now_iso()
-    save_json_file(GROUP_HISTORY_FILE, data, "Error saving group summarization history")
-    invalidate_cache(GROUP_HISTORY_FILE)
+    _save_processed_messages(
+        GROUP_HISTORY_FILE, messages, MAX_GROUP_HISTORY_MESSAGES,
+        "Error saving group summarization history",
+    )
 
 
 def load_group_summaries_history() -> List[SummaryInfo]:
@@ -450,7 +449,7 @@ async def update_existing_summary(
     user_content = f"Саммари:\n{summary.content}\n\nНовое сообщение:\n{new_message.text}"
 
     try:
-        updated_content = await call_openai(update_prompt, user_content, max_tokens=UPDATE_SUMMARY_MAX_TOKENS)
+        updated_content = await call_openai(update_prompt, user_content, max_tokens=UPDATE_SUMMARY_MAX_TOKENS, temperature=0)
         if not updated_content:
             updated_content = summary.content + f"\n\nДругие ссылки: {new_link}"
     except Exception as e:

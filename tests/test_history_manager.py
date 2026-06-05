@@ -1247,5 +1247,188 @@ class UpdateExistingSummaryLLMTests(unittest.TestCase):
                 self.assertIn("Другие ссылки:", updated.content)
 
 
+class UpdateExistingSummaryTemperatureTests(unittest.TestCase):
+    """Tests that update_existing_summary uses temperature=0 for deterministic link insertion."""
+
+    def test_update_existing_summary_uses_temperature_zero(self):
+        import types
+        import importlib
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        fake_channel_manager = types.ModuleType("channel_manager")
+        fake_channel_manager.create_channel_abbreviation = lambda ch: "AB"
+        fake_channel_manager.load_channel_abbreviations = lambda: {}
+
+        class FakeSummaryInfo:
+            def __init__(self, content="", date=None, message_count=0, channels=None, message_id=None):
+                self.content = content
+                self.date = date or datetime.now(timezone.utc)
+                self.message_count = message_count
+                self.channels = channels or []
+                self.message_id = message_id
+
+        class FakeMessageInfo:
+            def __init__(self, text="", channel="", message_id=0, date=None, link=""):
+                self.text = text
+                self.channel = channel
+                self.message_id = message_id
+                self.date = date or datetime.now(timezone.utc)
+                self.link = link
+
+            def get_telegram_link(self):
+                return f"https://t.me/{self.channel.lstrip('@')}/{self.message_id}"
+
+        fake_models = types.ModuleType("models")
+        fake_models.SummaryInfo = FakeSummaryInfo
+        fake_models.MessageInfo = FakeMessageInfo
+        fake_prompts = types.ModuleType("prompts")
+        fake_prompts.prompts = types.SimpleNamespace()
+        fake_utils = types.ModuleType("utils")
+        fake_utils.call_openai = AsyncMock(return_value="Updated with link")
+        fake_utils.extract_links = lambda text: []
+        fake_utils.load_json_file = lambda *a, **kw: {"summaries": [], "last_updated": ""}
+        fake_utils.save_json_file = MagicMock(return_value=True)
+        fake_utils.now_iso = lambda: "2026-01-01T00:00:00"
+        fake_utils.text_hash = lambda text: "abc123"
+
+        stubs = {
+            "dotenv": fake_dotenv,
+            "channel_manager": fake_channel_manager,
+            "models": fake_models,
+            "prompts": fake_prompts,
+            "utils": fake_utils,
+        }
+
+        with patch.dict(sys.modules, stubs):
+            with patch.dict(os.environ, {}, clear=True):
+                sys.modules.pop("history_manager", None)
+                sys.modules.pop("config", None)
+                hm = importlib.import_module("history_manager")
+
+                summary = FakeSummaryInfo(content="Original", message_id=1)
+                msg = FakeMessageInfo(text="New info", channel="@test", message_id=42)
+
+                async def _test():
+                    return await hm.update_existing_summary(summary, msg)
+
+                asyncio.run(_test())
+
+                call_kwargs = fake_utils.call_openai.call_args
+                self.assertEqual(call_kwargs.kwargs.get("temperature"), 0)
+
+
+class SharedLoadSaveHelperTests(unittest.TestCase):
+    """Tests for _load_processed_messages and _save_processed_messages shared helpers."""
+
+    def _import_hm_with_stubs(self):
+        import importlib
+        import sys
+        import types
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_channel_manager = types.ModuleType("channel_manager")
+        fake_channel_manager.create_channel_abbreviation = lambda ch: "AB"
+        fake_channel_manager.load_channel_abbreviations = lambda: {}
+
+        class FakeMessageInfo:
+            def __init__(self, text="", channel="", message_id=0, date=None, link=""):
+                self.text = text
+                self.channel = channel
+                self.message_id = message_id
+                self.date = date or datetime.now(timezone.utc)
+                self.link = link
+
+            @staticmethod
+            def from_dict(d):
+                m = FakeMessageInfo()
+                m.text = d.get("text", "")
+                m.channel = d.get("channel", "")
+                m.message_id = d.get("message_id", 0)
+                return m
+
+            def to_dict(self):
+                return {"text": self.text, "channel": self.channel, "message_id": self.message_id}
+
+        fake_models = types.ModuleType("models")
+        fake_models.SummaryInfo = type("FakeSummaryInfo", (), {"__init__": lambda self, **kw: None, "to_dict": lambda self: {}})
+        fake_models.MessageInfo = FakeMessageInfo
+        fake_prompts = types.ModuleType("prompts")
+        fake_prompts.prompts = types.SimpleNamespace()
+        fake_utils = types.ModuleType("utils")
+        fake_utils.call_openai = MagicMock()
+        fake_utils.extract_links = lambda text: []
+        fake_utils.load_json_file = lambda *a, **kw: {"processed_messages": []}
+        fake_utils.save_json_file = MagicMock(return_value=True)
+        fake_utils.now_iso = lambda: "2026-01-01T00:00:00"
+        fake_utils.extract_all_channels = lambda text: []
+        fake_utils.text_hash = lambda text: "abc123"
+        fake_telegram_client = types.ModuleType("telegram_client")
+        fake_telegram_client.user_client = None
+        fake_telegram_client.clients_loop = None
+
+        stubs = {
+            "dotenv": fake_dotenv,
+            "channel_manager": fake_channel_manager,
+            "models": fake_models,
+            "prompts": fake_prompts,
+            "utils": fake_utils,
+            "telegram_client": fake_telegram_client,
+        }
+
+        return stubs
+
+    def test_load_processed_messages_returns_set(self):
+        """_load_processed_messages should return a set of message ID strings."""
+        stubs = self._import_hm_with_stubs()
+        stubs["utils"].load_json_file = lambda path, default=None: {
+            "processed_messages": [
+                {"text": "hello", "channel": "@ch", "message_id": 1},
+                {"text": "world", "channel": "@ch", "message_id": 2},
+            ]
+        }
+
+        with patch.dict(sys.modules, stubs):
+            with patch.dict(os.environ, {}, clear=True):
+                sys.modules.pop("history_manager", None)
+                sys.modules.pop("config", None)
+                hm = importlib.import_module("history_manager")
+
+                result = hm._load_processed_messages("test.json")
+                self.assertIsInstance(result, set)
+                self.assertEqual(len(result), 2)
+
+    def test_save_processed_messages_appends_and_truncates(self):
+        """_save_processed_messages should append new messages and truncate to max."""
+        stubs = self._import_hm_with_stubs()
+
+        saved_data = {}
+
+        def fake_save(filepath, data, error_msg):
+            saved_data[filepath] = data
+            return True
+
+        stubs["utils"].save_json_file = fake_save
+        stubs["utils"].load_json_file = lambda path, default=None: {
+            "processed_messages": [{"text": "old", "channel": "@ch", "message_id": 1}]
+        }
+
+        with patch.dict(sys.modules, stubs):
+            with patch.dict(os.environ, {}, clear=True):
+                sys.modules.pop("history_manager", None)
+                sys.modules.pop("config", None)
+                hm = importlib.import_module("history_manager")
+
+                FakeMI = stubs["models"].MessageInfo
+                new_msgs = [FakeMI(text="new", channel="@ch", message_id=2)]
+
+                hm._save_processed_messages("test.json", new_msgs, max_messages=1, error_msg="test")
+
+                self.assertEqual(len(saved_data["test.json"]["processed_messages"]), 1)
+                self.assertEqual(saved_data["test.json"]["processed_messages"][0]["text"], "new")
+
+
 if __name__ == '__main__':
     unittest.main()

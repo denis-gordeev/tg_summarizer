@@ -122,6 +122,20 @@ class ConfigTests(unittest.TestCase):
             config = _reload_module("config")
         self.assertEqual(config.UPDATE_SUMMARY_MAX_TOKENS, 750)
 
+    def test_config_reads_summary_temperature_from_env(self):
+        env = {
+            **REQUIRED_ENV,
+            "OPENAI_SUMMARY_TEMPERATURE": "0.5",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            config = _reload_module("config")
+        self.assertAlmostEqual(config.OPENAI_SUMMARY_TEMPERATURE, 0.5)
+
+    def test_config_summary_temperature_default(self):
+        with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+            config = _reload_module("config")
+        self.assertAlmostEqual(config.OPENAI_SUMMARY_TEMPERATURE, 0.3)
+
 
 class SsmSecretResolutionTests(unittest.TestCase):
     def test_get_secret_prefers_ssm_over_env(self):

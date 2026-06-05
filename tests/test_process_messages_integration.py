@@ -27,6 +27,7 @@ def _setup_stubs():
     fake_config.ENABLE_SUMMARIES_DEDUPLICATION = False
     fake_config.OPENAI_CHANNEL_SUMMARY_MAX_TOKENS = 4000
     fake_config.OPENAI_GROUP_SUMMARY_MAX_TOKENS = 4000
+    fake_config.OPENAI_SUMMARY_TEMPERATURE = 0.3
     fake_config.SOURCE_CHANNELS = set()
     fake_config.DEBUG = False
     fake_config.ENABLE_SUMMARY_UPDATES = True
@@ -271,6 +272,58 @@ class ProcessMessagesIntegrationTests(unittest.TestCase):
 
             self.assertFalse(mock_dup.called, "LLM should NOT be called for near-identical messages")
             self.assertEqual(len(result), 1, "Near-identical message should be auto-deduplicated")
+
+
+class SummaryTemperatureTests(unittest.TestCase):
+    """Tests for OPENAI_SUMMARY_TEMPERATURE being passed to call_openai."""
+
+    @classmethod
+    def setUpClass(cls):
+        _setup_stubs()
+        import message_processor
+        cls.mp = message_processor
+
+    def test_summarize_text_passes_temperature(self):
+        """summarize_text should pass OPENAI_SUMMARY_TEMPERATURE to call_openai."""
+        from models import MessageInfo
+        from unittest.mock import AsyncMock, patch
+
+        messages = [
+            MessageInfo(
+                text="AI research breakthrough with detailed methodology",
+                channel="@ai",
+                message_id=1,
+                date=datetime.now(timezone.utc),
+                link="",
+            ),
+        ]
+
+        with patch.object(self.mp, "call_openai", new_callable=AsyncMock) as mock_openai:
+            mock_openai.return_value = "<b>AI news</b> [1]"
+            asyncio.run(self.mp.summarize_text(messages))
+            call_kwargs = mock_openai.call_args
+            self.assertAlmostEqual(call_kwargs.kwargs.get("temperature"), 0.3)
+
+    def test_summarize_group_text_passes_temperature(self):
+        """summarize_group_text should pass OPENAI_SUMMARY_TEMPERATURE to call_openai."""
+        from models import MessageInfo
+        from unittest.mock import AsyncMock, patch
+
+        messages = [
+            MessageInfo(
+                text="Group discussion about GPT-5 capabilities",
+                channel="@group",
+                message_id=1,
+                date=datetime.now(timezone.utc),
+                link="",
+            ),
+        ]
+
+        with patch.object(self.mp, "call_openai", new_callable=AsyncMock) as mock_openai:
+            mock_openai.return_value = "<b>GPT-5</b> [1]"
+            asyncio.run(self.mp.summarize_group_text(messages))
+            call_kwargs = mock_openai.call_args
+            self.assertAlmostEqual(call_kwargs.kwargs.get("temperature"), 0.3)
 
 
 class AreMessagesDuplicateRussianResponseTests(unittest.TestCase):

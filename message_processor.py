@@ -11,6 +11,7 @@ from config import (
     ENABLE_SUMMARIES_DEDUPLICATION,
     OPENAI_CHANNEL_SUMMARY_MAX_TOKENS,
     OPENAI_GROUP_SUMMARY_MAX_TOKENS,
+    OPENAI_SUMMARY_TEMPERATURE,
     DEBUG,
     SUMMARY_MIN_RATIO,
     SUMMARY_MIN_LENGTH,
@@ -302,6 +303,7 @@ async def summarize_text(messages: List[MessageInfo]) -> str:
         system_prompt,
         messages_text,
         max_tokens=OPENAI_CHANNEL_SUMMARY_MAX_TOKENS,
+        temperature=OPENAI_SUMMARY_TEMPERATURE,
     )
     if not result:
         return "Ошибка: Не удалось сгенерировать обобщение"
@@ -327,6 +329,7 @@ async def summarize_group_text(messages: List[MessageInfo]) -> str:
         system_prompt,
         messages_text,
         max_tokens=OPENAI_GROUP_SUMMARY_MAX_TOKENS,
+        temperature=OPENAI_SUMMARY_TEMPERATURE,
     )
     if not result:
         return "Ошибка: Не удалось сгенерировать обобщение"

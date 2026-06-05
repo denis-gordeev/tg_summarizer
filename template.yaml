@@ -15,6 +15,7 @@ Globals:
         OPENAI_CHANNEL_SUMMARY_MAX_TOKENS: !Ref OpenAIChannelSummaryMaxTokens
         OPENAI_GROUP_SUMMARY_MAX_TOKENS: !Ref OpenAIGroupSummaryMaxTokens
         OPENAI_REQUEST_TIMEOUT: !Ref OpenAIRequestTimeout
+        OPENAI_SUMMARY_TEMPERATURE: !Ref OpenAISummaryTemperature
         UPDATE_SUMMARY_MAX_TOKENS: !Ref UpdateSummaryMaxTokens
         NLP_CHECK_MAX_INPUT_CHARS: !Ref NlpCheckMaxInputChars
         MAX_MESSAGES_PER_SOURCE: !Ref MaxMessagesPerSource
@@ -104,6 +105,11 @@ Parameters:
     Type: String
     Description: Timeout in seconds for each OpenAI API request
     Default: "30"
+   
+  OpenAISummaryTemperature:
+    Type: String
+    Description: Temperature for summary generation (lower = more concise/consistent)
+    Default: "0.3"
    
   UpdateSummaryMaxTokens:
     Type: String

@@ -33,8 +33,7 @@ async def _ensure_clients() -> None:
 
 async def _ensure_bot_client() -> None:
     """Ensure bot client is connected, starting it if needed."""
-    if bot_client is None or not bot_client.is_connected():
-        await start_clients()
+    await _ensure_clients()
 
 
 async def get_similar_channels_from_telegram(channel_username: Optional[str] = None) -> List[str]:

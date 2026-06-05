@@ -358,6 +358,25 @@
   - `test_update_existing_summary_uses_update_max_tokens`: verifies `UPDATE_SUMMARY_MAX_TOKENS` (500) used instead of 4000
 - All 105 tests pass without errors.
 
+## Completed in 2026-06-05 round (Lambda hardening round 10, summary quality, code dedup)
+
+- **Summary temperature**: Added `OPENAI_SUMMARY_TEMPERATURE` config (default 0.3) in [`config.py`](config.py). Applied in [`summarize_text()`](message_processor.py) and [`summarize_group_text()`](message_processor.py) — previously used OpenAI's default temperature (1.0), which produced inconsistent and often verbose summaries. A low temperature (0.3) produces more concise, consistent output, directly addressing the AUTOWORK_INSTRUCTIONS goal of improving quality and conciseness. Configurable via env for A/B testing.
+- **Deterministic summary updates**: Added `temperature=0` to [`update_existing_summary()`](history_manager.py) — link insertion is a deterministic edit operation; randomness was unnecessary and could cause inconsistent updates.
+- **Code dedup**: Merged `_ensure_clients()` and `_ensure_bot_client()` in [`telegram_client.py`](telegram_client.py) — both were identical wrappers that called `start_clients()` when client was disconnected. `_ensure_bot_client()` now delegates to `_ensure_clients()`.
+- **Code dedup**: Extracted shared `_load_processed_messages()` and `_save_processed_messages()` helpers in [`history_manager.py`](history_manager.py). `load_summarization_history()` / `load_group_summarization_history()` and `save_summarization_history()` / `save_group_summarization_history()` now delegate to these shared helpers, eliminating ~40 lines of duplicated message-ID set building and append-truncate-save logic.
+- **SAM template updated**: Added `OpenAISummaryTemperature` parameter and env var in [`template.yaml`](template.yaml).
+- **`.env.example` synced**: Added `OPENAI_SUMMARY_TEMPERATURE=0.3` in [`.env.example`](.env.example).
+- **Tests added**: 7 new tests (total 112, up from 105):
+  - `test_config_reads_summary_temperature_from_env`: verifies `OPENAI_SUMMARY_TEMPERATURE` env var parsing
+  - `test_config_summary_temperature_default`: verifies default value is 0.3
+  - `test_summarize_text_passes_temperature`: verifies temperature passed to `call_openai` for channel summaries
+  - `test_summarize_group_text_passes_temperature`: verifies temperature passed for group summaries
+  - `test_update_existing_summary_uses_temperature_zero`: verifies `temperature=0` for deterministic link insertion
+  - `test_load_processed_messages_returns_set`: verifies shared load helper returns set of message IDs
+  - `test_save_processed_messages_appends_and_truncates`: verifies shared save helper appends and truncates
+- Updated test stubs in [`tests/test_process_messages_integration.py`](tests/test_process_messages_integration.py) to include `OPENAI_SUMMARY_TEMPERATURE`.
+- All 112 tests pass without errors.
+
 ## Next actions
 
 - **CI/CD**: Настроить GitHub Actions CI/CD для автоматического деплоя Lambda при мердже в main.
