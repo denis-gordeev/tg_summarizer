@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import time
-import traceback
 from telegram_client import start_clients, stop_clients, fetch_messages, fetch_group_messages
 from message_processor import process_messages
 from config import SOURCE_GROUPS
@@ -46,8 +45,7 @@ async def run_summarizer(
     except DeadlineExceededError:
         logger.warning("Deadline exceeded — saving partial results and exiting gracefully")
     except Exception as e:
-        logger.error("Error: %s", e)
-        traceback.print_exc()
+        logger.error("Error: %s", e, exc_info=True)
     finally:
         await stop_clients()
 

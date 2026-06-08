@@ -1,17 +1,18 @@
+import asyncio
 import logging
 import re
 from datetime import datetime, timezone
-from typing import List, Set
 from difflib import SequenceMatcher
+from typing import List, Set
 from models import MessageInfo, SummaryInfo
 from utils import call_openai, extract_links, count_characters, text_hash
 from config import (
-    SIMILARITY_LLM_LOWER,
     SIMILARITY_LLM_UPPER,
     ENABLE_SUMMARIES_DEDUPLICATION,
     OPENAI_CHANNEL_SUMMARY_MAX_TOKENS,
     OPENAI_GROUP_SUMMARY_MAX_TOKENS,
     OPENAI_SUMMARY_TEMPERATURE,
+    SOURCE_CHANNELS,
     DEBUG,
     SUMMARY_MIN_RATIO,
     SUMMARY_MIN_LENGTH,
@@ -114,14 +115,6 @@ def is_message_processed(msg: MessageInfo, processed_messages: Set[str]) -> bool
     return msg_id in processed_messages
 
 
-async def are_messages_duplicate(msg_a: MessageInfo, msg_b: MessageInfo) -> bool:
-    """Use the LLM to see if two messages cover the same topic."""
-    user_content = f"Message 1:\n{msg_a.text}\n\nMessage 2:\n{msg_b.text}"
-
-    answer = await call_openai(prompts.DUPLICATE_CHECK_PROMPT, user_content, max_tokens=3, temperature=0)
-    return answer.strip().lower().startswith("да")
-
-
 async def _check_coverage(
     msg: MessageInfo,
     recent_summaries: str,
@@ -180,62 +173,6 @@ async def is_nlp_related(text: str) -> tuple[bool, str]:
     return answer.lower().strip().startswith("да"), answer
 
 
-async def _remove_duplicates_generic(
-    messages: List[MessageInfo],
-    coverage_check_fn,
-    unique_label: str,
-) -> List[MessageInfo]:
-    """Generic deduplication shared by channel and group message streams.
-
-    Uses a three-band SequenceMatcher strategy to minimize LLM calls:
-    - ratio > SIMILARITY_LLM_UPPER (0.95): definite duplicate, no LLM
-    - ratio < SIMILARITY_LLM_LOWER (0.7): definite different, no LLM
-    - between: call LLM to decide
-    """
-    unique_msgs: List[MessageInfo] = []
-    seen_links = set()
-
-    for msg in messages:
-        links = extract_links(msg.text)
-
-        if links and any(link in seen_links for link in links):
-            logger.debug("Skipping link duplicate: %s", links[0])
-            continue
-
-        duplicate = False
-        for u in unique_msgs:
-            ratio = SequenceMatcher(None, msg.text, u.text).ratio()
-            if ratio > SIMILARITY_LLM_UPPER:
-                logger.debug("Skipping text duplicate (ratio=%.2f): %s...", ratio, msg.text[:50])
-                duplicate = True
-                break
-            if ratio < SIMILARITY_LLM_LOWER:
-                continue
-            try:
-                if await are_messages_duplicate(msg, u):
-                    logger.debug("Skipping LLM duplicate (ratio=%.2f): %s...", ratio, msg.text[:50])
-                    duplicate = True
-                    break
-            except Exception as e:
-                logger.error("Error checking LLM duplicate: %s", e)
-                continue
-
-        if not duplicate and ENABLE_SUMMARIES_DEDUPLICATION:
-            try:
-                if await coverage_check_fn(msg):
-                    logger.debug("Skipping duplicate: %s...", msg.text[:50])
-                    duplicate = True
-            except Exception as e:
-                logger.error("Error checking coverage: %s", e)
-
-        if not duplicate:
-            unique_msgs.append(msg)
-            seen_links.update(links)
-            logger.debug("%s: %s...", unique_label, msg.text[:50])
-
-    return unique_msgs
-
-
 def _remove_intra_batch_duplicates(messages: List[MessageInfo]) -> List[MessageInfo]:
     """Remove obvious duplicates within a batch using SequenceMatcher only.
 
@@ -264,23 +201,6 @@ def _remove_intra_batch_duplicates(messages: List[MessageInfo]) -> List[MessageI
             seen_links.update(links)
 
     return unique_msgs
-
-
-async def remove_duplicates(messages: List[MessageInfo]) -> List[MessageInfo]:
-    return await _remove_duplicates_generic(
-        messages,
-        coverage_check_fn=is_message_covered_in_summaries,
-        unique_label="Добавляем уникальное сообщение",
-    )
-
-
-async def remove_group_duplicates(messages: List[MessageInfo]) -> List[MessageInfo]:
-    """Remove duplicates from group messages, checking against group summaries history."""
-    return await _remove_duplicates_generic(
-        messages,
-        coverage_check_fn=is_message_covered_in_group_summaries,
-        unique_label="Добавляем уникальное сообщение из группы",
-    )
 
 
 def _replace_source_with_links(messages: List[MessageInfo], result: str) -> str:
@@ -440,8 +360,6 @@ async def process_messages(
     messages: List[MessageInfo], save_changes: bool, send_message: bool, is_group: bool = False
 ):
     """Processes a list of messages: filters, deduplicates, summarizes, and sends."""
-    import asyncio
-    from config import SOURCE_CHANNELS
     from telegram_client import send_message_to_target_channel_with_id
 
     stream_label = "groups" if is_group else "channels"
@@ -453,7 +371,7 @@ async def process_messages(
 
     all_checked_messages: List[MessageInfo] = []
     discovered_channels: set = set()
-    unique_messages: List[MessageInfo] = []
+    nlp_related_messages: List[MessageInfo] = []
 
     sem = asyncio.Semaphore(NLP_CONCURRENT_CHECKS)
 
@@ -481,20 +399,33 @@ async def process_messages(
         if msg.is_nlp_related and not is_group and msg.channel not in SOURCE_CHANNELS:
             discovered_channels.add(msg.channel)
 
-        is_covered = False
-        if ENABLE_SUMMARIES_DEDUPLICATION and msg.is_nlp_related:
-            coverage_fn = (
-                is_message_covered_in_group_summaries if is_group
-                else is_message_covered_in_summaries
-            )
-            is_covered = await coverage_fn(msg)
+        if msg.is_nlp_related:
+            nlp_related_messages.append(msg)
+
+    if ENABLE_SUMMARIES_DEDUPLICATION and nlp_related_messages:
+        coverage_fn = (
+            is_message_covered_in_group_summaries if is_group
+            else is_message_covered_in_summaries
+        )
+
+        async def _check_msg_coverage(msg: MessageInfo) -> bool:
+            async with sem:
+                return await coverage_fn(msg)
+
+        coverage_results = await asyncio.gather(
+            *[_check_msg_coverage(msg) for msg in nlp_related_messages]
+        )
+
+        for msg, is_covered in zip(nlp_related_messages, coverage_results):
             msg.is_covered_in_summaries = is_covered
             logger.debug("is_covered_in_summaries: %s", is_covered)
             if is_covered:
                 await process_covered_message(msg, is_group=is_group)
 
-        if msg.is_nlp_related and not is_covered:
-            unique_messages.append(msg)
+    unique_messages = [
+        msg for msg in nlp_related_messages
+        if not getattr(msg, 'is_covered_in_summaries', False)
+    ]
 
     summary = None
     message_id = None

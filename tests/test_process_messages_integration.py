@@ -22,7 +22,6 @@ def _setup_stubs():
 
     # --- Stub config ---
     fake_config = types.ModuleType("config")
-    fake_config.SIMILARITY_LLM_LOWER = 0.7
     fake_config.SIMILARITY_LLM_UPPER = 0.95
     fake_config.ENABLE_SUMMARIES_DEDUPLICATION = False
     fake_config.OPENAI_CHANNEL_SUMMARY_MAX_TOKENS = 4000
@@ -73,7 +72,6 @@ def _setup_stubs():
     # --- Stub prompts ---
     fake_prompts = types.ModuleType("prompts")
     fake_prompts.prompts = types.SimpleNamespace(
-        DUPLICATE_CHECK_PROMPT="dup",
         NLP_RELEVANCE_PROMPT="nlp",
         SUMMARY_COVERAGE_CHECK_PROMPT="cov",
         GROUP_SUMMARY_COVERAGE_CHECK_PROMPT="gcov",
@@ -238,42 +236,59 @@ class ProcessMessagesIntegrationTests(unittest.TestCase):
 
             fake_tg_call.assert_called_once()
 
-    def test_three_band_dedup_upper_threshold_uses_llm(self):
-        """Messages with ratio between LOWER and UPPER should call LLM, not auto-duplicate."""
-        base_text = "A detailed article about machine learning and neural networks " * 5
-        similar_text = "A detailed article about machine learning and neural networks " * 4 + "A different topic entirely about space exploration "
-
+    def test_coverage_checks_run_in_parallel(self):
+        """Coverage checks should be dispatched concurrently via asyncio.gather."""
         messages = [
-            _make_message(text=base_text, channel="@ch", message_id=1),
-            _make_message(text=similar_text, channel="@ch", message_id=2),
+            _make_message(
+                text="First article about transformer models in NLP research with detailed "
+                     "methodology and experimental results.",
+                channel="@ai_ch1",
+                message_id=601,
+            ),
+            _make_message(
+                text="Second article about reinforcement learning with LLMs as agents "
+                     "and their applications in real-world scenarios.",
+                channel="@ai_ch2",
+                message_id=602,
+            ),
         ]
 
-        self._fake_config.ENABLE_SUMMARIES_DEDUPLICATION = False
+        self._fake_config.SOURCE_CHANNELS = {"@ai_ch1", "@ai_ch2"}
 
-        with patch.object(self.mp, "are_messages_duplicate", new_callable=AsyncMock) as mock_dup:
-            mock_dup.return_value = False
+        with patch.object(self.mp, "is_nlp_related", new_callable=AsyncMock) as mock_nlp, \
+             patch.object(self.mp, "ENABLE_SUMMARIES_DEDUPLICATION", True), \
+             patch.object(self.mp, "is_message_covered_in_summaries", new_callable=AsyncMock) as mock_cov:
+            mock_nlp.return_value = (True, "NLP related")
+            mock_cov.return_value = False
 
-            result = asyncio.run(self.mp.remove_duplicates(messages))
+            self._run_pipeline(messages, save_changes=True, send_message=False, is_group=False)
 
-            self.assertTrue(mock_dup.called, "LLM duplicate check should be called for ambiguous ratio")
+            self.assertEqual(mock_cov.call_count, 2,
+                             "Coverage check should be called for each NLP-related message")
 
-    def test_three_band_dedup_near_identical_skips_llm(self):
-        """Nearly identical messages (ratio > UPPER) should be auto-deduplicated without LLM."""
-        base_text = "This is a detailed article about transformer models in NLP research " * 5
-        near_identical = base_text + " extra"
-
+    def test_covered_messages_excluded_from_summary(self):
+        """Messages covered in previous summaries should not appear in the new summary."""
         messages = [
-            _make_message(text=base_text, channel="@ch", message_id=1),
-            _make_message(text=near_identical, channel="@ch", message_id=2),
+            _make_message(
+                text="Article about AI that was already covered in a previous digest "
+                     "with similar content and analysis.",
+                channel="@ai_ch",
+                message_id=701,
+            ),
         ]
 
-        self._fake_config.ENABLE_SUMMARIES_DEDUPLICATION = False
+        self._fake_config.SOURCE_CHANNELS = {"@ai_ch"}
 
-        with patch.object(self.mp, "are_messages_duplicate", new_callable=AsyncMock) as mock_dup:
-            result = asyncio.run(self.mp.remove_duplicates(messages))
+        with patch.object(self.mp, "is_nlp_related", new_callable=AsyncMock) as mock_nlp, \
+             patch.object(self.mp, "ENABLE_SUMMARIES_DEDUPLICATION", True), \
+             patch.object(self.mp, "is_message_covered_in_summaries", new_callable=AsyncMock) as mock_cov, \
+             patch.object(self.mp, "summarize_text", new_callable=AsyncMock) as mock_sum:
+            mock_nlp.return_value = (True, "NLP related")
+            mock_cov.return_value = True
 
-            self.assertFalse(mock_dup.called, "LLM should NOT be called for near-identical messages")
-            self.assertEqual(len(result), 1, "Near-identical message should be auto-deduplicated")
+            self._run_pipeline(messages, save_changes=True, send_message=False, is_group=False)
+
+            mock_sum.assert_not_called()
 
 
 class SummaryTemperatureTests(unittest.TestCase):
@@ -326,47 +341,6 @@ class SummaryTemperatureTests(unittest.TestCase):
             asyncio.run(self.mp.summarize_group_text(messages))
             call_kwargs = mock_openai.call_args
             self.assertAlmostEqual(call_kwargs.kwargs.get("temperature"), 0.3)
-
-
-class AreMessagesDuplicateRussianResponseTests(unittest.TestCase):
-    """Tests for are_messages_duplicate Russian response handling."""
-
-    @classmethod
-    def setUpClass(cls):
-        _setup_stubs()
-        import message_processor
-        cls.mp = message_processor
-
-    def test_are_messages_duplicate_recognizes_russian_yes(self):
-        """are_messages_duplicate should recognize 'да' (Russian yes) as duplicate."""
-        from models import MessageInfo
-        from unittest.mock import AsyncMock, patch
-
-        msg_a = MessageInfo(text="Some text about AI", channel="@ch", message_id=1,
-                            date=datetime.now(timezone.utc), link="")
-        msg_b = MessageInfo(text="Some text about AI too", channel="@ch", message_id=2,
-                            date=datetime.now(timezone.utc), link="")
-
-        with patch.object(self.mp, "call_openai", new_callable=AsyncMock) as mock_openai:
-            mock_openai.return_value = "да"
-            result = asyncio.run(self.mp.are_messages_duplicate(msg_a, msg_b))
-            self.assertTrue(result, "Russian 'да' should be recognized as duplicate")
-
-    def test_are_messages_duplicate_recognizes_russian_no(self):
-        """are_messages_duplicate should recognize 'нет' (Russian no) as not duplicate."""
-        from models import MessageInfo
-        from unittest.mock import AsyncMock, patch
-
-        msg_a = MessageInfo(text="Some text about AI", channel="@ch", message_id=1,
-                            date=datetime.now(timezone.utc), link="")
-        msg_b = MessageInfo(text="Completely different topic", channel="@ch", message_id=2,
-                            date=datetime.now(timezone.utc), link="")
-
-        with patch.object(self.mp, "call_openai", new_callable=AsyncMock) as mock_openai:
-            mock_openai.return_value = "нет"
-            result = asyncio.run(self.mp.are_messages_duplicate(msg_a, msg_b))
-            self.assertFalse(result, "Russian 'нет' should be recognized as not duplicate")
-
 
 class NlpCheckTruncationTests(unittest.TestCase):
     """Tests for NLP check input truncation."""

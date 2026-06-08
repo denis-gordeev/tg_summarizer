@@ -47,7 +47,6 @@ def _stub_dependencies(fake_openai_response: str = "[1] New AI breakthrough"):
     fake_prompts.prompts = types.SimpleNamespace(
         CHANNEL_SUMMARY_PROMPT="{max_summary_length}",
         GROUP_SUMMARY_PROMPT="{max_summary_length}",
-        DUPLICATE_CHECK_PROMPT="no",
         NLP_RELEVANCE_PROMPT="yes",
         SUMMARY_COVERAGE_CHECK_PROMPT="нет",
         GROUP_SUMMARY_COVERAGE_CHECK_PROMPT="нет",

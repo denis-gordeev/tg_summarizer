@@ -404,6 +404,19 @@
 - Updated test stubs in [`tests/test_process_messages_integration.py`](tests/test_process_messages_integration.py) to include `SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE` and `NLP_CONCURRENT_CHECKS`.
 - All 125 tests pass without errors.
 
+## Completed in 2026-06-08 round (Lambda hardening round 12, parallel coverage, dead code removal, logging fix)
+
+- **Parallel coverage checks**: Refactored [`process_messages()`](message_processor.py) to run coverage checks in parallel using `asyncio.Semaphore` and `asyncio.gather`, mirroring the parallel NLP check pattern. Previously, coverage checks were sequential — each NLP-related message's coverage was checked one at a time, adding N × OpenAI latency to wall-clock time. Now all coverage checks run concurrently (up to `NLP_CONCURRENT_CHECKS` at a time), reducing wall-clock time from N × latency to ~N/5 × latency. State-mutating operations (`process_covered_message`) remain sequential for safety.
+- **Dead code removal**: Removed [`remove_duplicates()`](message_processor.py), [`remove_group_duplicates()`](message_processor.py), [`_remove_duplicates_generic()`](message_processor.py), and [`are_messages_duplicate()`](message_processor.py) — these functions were superseded by inline dedup logic in `process_messages()` and were only called from tests, never from the production code path. The production flow uses `_remove_intra_batch_duplicates()` (SequenceMatcher-only, no LLM) plus the parallel coverage check.
+- **Dead code removal**: Removed unused `SIMILARITY_LLM_LOWER` import from [`message_processor.py`](message_processor.py) — only `SIMILARITY_LLM_UPPER` is still used by `_remove_intra_batch_duplicates()`.
+- **Import cleanup**: Moved `import asyncio` and `from config import SOURCE_CHANNELS` to module level in [`message_processor.py`](message_processor.py), removing local imports inside `process_messages()`.
+- **Logging fix**: Replaced `traceback.print_exc()` with `exc_info=True` in [`summarizer.py`](summarizer.py) error handler — structured traceback in CloudWatch logs instead of unstructured stdout output. Removed unused `import traceback`.
+- **Tests updated**: Removed 4 obsolete tests (2 three-band dedup tests that tested removed `_remove_duplicates_generic`, 2 Russian response tests that tested removed `are_messages_duplicate`). Added 2 new tests:
+  - `test_coverage_checks_run_in_parallel`: verifies coverage check is called for each NLP-related message
+  - `test_covered_messages_excluded_from_summary`: verifies covered messages are excluded from summary generation
+  - Total test count: 123 (down from 125 — net -2 from 4 removed + 2 added)
+- All 123 tests pass without errors.
+
 ## Next actions
 
 - **CI/CD**: Настроить GitHub Actions CI/CD для автоматического деплоя Lambda при мердже в main.
@@ -411,5 +424,4 @@
 - **Prompt A/B testing**: Продолжить тестирование промптов — отслеживать качество саммари после снижения `max_tokens` до 4000 и при необходимости корректировать.
 - **OpenAI response streaming**: Рассмотреть streaming API для снижения perceived latency (но не стоимости — `max_tokens` уже ограничен).
 - **Coverage check prompt**: Рассмотреть замену coverage check промптов на JSON mode (`response_format={"type": "json_object"}`) для ещё большей детерминистичности при сохранении стоимости gpt-4o-mini.
-- **Parallel coverage checks**: Рассмотреть параллелизацию coverage check (после NLP классификации) аналогично параллельной NLP проверке — с `asyncio.Semaphore` и `asyncio.gather`.
-- **Intra-batch LLM dedup**: Рассмотреть добавление LLM-проверки для сообщений с ratio между SIMILARITY_LLM_LOWER (0.7) и SIMILARITY_LLM_UPPER (0.95) внутри `_remove_intra_batch_duplicates` — позволит ловить больше дубликатов за дополнительные токены.
+- **Intra-batch LLM dedup**: Рассмотреть добавление LLM-проверки для сообщений с ratio между SIMILARITY_LLM_LOWER (0.7) и SIMILARITY_LLM_UPPER (0.95) внутри `_remove_intra_batch_duplicates` — позволит ловить больше дубликатов за дополнительные токены. (Примечание: `are_messages_duplicate` и `_remove_duplicates_generic` удалены в раунде 2026-06-08 — при необходимости восстановления, см. git history.)
