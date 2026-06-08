@@ -138,7 +138,7 @@ async def _check_coverage(
 
     try:
         result = await call_openai(prompt, user_content, max_tokens=2, temperature=0)
-        return result.strip().upper() == "ДА"
+        return result.strip().upper().startswith("ДА")
     except Exception as e:
         logger.error("Error checking %s coverage: %s", label.strip(), e)
         return False
@@ -259,7 +259,8 @@ async def summarize_text(messages: List[MessageInfo]) -> str:
         temperature=OPENAI_SUMMARY_TEMPERATURE,
     )
     if not result:
-        return "Ошибка: Не удалось сгенерировать обобщение"
+        logger.error("Failed to generate channel summary for %d messages", len(messages))
+        return None
 
     logger.debug("Source length: %d chars, summary: %d chars", total_original_length, count_characters(result))
 
@@ -285,7 +286,8 @@ async def summarize_group_text(messages: List[MessageInfo]) -> str:
         temperature=OPENAI_SUMMARY_TEMPERATURE,
     )
     if not result:
-        return "Ошибка: Не удалось сгенерировать обобщение"
+        logger.error("Failed to generate group summary for %d messages", len(messages))
+        return None
 
     logger.debug("Group source length: %d chars, summary: %d chars", total_original_length, count_characters(result))
 
@@ -435,7 +437,7 @@ async def process_messages(
     if unique_messages:
         summary_fn = summarize_group_text if is_group else summarize_text
         summary = await summary_fn(unique_messages)
-        if send_message:
+        if summary and send_message:
             message_id = await send_message_to_target_channel_with_id(summary)
             logger.info("%s summary sent with ID: %s", "Group" if is_group else "Channel", message_id)
 

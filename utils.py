@@ -128,6 +128,14 @@ async def call_openai(
             result = response.choices[0].message.content
             if result is None:
                 return ""
+            if hasattr(response, 'usage') and response.usage:
+                logger.info(
+                    "OpenAI usage: model=%s prompt=%d completion=%d total=%d",
+                    OPENAI_MODEL,
+                    response.usage.prompt_tokens,
+                    response.usage.completion_tokens,
+                    response.usage.total_tokens,
+                )
             return result.strip()
         except (RateLimitError, APIConnectionError) as e:
             if attempt < max_retries:

@@ -247,9 +247,6 @@ Resources:
                   "include_today_processed_groups": false,
                   "include_today_processed_messages": false
                 }
-      Environment:
-        Variables:
-          send_message: !Ref EnableTelegramSend
 
   StateBucket:
     Type: AWS::Serverless::SimpleBucket

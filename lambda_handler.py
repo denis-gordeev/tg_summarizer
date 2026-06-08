@@ -87,6 +87,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             'status': 'error',
             'error': str(e),
             'request_id': request_id,
+            'elapsed_seconds': round(elapsed, 1),
             'send_message': send_message,
             'save_changes': save_changes,
         }
@@ -100,6 +101,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     return {
         'status': 'ok',
         'request_id': request_id,
+        'elapsed_seconds': round(elapsed, 1),
         'send_message': send_message,
         'save_changes': save_changes,
         'include_today_processed_groups': include_today_processed_groups,

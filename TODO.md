@@ -417,6 +417,26 @@
   - Total test count: 123 (down from 125 — net -2 from 4 removed + 2 added)
 - All 123 tests pass without errors.
 
+## Completed in 2026-06-08 round 2 (Lambda hardening round 13, bug fixes, observability, cleanup)
+
+- **Critical bug**: Fixed [`summarize_text()`](message_processor.py) and [`summarize_group_text()`](message_processor.py) — previously returned error string `"Ошибка: Не удалось сгенерировать обобщение"` on OpenAI failure. This error message was both posted to the Telegram channel AND saved to summary history, polluting the channel with error text and corrupting history files. Now returns `None` on failure, and [`process_messages()`](message_processor.py) skips Telegram send when summary is `None` (`if summary and send_message:` instead of `if send_message:`). The existing `if summary and unique_messages:` guard in [`_save_processing_results()`](message_processor.py) already handled `None` correctly.
+- **Coverage check robustness**: Changed `_check_coverage()` in [`message_processor.py`](message_processor.py) from `result.strip().upper() == "ДА"` to `.startswith("ДА")` — consistent with `is_nlp_related()` which already uses `.startswith("да")`. Handles model variations like "ДА." or "ДА, тема совпадает" that would fail strict equality.
+- **OpenAI token usage logging**: Added structured logging of token usage from API responses in [`call_openai()`](utils.py) — logs `model`, `prompt_tokens`, `completion_tokens`, and `total_tokens` at INFO level. Enables cost monitoring and trend detection in CloudWatch without additional API calls.
+- **Lambda response enrichment**: Added `elapsed_seconds` field to Lambda handler response in [`lambda_handler.py`](lambda_handler.py) — present in both success and error responses. Enables CloudWatch metric filters and invocation-level performance tracking.
+- **Dead config cleanup**: Removed redundant `send_message` environment variable from [`template.yaml`](template.yaml) — the `Environment.Variables.send_message` entry was never read by any code (the `send_message` flag is parsed from the event payload, not from env vars).
+- **Tests added**: 9 new tests (total 132, up from 123):
+  - `test_summarize_text_returns_none_on_empty_openai_response`: verifies `None` return on failure
+  - `test_summarize_group_text_returns_none_on_empty_openai_response`: verifies `None` return on failure
+  - `test_process_messages_skips_send_when_summary_is_none`: verifies Telegram send is skipped when summary fails
+  - `test_coverage_check_matches_da_with_period`: verifies `.startswith("ДА")` handles "ДА."
+  - `test_coverage_check_matches_da_with_comma`: verifies `.startswith("ДА")` handles "ДА, тема совпадает"
+  - `test_coverage_check_rejects_net`: verifies "НЕТ" is correctly rejected
+  - `test_call_openai_logs_token_usage`: verifies token usage logging in CloudWatch
+  - `test_handler_includes_elapsed_seconds_on_success`: verifies `elapsed_seconds` in success response
+  - `test_handler_includes_elapsed_seconds_on_error`: verifies `elapsed_seconds` in error response
+- Updated [`tests/test_lambda_handler.py`](tests/test_lambda_handler.py) — changed response assertion from exact dict match to key-level checks (more resilient to new fields).
+- All 132 tests pass without errors.
+
 ## Next actions
 
 - **CI/CD**: Настроить GitHub Actions CI/CD для автоматического деплоя Lambda при мердже в main.

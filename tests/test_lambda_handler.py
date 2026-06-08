@@ -77,17 +77,13 @@ class HandlerTests(unittest.TestCase):
         self.assertIsInstance(call_kwargs["_deadline"], float)
         mock_asyncio_run.assert_called_once()
         mock_upload.assert_called_once_with()
-        self.assertEqual(
-            result,
-            {
-                "status": "ok",
-                "request_id": None,
-                "send_message": False,
-                "save_changes": True,
-                "include_today_processed_groups": True,
-                "include_today_processed_messages": False,
-            },
-        )
+        self.assertEqual(result["status"], "ok")
+        self.assertIsNone(result["request_id"])
+        self.assertEqual(result["send_message"], False)
+        self.assertEqual(result["save_changes"], True)
+        self.assertEqual(result["include_today_processed_groups"], True)
+        self.assertEqual(result["include_today_processed_messages"], False)
+        self.assertIn("elapsed_seconds", result)
 
     def test_handler_uses_context_remaining_time_for_deadline(self):
         event = {"send_message": True, "save_changes": True}
@@ -190,6 +186,40 @@ class HandlerTests(unittest.TestCase):
             result = self.lambda_handler.handler(event, context=None)
 
         self.assertEqual(result["status"], "error")
+        self.assertIn("elapsed_seconds", result)
+
+    def test_handler_includes_elapsed_seconds_on_success(self):
+        event = {"send_message": True, "save_changes": True}
+
+        async_mock = AsyncMock()
+
+        def _run_and_close(coro):
+            coro.close()
+
+        with patch.object(self.lambda_handler.os, "chdir"), \
+             patch.object(self.lambda_handler, "download_from_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.object(self.lambda_handler, "run_summarizer", async_mock), \
+             patch.object(self.lambda_handler.asyncio, "run", side_effect=_run_and_close):
+            result = self.lambda_handler.handler(event, context=None)
+
+        self.assertIn("elapsed_seconds", result)
+        self.assertIsInstance(result["elapsed_seconds"], float)
+
+    def test_handler_includes_elapsed_seconds_on_error(self):
+        event = {"send_message": True, "save_changes": True}
+
+        async def _raise(**kwargs):
+            raise RuntimeError("test error")
+
+        with patch.object(self.lambda_handler.os, "chdir"), \
+             patch.object(self.lambda_handler, "download_from_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.object(self.lambda_handler, "run_summarizer", _raise):
+            result = self.lambda_handler.handler(event, context=None)
+
+        self.assertIn("elapsed_seconds", result)
+        self.assertIsInstance(result["elapsed_seconds"], float)
 
 
 if __name__ == "__main__":
