@@ -138,7 +138,7 @@ async def _restore_summaries_from_channel(
             if msg.date < since:
                 break
             logger.debug("Processing message: id=%d, date=%s", msg.id, msg.date)
-            if msg.message and msg.message.strip():
+            if msg.text and msg.text.strip():
                 from utils import extract_all_channels
 
                 channels = extract_all_channels(msg.text)
@@ -449,7 +449,8 @@ async def update_existing_summary(
 
     try:
         updated_content = await call_openai(update_prompt, user_content, max_tokens=UPDATE_SUMMARY_MAX_TOKENS, temperature=0)
-        if not updated_content:
+        if not updated_content or len(updated_content) < len(summary.content) * 0.8:
+            logger.warning("LLM update response too short (%d < %d*0.8); falling back to append", len(updated_content or ""), len(summary.content))
             updated_content = summary.content + f"\n\nДругие ссылки: {new_link}"
     except Exception as e:
         logger.error("Error updating summary via LLM: %s; falling back to append", e)

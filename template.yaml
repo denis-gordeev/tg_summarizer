@@ -21,6 +21,8 @@ Globals:
         MAX_MESSAGES_PER_SOURCE: !Ref MaxMessagesPerSource
         SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE: !Ref SummaryMaxInputCharsPerMessage
         NLP_CONCURRENT_CHECKS: !Ref NlpConcurrentChecks
+        ENABLE_SUMMARIES_DEDUPLICATION: !Ref EnableSummariesDeduplication
+        ENABLE_SUMMARY_UPDATES: !Ref EnableSummaryUpdates
         TARGET_CHANNEL: !Ref TargetChannel
         SOURCE_CHANNELS: !Ref SourceChannels
         SOURCE_GROUPS: !Ref SourceGroups
@@ -116,7 +118,7 @@ Parameters:
   UpdateSummaryMaxTokens:
     Type: String
     Description: Max tokens for summary update LLM calls (link insertion)
-    Default: "500"
+    Default: "2000"
    
   NlpCheckMaxInputChars:
     Type: String
@@ -137,6 +139,22 @@ Parameters:
     Type: String
     Description: Max concurrent NLP relevance checks (OpenAI API calls)
     Default: "5"
+  
+  EnableSummariesDeduplication:
+    Type: String
+    Description: Enable coverage deduplication against previous summaries
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+  
+  EnableSummaryUpdates:
+    Type: String
+    Description: Enable updating existing summaries with new covered messages
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
   
   StateBucket:
     Type: String

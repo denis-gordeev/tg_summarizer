@@ -374,5 +374,49 @@ class SummaryInputTruncationTests(unittest.TestCase):
         self.assertIn(short_text, text_output)
 
 
+class ExtractLinksTrailingPunctuationTests(unittest.TestCase):
+    """Tests for extract_links stripping trailing punctuation — pure regex tests."""
+
+    def test_strips_trailing_period(self):
+        import re
+        LINK_REGEX = re.compile(r"https?://\S+")
+        TRAILING = re.compile(r"[.,;:!?)\]}'\">]+$")
+        raw = LINK_REGEX.findall("See https://example.com/page.")
+        result = [TRAILING.sub("", url) for url in raw]
+        self.assertEqual(result, ["https://example.com/page"])
+
+    def test_strips_trailing_parenthesis(self):
+        import re
+        LINK_REGEX = re.compile(r"https?://\S+")
+        TRAILING = re.compile(r"[.,;:!?)\]}'\">]+$")
+        raw = LINK_REGEX.findall("Link (https://example.com/foo)")
+        result = [TRAILING.sub("", url) for url in raw]
+        self.assertEqual(result, ["https://example.com/foo"])
+
+    def test_strips_trailing_comma(self):
+        import re
+        LINK_REGEX = re.compile(r"https?://\S+")
+        TRAILING = re.compile(r"[.,;:!?)\]}'\">]+$")
+        raw = LINK_REGEX.findall("https://a.com, https://b.com")
+        result = [TRAILING.sub("", url) for url in raw]
+        self.assertEqual(result, ["https://a.com", "https://b.com"])
+
+    def test_preserves_clean_url(self):
+        import re
+        LINK_REGEX = re.compile(r"https?://\S+")
+        TRAILING = re.compile(r"[.,;:!?)\]}'\">]+$")
+        raw = LINK_REGEX.findall("Visit https://example.com/page today")
+        result = [TRAILING.sub("", url) for url in raw]
+        self.assertEqual(result, ["https://example.com/page"])
+
+    def test_strips_multiple_trailing_punctuation(self):
+        import re
+        LINK_REGEX = re.compile(r"https?://\S+")
+        TRAILING = re.compile(r"[.,;:!?)\]}'\">]+$")
+        raw = LINK_REGEX.findall("See https://example.com).")
+        result = [TRAILING.sub("", url) for url in raw]
+        self.assertEqual(result, ["https://example.com"])
+
+
 if __name__ == "__main__":
     unittest.main()

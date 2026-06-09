@@ -122,9 +122,6 @@ async def _check_coverage(
     label: str,
 ) -> bool:
     """Check if a message topic is already covered in previous summaries."""
-    if not ENABLE_SUMMARIES_DEDUPLICATION:
-        return False
-
     if not recent_summaries:
         return False
 
@@ -144,21 +141,25 @@ async def _check_coverage(
         return False
 
 
-async def is_message_covered_in_summaries(msg: MessageInfo) -> bool:
+async def is_message_covered_in_summaries(msg: MessageInfo, context: str = None) -> bool:
     """Проверяет, была ли тема сообщения уже освещена в предыдущих саммари."""
+    if context is None:
+        context = get_recent_summaries_context()
     return await _check_coverage(
         msg,
-        get_recent_summaries_context(),
+        context,
         prompts.SUMMARY_COVERAGE_CHECK_PROMPT,
         "",
     )
 
 
-async def is_message_covered_in_group_summaries(msg: MessageInfo) -> bool:
+async def is_message_covered_in_group_summaries(msg: MessageInfo, context: str = None) -> bool:
     """Проверяет, была ли тема сообщения уже освещена в предыдущих саммари групп."""
+    if context is None:
+        context = get_recent_group_summaries_context()
     return await _check_coverage(
         msg,
-        get_recent_group_summaries_context(),
+        context,
         prompts.GROUP_SUMMARY_COVERAGE_CHECK_PROMPT,
         " групп",
     )
@@ -404,36 +405,43 @@ async def process_messages(
         if msg.is_nlp_related:
             nlp_related_messages.append(msg)
 
-    if ENABLE_SUMMARIES_DEDUPLICATION and nlp_related_messages:
-        coverage_fn = (
-            is_message_covered_in_group_summaries if is_group
-            else is_message_covered_in_summaries
+    unique_messages = nlp_related_messages
+    if unique_messages:
+        unique_messages = _remove_intra_batch_duplicates(unique_messages)
+        logger.info("After intra-batch dedup: %d unique messages from %s", len(unique_messages), stream_label)
+
+    if ENABLE_SUMMARIES_DEDUPLICATION and unique_messages:
+        coverage_context = (
+            get_recent_group_summaries_context() if is_group
+            else get_recent_summaries_context()
         )
+        if coverage_context:
+            coverage_prompt = prompts.GROUP_SUMMARY_COVERAGE_CHECK_PROMPT if is_group else prompts.SUMMARY_COVERAGE_CHECK_PROMPT
+            coverage_label = " групп" if is_group else ""
 
-        async def _check_msg_coverage(msg: MessageInfo) -> bool:
-            async with sem:
-                return await coverage_fn(msg)
+            async def _check_msg_coverage(msg: MessageInfo) -> bool:
+                async with sem:
+                    return await _check_coverage(
+                        msg, coverage_context, coverage_prompt, coverage_label,
+                    )
 
-        coverage_results = await asyncio.gather(
-            *[_check_msg_coverage(msg) for msg in nlp_related_messages]
-        )
+            coverage_results = await asyncio.gather(
+                *[_check_msg_coverage(msg) for msg in unique_messages]
+            )
 
-        for msg, is_covered in zip(nlp_related_messages, coverage_results):
-            msg.is_covered_in_summaries = is_covered
-            logger.debug("is_covered_in_summaries: %s", is_covered)
-            if is_covered:
-                await process_covered_message(msg, is_group=is_group)
+            for msg, is_covered in zip(unique_messages, coverage_results):
+                msg.is_covered_in_summaries = is_covered
+                logger.debug("is_covered_in_summaries: %s", is_covered)
+                if is_covered:
+                    await process_covered_message(msg, is_group=is_group)
 
     unique_messages = [
-        msg for msg in nlp_related_messages
+        msg for msg in unique_messages
         if not getattr(msg, 'is_covered_in_summaries', False)
     ]
 
     summary = None
     message_id = None
-    if unique_messages:
-        unique_messages = _remove_intra_batch_duplicates(unique_messages)
-        logger.info("After intra-batch dedup: %d unique messages from %s", len(unique_messages), stream_label)
     if unique_messages:
         summary_fn = summarize_group_text if is_group else summarize_text
         summary = await summary_fn(unique_messages)

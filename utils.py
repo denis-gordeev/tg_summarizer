@@ -44,6 +44,7 @@ def now_iso() -> str:
 openai_client = None
 
 LINK_REGEX = re.compile(r"https?://\S+")
+TRAILING_PUNCTUATION_REGEX = re.compile(r"""[.,;:!?)\]}'">]+$""")
 TELEGRAM_CHANNEL_REGEX = re.compile(r"https://t\.me/([^/]+)/\d+")
 ABBREVIATION_REGEX = re.compile(r'\[([A-Z0-9]+)\]')
 
@@ -168,5 +169,6 @@ def text_hash(text: str) -> str:
 
 
 def extract_links(text: str) -> list[str]:
-    """Return all URLs from a string."""
-    return LINK_REGEX.findall(text)
+    """Return all URLs from a string, with trailing punctuation stripped."""
+    raw = LINK_REGEX.findall(text)
+    return [TRAILING_PUNCTUATION_REGEX.sub("", url) for url in raw]

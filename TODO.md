@@ -437,6 +437,35 @@
 - Updated [`tests/test_lambda_handler.py`](tests/test_lambda_handler.py) — changed response assertion from exact dict match to key-level checks (more resilient to new fields).
 - All 132 tests pass without errors.
 
+## Completed in 2026-06-09 round (Lambda hardening round 14, bug fixes, cost optimization, quality)
+
+- **Critical bug**: Fixed [`update_existing_summary()`](history_manager.py) — `UPDATE_SUMMARY_MAX_TOKENS` was 500, but the prompt asks the LLM to return the full updated summary ("Ответь только обновлённое саммари"). For a typical 2000-char Russian summary (~1000 tokens), 500 max_tokens would truncate the response, causing data loss — the shortened text replaced the original. Increased default from 500 to 2000 in [`config.py`](config.py). Added length guard: if the LLM response is less than 80% of the original content length, falls back to the append approach instead of using the truncated response.
+- **Critical bug**: Fixed [`process_messages()`](message_processor.py) — `nlp_related_messages.append(msg)` was outside the `for` loop (indentation error from the parallel NLP check refactor in round 12). Only the last message in each batch was being appended to `nlp_related_messages`, so all other NLP-related messages were silently dropped. This caused missing content in summaries whenever there were multiple messages in a batch.
+- **Cost optimization**: Reordered [`process_messages()`](message_processor.py) — intra-batch dedup now runs before coverage checks. Previously, all NLP-related messages got coverage checks (expensive LLM calls), and then intra-batch dedup removed duplicates after. Now duplicates are removed first (free SequenceMatcher check), saving LLM coverage check tokens on duplicate messages.
+- **Cost optimization**: Coverage context is now built once per [`process_messages()`](message_processor.py) call instead of per-message. Previously, `get_recent_summaries_context()` was called inside each `is_message_covered_in_summaries()` call, rebuilding the context string for every message. Now pre-computed once and passed to all parallel `_check_coverage()` calls.
+- **Operational**: Made `ENABLE_SUMMARIES_DEDUPLICATION` and `ENABLE_SUMMARY_UPDATES` configurable via env vars in [`config.py`](config.py) (default: `true`). Previously hardcoded to `True`, making it impossible to disable coverage dedup or summary updates for testing or cost saving without code changes.
+- **Link extraction**: Fixed [`extract_links()`](utils.py) — added `TRAILING_PUNCTUATION_REGEX` to strip trailing punctuation (`.`, `,`, `)`, `]`, `}`, etc.) from extracted URLs. Previously, `https://example.com/page).` would capture the closing parenthesis and period as part of the URL, causing incorrect link handling in summary generation and dedup.
+- **Consistency**: Replaced `msg.message` with `msg.text` in [`_restore_summaries_from_channel()`](history_manager.py) — both refer to the same property in Telethon, but `msg.text` is the canonical accessor and consistent with the rest of the codebase.
+- **SAM template updated**: Updated `UpdateSummaryMaxTokens` default from "500" to "2000" and added `EnableSummariesDeduplication` / `EnableSummaryUpdates` parameters and env vars in [`template.yaml`](template.yaml).
+- **`.env.example` synced**: Updated `UPDATE_SUMMARY_MAX_TOKENS=2000` and added `ENABLE_SUMMARIES_DEDUPLICATION=true` / `ENABLE_SUMMARY_UPDATES=true` in [`.env.example`](.env.example).
+- **Tests added**: 14 new tests (total 146, up from 132):
+  - `test_falls_back_when_llm_response_truncated`: verifies append fallback on truncated LLM response
+  - `test_keeps_llm_response_when_length_sufficient`: verifies LLM response kept when >= 80% of original
+  - `test_enable_dedup_defaults_true`: verifies `ENABLE_SUMMARIES_DEDUPLICATION` default
+  - `test_enable_dedup_can_be_disabled`: verifies `ENABLE_SUMMARIES_DEDUPLICATION=false` works
+  - `test_enable_updates_defaults_true`: verifies `ENABLE_SUMMARY_UPDATES` default
+  - `test_enable_updates_can_be_disabled`: verifies `ENABLE_SUMMARY_UPDATES=0` works
+  - `test_strips_trailing_period`: verifies URL trailing period stripped
+  - `test_strips_trailing_parenthesis`: verifies URL trailing parenthesis stripped
+  - `test_strips_trailing_comma`: verifies URL trailing comma stripped
+  - `test_preserves_clean_url`: verifies clean URLs unchanged
+  - `test_strips_multiple_trailing_punctuation`: verifies multiple trailing chars stripped
+  - `test_dedup_before_coverage_saves_llm_calls`: verifies coverage check only on deduped messages
+  - `test_all_nlp_messages_appended`: regression test for the indentation bug
+  - `test_config_update_summary_max_tokens_default`: verifies `UPDATE_SUMMARY_MAX_TOKENS` default is 2000
+- Updated test stubs in [`tests/test_process_messages_integration.py`](tests/test_process_messages_integration.py) to patch `_check_coverage` instead of `is_message_covered_in_summaries` (coverage checks now use pre-built context).
+- All 146 tests pass without errors.
+
 ## Next actions
 
 - **CI/CD**: Настроить GitHub Actions CI/CD для автоматического деплоя Lambda при мердже в main.

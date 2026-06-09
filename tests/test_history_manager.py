@@ -1107,7 +1107,7 @@ class UpdateExistingSummaryLLMTests(unittest.TestCase):
                 asyncio.run(_test())
 
                 call_kwargs = fake_utils.call_openai.call_args
-                self.assertEqual(call_kwargs.kwargs.get("max_tokens"), 500)
+                self.assertEqual(call_kwargs.kwargs.get("max_tokens"), 2000)
 
     def test_update_existing_summary_fallback_on_llm_failure(self):
         """update_existing_summary should fall back to append on LLM failure."""
@@ -1592,6 +1592,190 @@ class SharedSaveSummaryHelperTests(unittest.TestCase):
 
                 self.assertEqual(len(saved_data["test_summaries.json"]["summaries"]), 1)
                 self.assertEqual(saved_data["test_summaries.json"]["summaries"][0]["content"], "Test summary")
+
+
+class UpdateSummaryLengthGuardTests(unittest.TestCase):
+    """Tests for update_existing_summary length guard — falls back to append on truncation."""
+
+    def _make_stubs(self):
+        import types
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_channel_manager = types.ModuleType("channel_manager")
+        fake_channel_manager.create_channel_abbreviation = lambda ch: "AB"
+        fake_channel_manager.load_channel_abbreviations = lambda: {}
+
+        class FakeSummaryInfo:
+            def __init__(self, content="", date=None, message_count=0, channels=None, message_id=None):
+                self.content = content
+                self.date = date or datetime.now(timezone.utc)
+                self.message_count = message_count
+                self.channels = channels or []
+                self.message_id = message_id
+
+        class FakeMessageInfo:
+            def __init__(self, text="", channel="", message_id=0, date=None, link=""):
+                self.text = text
+                self.channel = channel
+                self.message_id = message_id
+                self.date = date or datetime.now(timezone.utc)
+                self.link = link
+
+            def get_telegram_link(self):
+                return f"https://t.me/{self.channel.lstrip('@')}/{self.message_id}"
+
+        fake_models = types.ModuleType("models")
+        fake_models.SummaryInfo = FakeSummaryInfo
+        fake_models.MessageInfo = FakeMessageInfo
+        fake_prompts = types.ModuleType("prompts")
+        fake_prompts.prompts = types.SimpleNamespace()
+        fake_utils = types.ModuleType("utils")
+        fake_utils.extract_links = lambda text: []
+        fake_utils.load_json_file = lambda *a, **kw: {"summaries": [], "last_updated": ""}
+        fake_utils.save_json_file = MagicMock(return_value=True)
+        fake_utils.now_iso = lambda: "2026-01-01T00:00:00"
+        fake_utils.text_hash = lambda text: "abc123"
+
+        stubs = {
+            "dotenv": fake_dotenv,
+            "channel_manager": fake_channel_manager,
+            "models": fake_models,
+            "prompts": fake_prompts,
+            "utils": fake_utils,
+        }
+        return stubs, FakeSummaryInfo, FakeMessageInfo, fake_utils
+
+    def test_falls_back_when_llm_response_truncated(self):
+        """If LLM response is <80% of original length, fall back to append."""
+        import types
+        import importlib
+
+        stubs, FakeSI, FakeMI, fake_utils = self._make_stubs()
+        original_content = "A" * 1000
+        truncated_response = "B" * 100
+
+        fake_utils.call_openai = AsyncMock(return_value=truncated_response)
+
+        with patch.dict(sys.modules, stubs):
+            with patch.dict(os.environ, {}, clear=True):
+                sys.modules.pop("history_manager", None)
+                sys.modules.pop("config", None)
+                hm = importlib.import_module("history_manager")
+
+                summary = FakeSI(content=original_content, message_id=1)
+                msg = FakeMI(text="New info", channel="@test", message_id=42)
+
+                async def _test():
+                    return await hm.update_existing_summary(summary, msg)
+
+                updated = asyncio.run(_test())
+                self.assertIn("Другие ссылки:", updated.content)
+                self.assertIn(original_content, updated.content)
+
+    def test_keeps_llm_response_when_length_sufficient(self):
+        """If LLM response is >=80% of original length, keep it."""
+        import types
+        import importlib
+
+        stubs, FakeSI, FakeMI, fake_utils = self._make_stubs()
+        original_content = "A" * 1000
+        good_response = "B" * 900
+
+        fake_utils.call_openai = AsyncMock(return_value=good_response)
+
+        with patch.dict(sys.modules, stubs):
+            with patch.dict(os.environ, {}, clear=True):
+                sys.modules.pop("history_manager", None)
+                sys.modules.pop("config", None)
+                hm = importlib.import_module("history_manager")
+
+                summary = FakeSI(content=original_content, message_id=1)
+                msg = FakeMI(text="New info", channel="@test", message_id=42)
+
+                async def _test():
+                    return await hm.update_existing_summary(summary, msg)
+
+                updated = asyncio.run(_test())
+                self.assertEqual(updated.content, good_response)
+                self.assertNotIn("Другие ссылки:", updated.content)
+
+
+class ConfigDedupToggleTests(unittest.TestCase):
+    """Tests for ENABLE_SUMMARIES_DEDUPLICATION and ENABLE_SUMMARY_UPDATES env-configurable."""
+
+    def test_enable_dedup_defaults_true(self):
+        import importlib
+        import sys
+        import types
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, {
+                "TELEGRAM_API_ID": "1", "TELEGRAM_API_HASH": "h",
+                "TELEGRAM_BOT_TOKEN": "t", "TARGET_CHANNEL": "@c",
+                "OPENAI_API_KEY": "k",
+            }, clear=True):
+                sys.modules.pop("config", None)
+                config = importlib.import_module("config")
+                self.assertTrue(config.ENABLE_SUMMARIES_DEDUPLICATION)
+
+    def test_enable_dedup_can_be_disabled(self):
+        import importlib
+        import sys
+        import types
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, {
+                "TELEGRAM_API_ID": "1", "TELEGRAM_API_HASH": "h",
+                "TELEGRAM_BOT_TOKEN": "t", "TARGET_CHANNEL": "@c",
+                "OPENAI_API_KEY": "k",
+                "ENABLE_SUMMARIES_DEDUPLICATION": "false",
+            }, clear=True):
+                sys.modules.pop("config", None)
+                config = importlib.import_module("config")
+                self.assertFalse(config.ENABLE_SUMMARIES_DEDUPLICATION)
+
+    def test_enable_updates_defaults_true(self):
+        import importlib
+        import sys
+        import types
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, {
+                "TELEGRAM_API_ID": "1", "TELEGRAM_API_HASH": "h",
+                "TELEGRAM_BOT_TOKEN": "t", "TARGET_CHANNEL": "@c",
+                "OPENAI_API_KEY": "k",
+            }, clear=True):
+                sys.modules.pop("config", None)
+                config = importlib.import_module("config")
+                self.assertTrue(config.ENABLE_SUMMARY_UPDATES)
+
+    def test_enable_updates_can_be_disabled(self):
+        import importlib
+        import sys
+        import types
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, {
+                "TELEGRAM_API_ID": "1", "TELEGRAM_API_HASH": "h",
+                "TELEGRAM_BOT_TOKEN": "t", "TARGET_CHANNEL": "@c",
+                "OPENAI_API_KEY": "k",
+                "ENABLE_SUMMARY_UPDATES": "0",
+            }, clear=True):
+                sys.modules.pop("config", None)
+                config = importlib.import_module("config")
+                self.assertFalse(config.ENABLE_SUMMARY_UPDATES)
 
 
 if __name__ == '__main__':

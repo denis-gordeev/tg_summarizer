@@ -136,8 +136,8 @@ PROMPTS_FILE = os.getenv("PROMPTS_FILE", "prompts.json")
 # Constants
 SIMILARITY_LLM_LOWER = float(os.getenv("SIMILARITY_LLM_LOWER", "0.7"))
 SIMILARITY_LLM_UPPER = float(os.getenv("SIMILARITY_LLM_UPPER", "0.95"))
-ENABLE_SUMMARIES_DEDUPLICATION = True
-ENABLE_SUMMARY_UPDATES = True
+ENABLE_SUMMARIES_DEDUPLICATION = os.getenv("ENABLE_SUMMARIES_DEDUPLICATION", "true").lower() not in {"0", "false", "no", "off"}
+ENABLE_SUMMARY_UPDATES = os.getenv("ENABLE_SUMMARY_UPDATES", "true").lower() not in {"0", "false", "no", "off"}
 
 # History limits (configurable via environment variables)
 MAX_CHANNEL_HISTORY_MESSAGES = int(os.getenv("MAX_CHANNEL_HISTORY_MESSAGES", "1000"))
@@ -162,7 +162,7 @@ COVERAGE_CHECK_MAX_SUMMARIES = int(os.getenv("COVERAGE_CHECK_MAX_SUMMARIES", "10
 COVERAGE_CHECK_MAX_CHARS_PER_SUMMARY = int(os.getenv("COVERAGE_CHECK_MAX_CHARS_PER_SUMMARY", "300"))
 UPDATE_MATCH_MAX_SUMMARIES = int(os.getenv("UPDATE_MATCH_MAX_SUMMARIES", "5"))
 UPDATE_MATCH_MAX_CHARS_PER_SUMMARY = int(os.getenv("UPDATE_MATCH_MAX_CHARS_PER_SUMMARY", "500"))
-UPDATE_SUMMARY_MAX_TOKENS = _get_int_env("UPDATE_SUMMARY_MAX_TOKENS", 500)
+UPDATE_SUMMARY_MAX_TOKENS = _get_int_env("UPDATE_SUMMARY_MAX_TOKENS", 2000)
 
 # Debug mode (set DEBUG=1 in environment to enable verbose logging)
 DEBUG = os.getenv("DEBUG", "").lower() in {"1", "true", "yes"}
