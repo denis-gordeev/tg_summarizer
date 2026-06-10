@@ -1778,5 +1778,68 @@ class ConfigDedupToggleTests(unittest.TestCase):
                 self.assertFalse(config.ENABLE_SUMMARY_UPDATES)
 
 
+class UpdateSummaryInputTruncationTests(unittest.TestCase):
+    """Tests for summary content truncation in update_existing_summary."""
+
+    def test_truncates_summary_in_update_prompt(self):
+        """update_existing_summary should truncate summary content to UPDATE_SUMMARY_MAX_INPUT_CHARS."""
+        from models import MessageInfo, SummaryInfo
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_openai = types.ModuleType("openai")
+
+        class FakeOpenAIError(Exception):
+            pass
+
+        async def fake_call_openai(system_prompt, user_content, **kwargs):
+            self.assertLessEqual(
+                user_content.find("Саммари:\n") + len("Саммари:\n") + 2001,
+                user_content.find("\n\nНовое сообщение:"),
+            )
+            return SummaryInfo.__module__  # return something truthy
+
+        fake_openai.AsyncOpenAI = type("AsyncOpenAI", (), {"__init__": lambda self, **kw: None})
+        fake_openai.APIError = FakeOpenAIError
+        fake_openai.RateLimitError = type("RateLimitError", (FakeOpenAIError,), {"status_code": None})
+        fake_openai.APIConnectionError = type("APIConnectionError", (FakeOpenAIError,), {})
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv, "openai": fake_openai}):
+            with patch.dict(os.environ, {
+                "TELEGRAM_API_ID": "1", "TELEGRAM_API_HASH": "h",
+                "TELEGRAM_BOT_TOKEN": "t", "TARGET_CHANNEL": "@c",
+                "OPENAI_API_KEY": "k",
+                "UPDATE_SUMMARY_MAX_INPUT_CHARS": "2000",
+            }, clear=True):
+                for mod_name in list(sys.modules.keys()):
+                    if mod_name in ("config", "utils", "history_manager", "channel_manager", "prompts", "models"):
+                        sys.modules.pop(mod_name, None)
+                config = importlib.import_module("config")
+                models = importlib.import_module("models")
+
+                long_summary = models.SummaryInfo(
+                    content="x" * 5000,
+                    date=datetime.now(timezone.utc),
+                    message_count=3,
+                    channels=["@ch"],
+                    message_id=100,
+                )
+                new_msg = models.MessageInfo(
+                    text="New message about AI research with enough content",
+                    channel="@ch",
+                    message_id=200,
+                    date=datetime.now(timezone.utc),
+                    link="",
+                )
+
+                with patch("history_manager.call_openai", new_callable=AsyncMock) as mock_openai:
+                    mock_openai.return_value = "x" * 5000
+                    hm = importlib.import_module("history_manager")
+                    result = asyncio.run(hm.update_existing_summary(long_summary, new_msg))
+                    user_content = mock_openai.call_args[0][1]
+                    summary_part = user_content.split("Саммари:\n")[1].split("\n\nНовое сообщение:")[0]
+                    self.assertLessEqual(len(summary_part), 2001)
+
+
 if __name__ == '__main__':
     unittest.main()

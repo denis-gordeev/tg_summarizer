@@ -3,7 +3,7 @@ import logging
 import re
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
-from typing import List, Set
+from typing import List, Optional, Set
 from models import MessageInfo, SummaryInfo
 from utils import call_openai, extract_links, count_characters, text_hash
 from config import (
@@ -22,6 +22,9 @@ from config import (
     NLP_CHECK_MAX_INPUT_CHARS,
     SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE,
     NLP_CONCURRENT_CHECKS,
+    NLP_AD_KEYWORDS,
+    UPDATE_MATCH_MAX_SUMMARIES,
+    UPDATE_MATCH_MAX_CHARS_PER_SUMMARY,
 )
 from history_manager import get_recent_summaries_context, get_recent_group_summaries_context
 from channel_manager import (
@@ -141,6 +144,50 @@ async def _check_coverage(
         return False
 
 
+async def _check_coverage_and_match(
+    msg: MessageInfo,
+    summaries: List[SummaryInfo],
+    is_group: bool = False,
+) -> Optional[SummaryInfo]:
+    """Combined coverage check + summary match. Returns matching summary if covered, None otherwise.
+
+    Saves one LLM call per covered message vs separate _check_coverage + find_relevant_summary_for_update.
+    """
+    if not summaries:
+        return None
+
+    recent = summaries[-UPDATE_MATCH_MAX_SUMMARIES:]
+    context_parts = []
+    for i, s in enumerate(recent, 1):
+        truncated = s.content[:UPDATE_MATCH_MAX_CHARS_PER_SUMMARY]
+        context_parts.append(f"Дайджест {i}:\n{truncated}\n")
+
+    label = " групп" if is_group else ""
+    numbers = ", ".join(str(i) for i in range(1, len(recent) + 1))
+    user_content = f"""Предыдущие дайджесты{label}:
+{"".join(context_parts)}
+Новое сообщение:
+{msg.text}
+
+Совпадает ли ТЕМА и ОСНОВНАЯ ИДЕЯ нового сообщения с одним из дайджестов?
+- Та же тема → номер дайджеста ({numbers})
+- Новая тема или существенные новые детали → "НЕТ"
+Ответь только номером ({numbers}) или "НЕТ"."""
+
+    try:
+        result = await call_openai(
+            prompts.COVERAGE_AND_MATCH_PROMPT, user_content, max_tokens=3, temperature=0,
+        )
+        result = result.strip().upper()
+        if result.isdigit():
+            index = int(result) - 1
+            if 0 <= index < len(recent):
+                return recent[index]
+    except Exception as e:
+        logger.error("Error in coverage+match check: %s", e)
+    return None
+
+
 async def is_message_covered_in_summaries(msg: MessageInfo, context: str = None) -> bool:
     """Проверяет, была ли тема сообщения уже освещена в предыдущих саммари."""
     if context is None:
@@ -165,10 +212,20 @@ async def is_message_covered_in_group_summaries(msg: MessageInfo, context: str =
     )
 
 
+_AD_PATTERN = re.compile("|".join(re.escape(kw) for kw in NLP_AD_KEYWORDS), re.IGNORECASE)
+
+
+def _is_obvious_non_nlp(text: str) -> bool:
+    """Quick regex pre-check for obvious ad/course content before LLM call."""
+    return bool(_AD_PATTERN.search(text))
+
+
 async def is_nlp_related(text: str) -> tuple[bool, str]:
     """Use the LLM to decide if a message is NLP related and not advertising."""
     if len(text) < 100:
         return False, "too_short"
+    if _is_obvious_non_nlp(text):
+        return False, "ad_keyword"
     truncated = text[:NLP_CHECK_MAX_INPUT_CHARS]
     answer = await call_openai(prompts.NLP_RELEVANCE_PROMPT, truncated, max_tokens=20, temperature=0)
     return answer.lower().strip().startswith("да"), answer
@@ -411,29 +468,24 @@ async def process_messages(
         logger.info("After intra-batch dedup: %d unique messages from %s", len(unique_messages), stream_label)
 
     if ENABLE_SUMMARIES_DEDUPLICATION and unique_messages:
-        coverage_context = (
-            get_recent_group_summaries_context() if is_group
-            else get_recent_summaries_context()
-        )
-        if coverage_context:
-            coverage_prompt = prompts.GROUP_SUMMARY_COVERAGE_CHECK_PROMPT if is_group else prompts.SUMMARY_COVERAGE_CHECK_PROMPT
-            coverage_label = " групп" if is_group else ""
+        from history_manager import load_summaries_history, load_group_summaries_history
 
-            async def _check_msg_coverage(msg: MessageInfo) -> bool:
+        summaries = load_group_summaries_history() if is_group else load_summaries_history()
+
+        if summaries:
+            async def _check_msg_coverage(msg: MessageInfo) -> Optional[SummaryInfo]:
                 async with sem:
-                    return await _check_coverage(
-                        msg, coverage_context, coverage_prompt, coverage_label,
-                    )
+                    return await _check_coverage_and_match(msg, summaries, is_group)
 
             coverage_results = await asyncio.gather(
                 *[_check_msg_coverage(msg) for msg in unique_messages]
             )
 
-            for msg, is_covered in zip(unique_messages, coverage_results):
-                msg.is_covered_in_summaries = is_covered
-                logger.debug("is_covered_in_summaries: %s", is_covered)
-                if is_covered:
-                    await process_covered_message(msg, is_group=is_group)
+            for msg, matching_summary in zip(unique_messages, coverage_results):
+                msg.is_covered_in_summaries = matching_summary is not None
+                logger.debug("is_covered_in_summaries: %s", msg.is_covered_in_summaries)
+                if matching_summary is not None:
+                    await process_covered_message(msg, matching_summary=matching_summary, is_group=is_group)
 
     unique_messages = [
         msg for msg in unique_messages
@@ -456,11 +508,10 @@ async def process_messages(
         )
 
 
-async def process_covered_message(msg: MessageInfo, is_group: bool = False):
+async def process_covered_message(msg: MessageInfo, matching_summary: SummaryInfo = None, is_group: bool = False):
     """Process a message that is already covered in previous summaries."""
     from config import ENABLE_SUMMARY_UPDATES
     from history_manager import (
-        find_relevant_summary_for_update,
         update_existing_summary,
         save_updated_summary,
     )
@@ -471,13 +522,15 @@ async def process_covered_message(msg: MessageInfo, is_group: bool = False):
 
     logger.debug("Checking summary update for: %s...", msg.text[:50])
 
-    # Ищем подходящее саммари для обновления
-    relevant_summary = await find_relevant_summary_for_update(msg, is_group)
-    if relevant_summary:
+    if matching_summary is None:
+        from history_manager import find_relevant_summary_for_update
+        matching_summary = await find_relevant_summary_for_update(msg, is_group)
+
+    if matching_summary:
         logger.debug("Found relevant summary for update")
-        updated_summary = await update_existing_summary(relevant_summary, msg, is_group)
+        updated_summary = await update_existing_summary(matching_summary, msg, is_group)
         if updated_summary:
-            await save_updated_summary(relevant_summary, updated_summary, is_group)
+            await save_updated_summary(matching_summary, updated_summary, is_group)
             logger.info("Summary updated with new message")
         else:
             logger.warning("Failed to update summary")

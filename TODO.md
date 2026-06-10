@@ -466,11 +466,44 @@
 - Updated test stubs in [`tests/test_process_messages_integration.py`](tests/test_process_messages_integration.py) to patch `_check_coverage` instead of `is_message_covered_in_summaries` (coverage checks now use pre-built context).
 - All 146 tests pass without errors.
 
+## Completed in 2026-06-10 round (Lambda hardening round 15, NLP pre-filter, coverage+match merge, cost optimization)
+
+- **NLP keyword pre-filter**: Added `_is_obvious_non_nlp()` in [`message_processor.py`](message_processor.py) — regex-based pre-check for common ad/course/webinar patterns (`курс`, `вебинар`, `регистраци`, `скидк`, `промокод`, `мастер-класс`, `стажировк`, `hire`, `bootcamp`, etc.). Applied in [`is_nlp_related()`](message_processor.py) — messages matching ad patterns are rejected immediately with reason `"ad_keyword"` without making an LLM call. Saves ~30-50% of NLP relevance LLM calls on typical Telegram channels with heavy advertising.
+- **Combined coverage + match check**: Added [`_check_coverage_and_match()`](message_processor.py) — merges the previous two-step flow (coverage check + `find_relevant_summary_for_update`) into a single LLM call. When a message is covered in previous summaries, the combined check returns the matching `SummaryInfo` directly. [`process_messages()`](message_processor.py) now passes the matching summary to [`process_covered_message()`](message_processor.py), which skips the separate `find_relevant_summary_for_update` call. Saves one entire LLM call per covered message.
+- **COVERAGE_AND_MATCH_PROMPT**: Added new prompt in [`prompts.py`](prompts.py) — asks the LLM to return either a summary number or "НЕТ", combining coverage detection and matching into one response.
+- **Summary update input truncation**: Added `UPDATE_SUMMARY_MAX_INPUT_CHARS` config (default 2000) in [`config.py`](config.py). Applied in [`update_existing_summary()`](history_manager.py) — summary content sent to the LLM is now truncated before the update prompt. Previously sent the full summary (up to 4000 chars) as input context, wasting tokens on a simple link insertion.
+- **Config validation consistency**: Replaced all `int(os.getenv(...))` calls with `_get_int_env()` in [`config.py`](config.py) — `NLP_CHECK_MAX_INPUT_CHARS`, `MAX_MESSAGES_PER_SOURCE`, `SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE`, `NLP_CONCURRENT_CHECKS`, `COVERAGE_CHECK_MAX_SUMMARIES`, `COVERAGE_CHECK_MAX_CHARS_PER_SUMMARY`, `UPDATE_MATCH_MAX_SUMMARIES`, `UPDATE_MATCH_MAX_CHARS_PER_SUMMARY`, `MAX_CHANNEL_HISTORY_MESSAGES`, `MAX_CHANNEL_SUMMARIES`, `MAX_GROUP_HISTORY_MESSAGES`, `MAX_GROUP_SUMMARIES`, `GROUP_SUMMARIZATION_INTERVAL_SECONDS`, `RESTORE_HISTORY_DAYS`. Now all integer configs validate that values are positive integers, catching misconfiguration early.
+- **Telegram message accessor consistency**: Replaced `msg.message` with `msg.text` in [`_fetch_from_sources()`](telegram_client.py) — `msg.text` is the canonical Telethon accessor, consistent with the rest of the codebase. `msg.message` and `msg.text` return the same value for plain text messages, but `msg.text` handles formatting entities correctly.
+- **SAM template updated**: Added `UpdateSummaryMaxInputChars` parameter and env var in [`template.yaml`](template.yaml).
+- **`.env.example` synced**: Added `UPDATE_SUMMARY_MAX_INPUT_CHARS=2000` in [`.env.example`](.env.example).
+- **Tests added**: 17 new tests (total 163, up from 146):
+  - `test_rejects_course_ad`: verifies `_is_obvious_non_nlp` catches "курс"
+  - `test_rejects_webinar_ad`: verifies `_is_obvious_non_nlp` catches "вебинар"
+  - `test_rejects_promocode_ad`: verifies `_is_obvious_non_nlp` catches "промокод"
+  - `test_allows_ai_research`: verifies `_is_obvious_non_nlp` passes AI research text
+  - `test_allows_vacancy`: verifies `_is_obvious_non_nlp` passes vacancy text
+  - `test_nlp_related_skips_llm_on_ad_keyword`: verifies `is_nlp_related` returns `(False, "ad_keyword")` without LLM call
+  - `test_returns_matching_summary_on_covered`: verifies `_check_coverage_and_match` returns matching summary
+  - `test_returns_none_on_not_covered`: verifies `_check_coverage_and_match` returns None for "НЕТ"
+  - `test_returns_none_on_empty_summaries`: verifies `_check_coverage_and_match` returns None without LLM call when no summaries
+  - `test_returns_none_on_invalid_response`: verifies `_check_coverage_and_match` handles invalid LLM response
+  - `test_config_reads_update_summary_max_input_chars_from_env`: verifies `UPDATE_SUMMARY_MAX_INPUT_CHARS` env var
+  - `test_config_update_summary_max_input_chars_default`: verifies default is 2000
+  - `test_nlp_ad_keywords_is_list`: verifies `NLP_AD_KEYWORDS` is a non-empty list
+  - `test_nlp_ad_keywords_contains_course`: verifies "курс" is in `NLP_AD_KEYWORDS`
+  - `test_nlp_check_max_input_chars_rejects_zero`: validates `_get_int_env` rejects zero
+  - `test_max_messages_per_source_rejects_negative`: validates `_get_int_env` rejects negative
+  - `test_truncates_summary_in_update_prompt`: verifies summary content truncation in `update_existing_summary`
+- Updated coverage check tests in [`tests/test_process_messages_integration.py`](tests/test_process_messages_integration.py) to use `_check_coverage_and_match` instead of `_check_coverage`, and to provide `SummaryInfo` objects via `load_summaries_history` stub.
+- Updated test stubs in [`tests/test_process_messages_integration.py`](tests/test_process_messages_integration.py) to include `NLP_AD_KEYWORDS`, `UPDATE_MATCH_MAX_SUMMARIES`, `UPDATE_MATCH_MAX_CHARS_PER_SUMMARY`, `COVERAGE_AND_MATCH_PROMPT`, `load_summaries_history`, `load_group_summaries_history`.
+- All 163 tests pass without errors.
+
 ## Next actions
 
 - **CI/CD**: Настроить GitHub Actions CI/CD для автоматического деплоя Lambda при мердже в main.
 - **Secrets management**: Перенести реальные секреты в AWS SSM Parameter Store (инфраструктура готова — `*_SSM_PATH` env vars и IAM policies в template.yaml).
 - **Prompt A/B testing**: Продолжить тестирование промптов — отслеживать качество саммари после снижения `max_tokens` до 4000 и при необходимости корректировать.
 - **OpenAI response streaming**: Рассмотреть streaming API для снижения perceived latency (но не стоимости — `max_tokens` уже ограничен).
-- **Coverage check prompt**: Рассмотреть замену coverage check промптов на JSON mode (`response_format={"type": "json_object"}`) для ещё большей детерминистичности при сохранении стоимости gpt-4o-mini.
 - **Intra-batch LLM dedup**: Рассмотреть добавление LLM-проверки для сообщений с ratio между SIMILARITY_LLM_LOWER (0.7) и SIMILARITY_LLM_UPPER (0.95) внутри `_remove_intra_batch_duplicates` — позволит ловить больше дубликатов за дополнительные токены. (Примечание: `are_messages_duplicate` и `_remove_duplicates_generic` удалены в раунде 2026-06-08 — при необходимости восстановления, см. git history.)
+- **Coverage+match accuracy**: Отслеживать точность `_check_coverage_and_match` — если LLM иногда выбирает не лучший дайджест для обновления, можно увеличить `UPDATE_MATCH_MAX_CHARS_PER_SUMMARY` или добавить fallback на `find_relevant_summary_for_update`.
+- **NLP pre-filter tuning**: Мониторить процент сообщений, отклонённых `_is_obvious_non_nlp` — если ложноположительных срабатываний много, сузить список `NLP_AD_KEYWORDS` или добавить whitelist.

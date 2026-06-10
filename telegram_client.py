@@ -113,12 +113,12 @@ async def _fetch_from_sources(
                 if source_count >= MAX_MESSAGES_PER_SOURCE:
                     logger.debug("Reached MAX_MESSAGES_PER_SOURCE (%d) for %s %s", MAX_MESSAGES_PER_SOURCE, source_label, source)
                     break
-                if msg.message:
-                    links = extract_links(msg.message)
+                if msg.text:
+                    links = extract_links(msg.text)
                     main_link = links[0] if links else ""
 
                     message_info = MessageInfo(
-                        text=msg.message,
+                        text=msg.text,
                         channel=source,
                         message_id=msg.id,
                         date=msg.date,

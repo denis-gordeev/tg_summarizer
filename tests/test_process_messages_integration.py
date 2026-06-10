@@ -5,6 +5,7 @@ import types
 import unittest
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
+from models import MessageInfo, SummaryInfo
 
 
 def _setup_stubs():
@@ -38,12 +39,21 @@ def _setup_stubs():
     fake_config.NLP_CHECK_MAX_INPUT_CHARS = 2000
     fake_config.SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE = 3000
     fake_config.NLP_CONCURRENT_CHECKS = 5
+    fake_config.NLP_AD_KEYWORDS = [
+        "курс", "вебинар", "регистраци", "скидк", "промокод", "бесплатный курс",
+        "платный курс", "мастер-класс", "стажировк", "hire", "hiring day",
+        "карьерный трек", "bootcamp", "boot camp",
+    ]
+    fake_config.UPDATE_MATCH_MAX_SUMMARIES = 5
+    fake_config.UPDATE_MATCH_MAX_CHARS_PER_SUMMARY = 500
     sys.modules["config"] = fake_config
 
     # --- Stub history_manager ---
     fake_history = types.ModuleType("history_manager")
     fake_history.get_recent_summaries_context = MagicMock(return_value="")
     fake_history.get_recent_group_summaries_context = MagicMock(return_value="")
+    fake_history.load_summaries_history = MagicMock(return_value=[])
+    fake_history.load_group_summaries_history = MagicMock(return_value=[])
     fake_history.save_summarization_history = MagicMock()
     fake_history.save_group_summarization_history = MagicMock()
     fake_history.save_summary_to_history = MagicMock()
@@ -75,6 +85,7 @@ def _setup_stubs():
         NLP_RELEVANCE_PROMPT="nlp",
         SUMMARY_COVERAGE_CHECK_PROMPT="cov",
         GROUP_SUMMARY_COVERAGE_CHECK_PROMPT="gcov",
+        COVERAGE_AND_MATCH_PROMPT="covmatch",
         CHANNEL_SUMMARY_PROMPT="channel summary, max {max_summary_length} chars",
         GROUP_SUMMARY_PROMPT="group summary, max {max_summary_length} chars",
         FIND_RELEVANT_SUMMARY_PROMPT="find",
@@ -254,21 +265,29 @@ class ProcessMessagesIntegrationTests(unittest.TestCase):
         ]
 
         self._fake_config.SOURCE_CHANNELS = {"@ai_ch1", "@ai_ch2"}
-        self._fake_history.get_recent_summaries_context.return_value = "some context"
+        fake_summary = SummaryInfo(
+            content="Previous summary about transformers",
+            date=datetime.now(timezone.utc),
+            message_count=1,
+            channels=["@ai_ch1"],
+        )
+        self._fake_history.load_summaries_history.return_value = [fake_summary]
 
         with patch.object(self.mp, "is_nlp_related", new_callable=AsyncMock) as mock_nlp, \
              patch.object(self.mp, "ENABLE_SUMMARIES_DEDUPLICATION", True), \
-             patch.object(self.mp, "_check_coverage", new_callable=AsyncMock) as mock_cov:
+             patch.object(self.mp, "_check_coverage_and_match", new_callable=AsyncMock) as mock_cov:
             mock_nlp.return_value = (True, "NLP related")
-            mock_cov.return_value = False
+            mock_cov.return_value = None
 
             self._run_pipeline(messages, save_changes=True, send_message=False, is_group=False)
 
             self.assertEqual(mock_cov.call_count, 2,
-                             "Coverage check should be called for each unique NLP-related message")
+                             "Coverage+match check should be called for each unique NLP-related message")
 
     def test_covered_messages_excluded_from_summary(self):
         """Messages covered in previous summaries should not appear in the new summary."""
+        from models import SummaryInfo
+
         messages = [
             _make_message(
                 text="Article about AI that was already covered in a previous digest "
@@ -279,14 +298,21 @@ class ProcessMessagesIntegrationTests(unittest.TestCase):
         ]
 
         self._fake_config.SOURCE_CHANNELS = {"@ai_ch"}
-        self._fake_history.get_recent_summaries_context.return_value = "some context"
+        fake_summary = SummaryInfo(
+            content="Previous summary about AI",
+            date=datetime.now(timezone.utc),
+            message_count=1,
+            channels=["@ai_ch"],
+            message_id=100,
+        )
+        self._fake_history.load_summaries_history.return_value = [fake_summary]
 
         with patch.object(self.mp, "is_nlp_related", new_callable=AsyncMock) as mock_nlp, \
              patch.object(self.mp, "ENABLE_SUMMARIES_DEDUPLICATION", True), \
-             patch.object(self.mp, "_check_coverage", new_callable=AsyncMock) as mock_cov, \
+             patch.object(self.mp, "_check_coverage_and_match", new_callable=AsyncMock) as mock_cov, \
              patch.object(self.mp, "summarize_text", new_callable=AsyncMock) as mock_sum:
             mock_nlp.return_value = (True, "NLP related")
-            mock_cov.return_value = True
+            mock_cov.return_value = fake_summary
 
             self._run_pipeline(messages, save_changes=True, send_message=False, is_group=False)
 
@@ -531,14 +557,20 @@ class IntraBatchDedupBeforeCoverageTests(unittest.TestCase):
         ]
 
         self._fake_config.SOURCE_CHANNELS = {"@ai_ch1", "@ai_ch2"}
-        self._fake_history.get_recent_summaries_context.return_value = "some context"
+        fake_summary = SummaryInfo(
+            content="Previous summary",
+            date=datetime.now(timezone.utc),
+            message_count=1,
+            channels=["@ai_ch1"],
+        )
+        self._fake_history.load_summaries_history.return_value = [fake_summary]
 
         with patch.object(self.mp, "is_nlp_related", new_callable=AsyncMock) as mock_nlp, \
              patch.object(self.mp, "ENABLE_SUMMARIES_DEDUPLICATION", True), \
-             patch.object(self.mp, "_check_coverage", new_callable=AsyncMock) as mock_cov, \
+             patch.object(self.mp, "_check_coverage_and_match", new_callable=AsyncMock) as mock_cov, \
              patch.object(self.mp, "summarize_text", new_callable=AsyncMock) as mock_sum:
             mock_nlp.return_value = (True, "NLP related")
-            mock_cov.return_value = False
+            mock_cov.return_value = None
             mock_sum.return_value = "<b>test</b>"
 
             asyncio.run(self.mp.process_messages(
@@ -586,3 +618,128 @@ class NlpRelatedMessagesIndentationTests(unittest.TestCase):
             nlp_related_count = sum(1 for m in messages if m.is_nlp_related)
             self.assertEqual(nlp_related_count, 3,
                              "All 3 messages should be marked as NLP related")
+
+
+class NlpAdKeywordFilterTests(unittest.TestCase):
+    """Tests for _is_obvious_non_nlp keyword pre-filter."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._stubs = _setup_stubs()
+        cls._fake_config, cls._fake_history, cls._fake_tg = cls._stubs
+        for mod_name in list(sys.modules.keys()):
+            if mod_name in ("message_processor", "models"):
+                del sys.modules[mod_name]
+        cls.mp = importlib.import_module("message_processor")
+
+    def test_rejects_course_ad(self):
+        result = self.mp._is_obvious_non_nlp("Запишитесь на наш курс по машинному обучению!")
+        self.assertTrue(result)
+
+    def test_rejects_webinar_ad(self):
+        result = self.mp._is_obvious_non_nlp("Бесплатный вебинар по AI завтра в 18:00")
+        self.assertTrue(result)
+
+    def test_rejects_promocode_ad(self):
+        result = self.mp._is_obvious_non_nlp("Промокод на скидку 50% на обучение")
+        self.assertTrue(result)
+
+    def test_allows_ai_research(self):
+        result = self.mp._is_obvious_non_nlp("New research paper on transformer architectures and attention mechanisms")
+        self.assertFalse(result)
+
+    def test_allows_vacancy(self):
+        result = self.mp._is_obvious_non_nlp("Ищем ML инженера в команду, удаленка, опыт с LLM")
+        self.assertFalse(result)
+
+    def test_nlp_related_skips_llm_on_ad_keyword(self):
+        """is_nlp_related should return (False, 'ad_keyword') without calling LLM for ads."""
+        ad_text = "Курс по Data Science с сертификатом! Регистрация открыта!" + " x" * 80
+
+        with patch.object(self.mp, "call_openai", new_callable=AsyncMock) as mock_openai:
+            result = asyncio.run(self.mp.is_nlp_related(ad_text))
+            self.assertFalse(result[0])
+            self.assertEqual(result[1], "ad_keyword")
+            mock_openai.assert_not_called()
+
+
+class CoverageAndMatchCheckTests(unittest.TestCase):
+    """Tests for _check_coverage_and_match combined check."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._stubs = _setup_stubs()
+        cls._fake_config, cls._fake_history, cls._fake_tg = cls._stubs
+        for mod_name in list(sys.modules.keys()):
+            if mod_name in ("message_processor", "models"):
+                del sys.modules[mod_name]
+        cls.mp = importlib.import_module("message_processor")
+
+    def test_returns_matching_summary_on_covered(self):
+        """When LLM returns a valid summary number, return that summary."""
+        summaries = [
+            SummaryInfo(
+                content="Summary about GPT-5 release",
+                date=datetime.now(timezone.utc),
+                message_count=2,
+                channels=["@ai"],
+                message_id=100,
+            ),
+            SummaryInfo(
+                content="Summary about BERT improvements",
+                date=datetime.now(timezone.utc),
+                message_count=1,
+                channels=["@nlp"],
+                message_id=101,
+            ),
+        ]
+        msg = _make_message(text="New details about GPT-5 capabilities", channel="@ai", message_id=1)
+
+        with patch.object(self.mp, "call_openai", new_callable=AsyncMock) as mock_openai:
+            mock_openai.return_value = "1"
+            result = asyncio.run(self.mp._check_coverage_and_match(msg, summaries, is_group=False))
+            self.assertIsNotNone(result)
+            self.assertEqual(result.message_id, 100)
+
+    def test_returns_none_on_not_covered(self):
+        """When LLM returns НЕТ, return None."""
+        summaries = [
+            SummaryInfo(
+                content="Summary about quantum computing",
+                date=datetime.now(timezone.utc),
+                message_count=1,
+                channels=["@quantum"],
+            ),
+        ]
+        msg = _make_message(text="New LLM benchmark results", channel="@ml", message_id=1)
+
+        with patch.object(self.mp, "call_openai", new_callable=AsyncMock) as mock_openai:
+            mock_openai.return_value = "НЕТ"
+            result = asyncio.run(self.mp._check_coverage_and_match(msg, summaries, is_group=False))
+            self.assertIsNone(result)
+
+    def test_returns_none_on_empty_summaries(self):
+        """When summaries list is empty, return None without LLM call."""
+        msg = _make_message(text="Some text", channel="@ch", message_id=1)
+
+        with patch.object(self.mp, "call_openai", new_callable=AsyncMock) as mock_openai:
+            result = asyncio.run(self.mp._check_coverage_and_match(msg, [], is_group=False))
+            self.assertIsNone(result)
+            mock_openai.assert_not_called()
+
+    def test_returns_none_on_invalid_response(self):
+        """When LLM returns invalid response, return None."""
+        summaries = [
+            SummaryInfo(
+                content="Some summary",
+                date=datetime.now(timezone.utc),
+                message_count=1,
+                channels=["@ch"],
+            ),
+        ]
+        msg = _make_message(text="Some text", channel="@ch", message_id=1)
+
+        with patch.object(self.mp, "call_openai", new_callable=AsyncMock) as mock_openai:
+            mock_openai.return_value = "maybe"
+            result = asyncio.run(self.mp._check_coverage_and_match(msg, summaries, is_group=False))
+            self.assertIsNone(result)

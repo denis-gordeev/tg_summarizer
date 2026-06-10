@@ -24,6 +24,7 @@ from config import (
     UPDATE_MATCH_MAX_SUMMARIES,
     UPDATE_MATCH_MAX_CHARS_PER_SUMMARY,
     UPDATE_SUMMARY_MAX_TOKENS,
+    UPDATE_SUMMARY_MAX_INPUT_CHARS,
 )
 from models import MessageInfo, SummaryInfo
 from prompts import prompts
@@ -445,7 +446,8 @@ async def update_existing_summary(
 Если нет подходящего места — добавь строку "Другие ссылки: {new_link}" в конец.
 Ответь только обновлённое саммари."""
 
-    user_content = f"Саммари:\n{summary.content}\n\nНовое сообщение:\n{new_message.text}"
+    truncated_summary = summary.content[:UPDATE_SUMMARY_MAX_INPUT_CHARS]
+    user_content = f"Саммари:\n{truncated_summary}\n\nНовое сообщение:\n{new_message.text}"
 
     try:
         updated_content = await call_openai(update_prompt, user_content, max_tokens=UPDATE_SUMMARY_MAX_TOKENS, temperature=0)

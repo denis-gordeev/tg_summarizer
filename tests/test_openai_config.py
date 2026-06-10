@@ -534,5 +534,87 @@ class OpenAITokenUsageLoggingTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(len(usage_logs) > 0, "Expected a token usage log message")
 
 
+class UpdateSummaryMaxInputCharsTests(unittest.TestCase):
+    """Tests for UPDATE_SUMMARY_MAX_INPUT_CHARS config."""
+
+    def test_config_reads_update_summary_max_input_chars_from_env(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, {
+                **REQUIRED_ENV,
+                "UPDATE_SUMMARY_MAX_INPUT_CHARS": "3000",
+            }, clear=True):
+                sys.modules.pop("config", None)
+                config = importlib.import_module("config")
+                self.assertEqual(config.UPDATE_SUMMARY_MAX_INPUT_CHARS, 3000)
+
+    def test_config_update_summary_max_input_chars_default(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+                sys.modules.pop("config", None)
+                config = importlib.import_module("config")
+                self.assertEqual(config.UPDATE_SUMMARY_MAX_INPUT_CHARS, 2000)
+
+
+class NlpAdKeywordsConfigTests(unittest.TestCase):
+    """Tests for NLP_AD_KEYWORDS config."""
+
+    def test_nlp_ad_keywords_is_list(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+                sys.modules.pop("config", None)
+                config = importlib.import_module("config")
+                self.assertIsInstance(config.NLP_AD_KEYWORDS, list)
+                self.assertTrue(len(config.NLP_AD_KEYWORDS) > 0)
+
+    def test_nlp_ad_keywords_contains_course(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+                sys.modules.pop("config", None)
+                config = importlib.import_module("config")
+                self.assertIn("курс", config.NLP_AD_KEYWORDS)
+
+
+class ConfigValidationConsistencyTests(unittest.TestCase):
+    """Tests that _get_int_env validates all integer configs."""
+
+    def test_nlp_check_max_input_chars_rejects_zero(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, {
+                **REQUIRED_ENV,
+                "NLP_CHECK_MAX_INPUT_CHARS": "0",
+            }, clear=True):
+                sys.modules.pop("config", None)
+                with self.assertRaises(ValueError):
+                    importlib.import_module("config")
+
+    def test_max_messages_per_source_rejects_negative(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, {
+                **REQUIRED_ENV,
+                "MAX_MESSAGES_PER_SOURCE": "-5",
+            }, clear=True):
+                sys.modules.pop("config", None)
+                with self.assertRaises(ValueError):
+                    importlib.import_module("config")
+
+
 if __name__ == "__main__":
     unittest.main()
