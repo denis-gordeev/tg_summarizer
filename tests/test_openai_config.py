@@ -615,6 +615,26 @@ class ConfigValidationConsistencyTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     importlib.import_module("config")
 
+    def test_channel_summary_max_tokens_default_is_1500(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+                sys.modules.pop("config", None)
+                config = importlib.import_module("config")
+                self.assertEqual(config.OPENAI_CHANNEL_SUMMARY_MAX_TOKENS, 1500)
+
+    def test_channel_summary_max_tokens_from_env(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, {**REQUIRED_ENV, "OPENAI_CHANNEL_SUMMARY_MAX_TOKENS": "2000"}, clear=True):
+                sys.modules.pop("config", None)
+                config = importlib.import_module("config")
+                self.assertEqual(config.OPENAI_CHANNEL_SUMMARY_MAX_TOKENS, 2000)
+
 
 if __name__ == "__main__":
     unittest.main()

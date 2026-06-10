@@ -99,7 +99,7 @@ Parameters:
   OpenAIChannelSummaryMaxTokens:
     Type: String
     Description: Max tokens for channel summaries
-    Default: "4000"
+    Default: "1500"
    
   OpenAIGroupSummaryMaxTokens:
     Type: String

@@ -222,5 +222,22 @@ class HandlerTests(unittest.TestCase):
         self.assertIsInstance(result["elapsed_seconds"], float)
 
 
+    def test_handler_returns_structured_error_on_validate_config_failure(self):
+        """validate_config inside try/except should return structured error, not unhandled exception."""
+        event = {"send_message": True, "save_changes": True}
+
+        def _raise_value_error():
+            raise ValueError("Missing required environment variables: FOO, BAR")
+
+        with patch.object(self.lambda_handler.os, "chdir"), \
+             patch.object(self.lambda_handler, "download_from_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.dict(sys.modules, {"config": types.SimpleNamespace(validate_config=_raise_value_error)}):
+            result = self.lambda_handler.handler(event, context=None)
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("Missing required", result["error"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -498,6 +498,34 @@
 - Updated test stubs in [`tests/test_process_messages_integration.py`](tests/test_process_messages_integration.py) to include `NLP_AD_KEYWORDS`, `UPDATE_MATCH_MAX_SUMMARIES`, `UPDATE_MATCH_MAX_CHARS_PER_SUMMARY`, `COVERAGE_AND_MATCH_PROMPT`, `load_summaries_history`, `load_group_summaries_history`.
 - All 163 tests pass without errors.
 
+## Completed in 2026-06-10 round 2 (Lambda hardening round 16, bug fixes, cost optimization, dead code removal)
+
+- **Bug fix**: Moved [`validate_config()`](lambda_handler.py) inside the `try/except` block — previously called before the try, a `ValueError` on missing env vars would produce an unhandled Lambda exception with raw traceback instead of the structured `{'status': 'error', ...}` JSON response.
+- **Bug fix**: Changed [`should_run_group_summarization()`](history_manager.py) to return `True` on parse errors — previously returned `False` on malformed `GROUP_LAST_RUN_FILE` timestamps, permanently skipping group summarization until manual file deletion.
+- **Bug fix**: Added stale matching_summary refresh in [`process_covered_message()`](message_processor.py) — when multiple messages match the same summary in one batch, the second update would use the stale (pre-update) summary, overwriting the first update. Now reloads the summary from file via `load_summaries_history()` before calling `update_existing_summary()`.
+- **Cost optimization**: Reduced `OPENAI_CHANNEL_SUMMARY_MAX_TOKENS` default from 4000→1500 in [`config.py`](config.py) and [`template.yaml`](template.yaml). With `SUMMARY_MAX_LENGTH=4000` chars and ~3 chars/token for Russian, 1500 tokens is sufficient. Post-hoc `enforce_summary_length()` still catches any excess.
+- **Cost optimization**: Truncated `msg.text` in [`_check_coverage_and_match()`](message_processor.py) to `NLP_CHECK_MAX_INPUT_CHARS` (2000) — previously sent the full message text, wasting input tokens on long articles for a yes/no classification.
+- **Cost optimization**: Truncated `new_message.text` in [`update_existing_summary()`](history_manager.py) to `UPDATE_SUMMARY_MAX_INPUT_CHARS` (2000) — previously sent the full message text for a link-insertion task.
+- **Dead code removal**: Removed `is_message_covered_in_summaries()` and `is_message_covered_in_group_summaries()` from [`message_processor.py`](message_processor.py) — superseded by `_check_coverage_and_match()` which combines coverage check + match finding into one LLM call. Updated tests to use `_check_coverage()` directly.
+- **Dead code removal**: Removed `DUPLICATE_CHECK_PROMPT` from [`prompts.py`](prompts.py) — LLM-based deduplication was removed in round 12; this prompt was never called in production.
+- **Import cleanup**: Moved inline `from history_manager import ...` and `from channel_manager import save_discovered_channel` to top-level in [`message_processor.py`](message_processor.py). Moved `import time` to top-level. Added `from config import ENABLE_SUMMARY_UPDATES` to top-level.
+- **Prompt consistency**: Added "Разные модели на Hugging Face = разные темы → НЕТ" rule to [`GROUP_SUMMARY_COVERAGE_CHECK_PROMPT`](prompts.py) — was missing from the group version but present in the channel version, causing inconsistent coverage check behavior.
+- **Lambda hardening**: Added `_deadline` parameter to [`process_messages()`](message_processor.py) with checks before NLP classification, coverage checks, and summary generation. [`summarizer.py`](summarizer.py) now passes `_deadline` through. When deadline is exceeded, the current phase is skipped and partial results are saved.
+- **Lambda hardening**: Cached [`_load_processed_messages()`](history_manager.py) — previously read from disk and rebuilt the processed-messages set on every call. Now uses the same `_cache` pattern as `load_summaries_history()`, with invalidation on save.
+- **Lambda hardening**: Added total message examined limit (`MAX_MESSAGES_PER_SOURCE * 3`) in [`_fetch_from_sources()`](telegram_client.py) — previously, a channel with many already-processed messages could iterate through all of them before hitting the date cutoff, wasting Telegram API calls and time.
+- **Test stubs updated**: Added missing stub attributes (`load_summaries_history`, `save_summaries_history`, `save_discovered_channel`, `COVERAGE_AND_MATCH_PROMPT`, `FIND_RELEVANT_SUMMARY_PROMPT`, `ENABLE_SUMMARY_UPDATES`) to [`tests/test_digest_post_processing.py`](tests/test_digest_post_processing.py), [`tests/test_summary_length_guardrails.py`](tests/test_summary_length_guardrails.py), and [`tests/test_process_messages_integration.py`](tests/test_process_messages_integration.py).
+- **Tests added**: 8 new tests (total 171, up from 163):
+  - `test_handler_returns_structured_error_on_validate_config_failure`: verifies validate_config errors return structured JSON
+  - `test_returns_true_on_malformed_timestamp`: verifies should_run_group_summarization returns True on parse error
+  - `test_returns_true_when_file_missing`: verifies should_run_group_summarization returns True when file missing
+  - `test_coverage_match_truncates_long_message`: verifies _check_coverage_and_match truncates msg.text
+  - `test_deadline_skips_summary_generation`: verifies deadline propagation in process_messages
+  - `test_refreshes_matching_summary_from_file`: verifies stale matching_summary refresh in process_covered_message
+  - `test_channel_summary_max_tokens_default_is_1500`: verifies new default
+  - `test_channel_summary_max_tokens_from_env`: verifies env var override
+- Updated `should_run_group_summarization` logic test to expect `True` on malformed timestamps (consistent with the bug fix).
+- All 171 tests pass without errors.
+
 ## Next actions
 
 - **CI/CD**: Настроить GitHub Actions CI/CD для автоматического деплоя Lambda при мердже в main.

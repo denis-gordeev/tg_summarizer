@@ -33,9 +33,6 @@ def _parse_event_flag(value: Any, default: bool) -> bool:
 
 
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
-    from config import validate_config
-    validate_config()
-
     request_id = getattr(context, 'aws_request_id', None) if context else None
     if request_id:
         logger.info("Lambda invocation %s", request_id)
@@ -68,6 +65,9 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         deadline = time.monotonic() + 180 - SAFETY_MARGIN_SECONDS
 
     try:
+        from config import validate_config
+        validate_config()
+
         # Run the summarizer
         asyncio.run(
             run_summarizer(

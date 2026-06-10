@@ -47,13 +47,18 @@ def invalidate_cache(filepath: str = None) -> None:
 
 
 def _load_processed_messages(filepath: str) -> Set[str]:
-    """Load processed message IDs from a history file."""
+    """Load processed message IDs from a history file (cached)."""
+    cache_key = _cache_key(filepath)
+    if cache_key in _cache:
+        return _cache[cache_key]
+
     data = load_json_file(filepath, {"processed_messages": []})
     processed_messages = set()
     for msg_data in data.get("processed_messages", []):
         msg = MessageInfo.from_dict(msg_data)
         msg_id = f"{msg.channel}_{msg.message_id}_{text_hash(msg.text)}"
         processed_messages.add(msg_id)
+    _cache[cache_key] = processed_messages
     return processed_messages
 
 
@@ -329,7 +334,7 @@ def should_run_group_summarization() -> bool:
         return time_since_last_run > GROUP_SUMMARIZATION_INTERVAL_SECONDS
     except (ValueError, TypeError) as e:
         logger.error("Error parsing group last run time: %s", e)
-        return False
+        return True
 
 
 def update_group_last_run() -> None:
@@ -447,7 +452,8 @@ async def update_existing_summary(
 Ответь только обновлённое саммари."""
 
     truncated_summary = summary.content[:UPDATE_SUMMARY_MAX_INPUT_CHARS]
-    user_content = f"Саммари:\n{truncated_summary}\n\nНовое сообщение:\n{new_message.text}"
+    truncated_msg = new_message.text[:UPDATE_SUMMARY_MAX_INPUT_CHARS]
+    user_content = f"Саммари:\n{truncated_summary}\n\nНовое сообщение:\n{truncated_msg}"
 
     try:
         updated_content = await call_openai(update_prompt, user_content, max_tokens=UPDATE_SUMMARY_MAX_TOKENS, temperature=0)

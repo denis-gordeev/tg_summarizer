@@ -14,7 +14,6 @@ class ShouldRunGroupSummarizationLogicTests(unittest.TestCase):
 
     def test_time_calculation_logic(self):
         """Test the time calculation logic without file I/O."""
-        # Simulate the logic from should_run_group_summarization
         def check_should_run(last_run_str):
             if not last_run_str:
                 return True
@@ -27,24 +26,99 @@ class ShouldRunGroupSummarizationLogicTests(unittest.TestCase):
                 now = datetime.now(timezone.utc)
                 time_since_last_run = (now - last_run).total_seconds()
                 
-                # 24 hours = 86400 seconds
                 return time_since_last_run > 86400
             except (ValueError, TypeError):
-                return False
+                return True
         
-        # Test empty string
         self.assertTrue(check_should_run(""))
         
-        # Test recent run (12 hours ago)
         recent = (datetime.now(timezone.utc) - timedelta(hours=12)).isoformat()
         self.assertFalse(check_should_run(recent))
         
-        # Test old run (30 hours ago)
         old = (datetime.now(timezone.utc) - timedelta(hours=30)).isoformat()
         self.assertTrue(check_should_run(old))
         
-        # Test malformed timestamp
-        self.assertFalse(check_should_run("not-a-timestamp"))
+        self.assertTrue(check_should_run("not-a-timestamp"))
+
+
+class ShouldRunGroupSummarizationParseErrorTests(unittest.TestCase):
+    """Tests for should_run_group_summarization returning True on parse errors."""
+
+    def _import_hm_with_stubs(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_channel_manager = types.ModuleType("channel_manager")
+        fake_channel_manager.create_channel_abbreviation = lambda ch: "AB"
+        fake_channel_manager.load_channel_abbreviations = lambda: {}
+        fake_models = types.ModuleType("models")
+        fake_models.SummaryInfo = type("FakeSummaryInfo", (), {"__init__": lambda self, **kw: None, "to_dict": lambda self: {}})
+        fake_models.MessageInfo = type("MessageInfo", (), {})
+        fake_prompts = types.ModuleType("prompts")
+        fake_prompts.prompts = types.SimpleNamespace()
+        fake_utils = types.ModuleType("utils")
+        fake_utils.call_openai = MagicMock()
+        fake_utils.extract_links = lambda text: []
+        fake_utils.load_json_file = lambda *a, **kw: {}
+        fake_utils.save_json_file = lambda *a, **kw: True
+        fake_utils.now_iso = lambda: "2026-01-01T00:00:00"
+        fake_utils.extract_all_channels = lambda text: []
+        fake_utils.text_hash = lambda text: "abc123"
+        fake_telegram_client = types.ModuleType("telegram_client")
+        fake_telegram_client.user_client = None
+        fake_telegram_client.clients_loop = None
+
+        stubs = {
+            "dotenv": fake_dotenv,
+            "channel_manager": fake_channel_manager,
+            "models": fake_models,
+            "prompts": fake_prompts,
+            "utils": fake_utils,
+            "telegram_client": fake_telegram_client,
+        }
+
+        return stubs
+
+    def test_returns_true_on_malformed_timestamp(self):
+        """should_run_group_summarization should return True on parse error."""
+        import tempfile
+        import os
+
+        stubs = self._import_hm_with_stubs()
+        with patch.dict(sys.modules, stubs), \
+             patch.dict(os.environ, {"GROUP_LAST_RUN_FILE": ""}, clear=False):
+            sys.modules.pop("config", None)
+            sys.modules.pop("history_manager", None)
+            config = importlib.import_module("config")
+            config.GROUP_LAST_RUN_FILE = "/tmp/test_group_last_run_malformed.json"
+            config.GROUP_SUMMARIZATION_INTERVAL_SECONDS = 86400
+            sys.modules["config"] = config
+
+            with open("/tmp/test_group_last_run_malformed.json", "w") as f:
+                json.dump({"last_run": "not-a-timestamp"}, f)
+
+            hm = importlib.import_module("history_manager")
+            result = hm.should_run_group_summarization()
+            self.assertTrue(result)
+
+        os.remove("/tmp/test_group_last_run_malformed.json")
+
+    def test_returns_true_when_file_missing(self):
+        """should_run_group_summarization should return True when file is missing."""
+        import os
+
+        stubs = self._import_hm_with_stubs()
+        with patch.dict(sys.modules, stubs), \
+             patch.dict(os.environ, {"GROUP_LAST_RUN_FILE": ""}, clear=False):
+            sys.modules.pop("config", None)
+            sys.modules.pop("history_manager", None)
+            config = importlib.import_module("config")
+            config.GROUP_LAST_RUN_FILE = "/tmp/nonexistent_group_last_run.json"
+            config.GROUP_SUMMARIZATION_INTERVAL_SECONDS = 86400
+            sys.modules["config"] = config
+
+            hm = importlib.import_module("history_manager")
+            result = hm.should_run_group_summarization()
+            self.assertTrue(result)
 
 
 class HistoryContextLogicTests(unittest.TestCase):

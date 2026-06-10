@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import re
+import time
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from typing import List, Optional, Set
@@ -26,11 +27,24 @@ from config import (
     UPDATE_MATCH_MAX_SUMMARIES,
     UPDATE_MATCH_MAX_CHARS_PER_SUMMARY,
 )
-from history_manager import get_recent_summaries_context, get_recent_group_summaries_context
+from history_manager import (
+    load_summaries_history,
+    load_group_summaries_history,
+    save_summarization_history,
+    save_group_summarization_history,
+    save_summary_to_history,
+    save_group_summary_to_history,
+    update_group_last_run,
+    find_relevant_summary_for_update,
+    update_existing_summary,
+    save_updated_summary,
+)
 from channel_manager import (
     create_channel_abbreviation,
+    save_discovered_channel,
 )
 from prompts import prompts
+from config import ENABLE_SUMMARY_UPDATES
 
 logger = logging.getLogger(__name__)
 
@@ -167,7 +181,7 @@ async def _check_coverage_and_match(
     user_content = f"""Предыдущие дайджесты{label}:
 {"".join(context_parts)}
 Новое сообщение:
-{msg.text}
+{msg.text[:NLP_CHECK_MAX_INPUT_CHARS]}
 
 Совпадает ли ТЕМА и ОСНОВНАЯ ИДЕЯ нового сообщения с одним из дайджестов?
 - Та же тема → номер дайджеста ({numbers})
@@ -186,30 +200,6 @@ async def _check_coverage_and_match(
     except Exception as e:
         logger.error("Error in coverage+match check: %s", e)
     return None
-
-
-async def is_message_covered_in_summaries(msg: MessageInfo, context: str = None) -> bool:
-    """Проверяет, была ли тема сообщения уже освещена в предыдущих саммари."""
-    if context is None:
-        context = get_recent_summaries_context()
-    return await _check_coverage(
-        msg,
-        context,
-        prompts.SUMMARY_COVERAGE_CHECK_PROMPT,
-        "",
-    )
-
-
-async def is_message_covered_in_group_summaries(msg: MessageInfo, context: str = None) -> bool:
-    """Проверяет, была ли тема сообщения уже освещена в предыдущих саммари групп."""
-    if context is None:
-        context = get_recent_group_summaries_context()
-    return await _check_coverage(
-        msg,
-        context,
-        prompts.GROUP_SUMMARY_COVERAGE_CHECK_PROMPT,
-        " групп",
-    )
 
 
 _AD_PATTERN = re.compile("|".join(re.escape(kw) for kw in NLP_AD_KEYWORDS), re.IGNORECASE)
@@ -384,15 +374,6 @@ async def _save_processing_results(
     is_group: bool,
 ) -> None:
     """Save history, discovered channels, and summary info."""
-    from history_manager import (
-        save_summarization_history,
-        save_group_summarization_history,
-        save_summary_to_history,
-        save_group_summary_to_history,
-        update_group_last_run,
-    )
-    from channel_manager import save_discovered_channel
-
     if all_checked_messages:
         if is_group:
             save_group_summarization_history(all_checked_messages)
@@ -417,7 +398,8 @@ async def _save_processing_results(
 
 
 async def process_messages(
-    messages: List[MessageInfo], save_changes: bool, send_message: bool, is_group: bool = False
+    messages: List[MessageInfo], save_changes: bool, send_message: bool, is_group: bool = False,
+    _deadline: float = 0.0,
 ):
     """Processes a list of messages: filters, deduplicates, summarizes, and sends."""
     from telegram_client import send_message_to_target_channel_with_id
@@ -432,6 +414,10 @@ async def process_messages(
     all_checked_messages: List[MessageInfo] = []
     discovered_channels: set = set()
     nlp_related_messages: List[MessageInfo] = []
+
+    if _deadline and time.monotonic() > _deadline:
+        logger.warning("Deadline exceeded before NLP checks in %s — skipping", stream_label)
+        return
 
     sem = asyncio.Semaphore(NLP_CONCURRENT_CHECKS)
 
@@ -468,24 +454,25 @@ async def process_messages(
         logger.info("After intra-batch dedup: %d unique messages from %s", len(unique_messages), stream_label)
 
     if ENABLE_SUMMARIES_DEDUPLICATION and unique_messages:
-        from history_manager import load_summaries_history, load_group_summaries_history
+        if _deadline and time.monotonic() > _deadline:
+            logger.warning("Deadline exceeded before coverage checks in %s — skipping dedup", stream_label)
+        else:
+            summaries = load_group_summaries_history() if is_group else load_summaries_history()
 
-        summaries = load_group_summaries_history() if is_group else load_summaries_history()
+            if summaries:
+                async def _check_msg_coverage(msg: MessageInfo) -> Optional[SummaryInfo]:
+                    async with sem:
+                        return await _check_coverage_and_match(msg, summaries, is_group)
 
-        if summaries:
-            async def _check_msg_coverage(msg: MessageInfo) -> Optional[SummaryInfo]:
-                async with sem:
-                    return await _check_coverage_and_match(msg, summaries, is_group)
+                coverage_results = await asyncio.gather(
+                    *[_check_msg_coverage(msg) for msg in unique_messages]
+                )
 
-            coverage_results = await asyncio.gather(
-                *[_check_msg_coverage(msg) for msg in unique_messages]
-            )
-
-            for msg, matching_summary in zip(unique_messages, coverage_results):
-                msg.is_covered_in_summaries = matching_summary is not None
-                logger.debug("is_covered_in_summaries: %s", msg.is_covered_in_summaries)
-                if matching_summary is not None:
-                    await process_covered_message(msg, matching_summary=matching_summary, is_group=is_group)
+                for msg, matching_summary in zip(unique_messages, coverage_results):
+                    msg.is_covered_in_summaries = matching_summary is not None
+                    logger.debug("is_covered_in_summaries: %s", msg.is_covered_in_summaries)
+                    if matching_summary is not None:
+                        await process_covered_message(msg, matching_summary=matching_summary, is_group=is_group)
 
     unique_messages = [
         msg for msg in unique_messages
@@ -495,11 +482,14 @@ async def process_messages(
     summary = None
     message_id = None
     if unique_messages:
-        summary_fn = summarize_group_text if is_group else summarize_text
-        summary = await summary_fn(unique_messages)
-        if summary and send_message:
-            message_id = await send_message_to_target_channel_with_id(summary)
-            logger.info("%s summary sent with ID: %s", "Group" if is_group else "Channel", message_id)
+        if _deadline and time.monotonic() > _deadline:
+            logger.warning("Deadline exceeded before summary generation in %s — skipping", stream_label)
+        else:
+            summary_fn = summarize_group_text if is_group else summarize_text
+            summary = await summary_fn(unique_messages)
+            if summary and send_message:
+                message_id = await send_message_to_target_channel_with_id(summary)
+                logger.info("%s summary sent with ID: %s", "Group" if is_group else "Channel", message_id)
 
     if save_changes:
         await _save_processing_results(
@@ -510,15 +500,16 @@ async def process_messages(
 
 async def process_covered_message(msg: MessageInfo, matching_summary: SummaryInfo = None, is_group: bool = False):
     """Process a message that is already covered in previous summaries."""
-    from config import ENABLE_SUMMARY_UPDATES
-    from history_manager import (
-        update_existing_summary,
-        save_updated_summary,
-    )
-
     if not ENABLE_SUMMARY_UPDATES:
         logger.debug("Skipping already covered message: %s...", msg.text[:50])
         return
+
+    if matching_summary is not None and matching_summary.message_id is not None:
+        summaries = load_group_summaries_history() if is_group else load_summaries_history()
+        for s in summaries:
+            if s.message_id == matching_summary.message_id:
+                matching_summary = s
+                break
 
     logger.debug("Checking summary update for: %s...", msg.text[:50])
 

@@ -101,6 +101,7 @@ async def _fetch_from_sources(
             break
         logger.info("Fetching messages from %s %s", source_label, source)
         source_count = 0
+        total_examined = 0
         try:
             async for msg in user_client.iter_messages(
                 source, offset_date=None, min_id=0, reverse=False
@@ -109,6 +110,10 @@ async def _fetch_from_sources(
                     logger.warning("Deadline exceeded during fetch from %s %s — returning %d messages fetched so far", source_label, source, len(all_msgs))
                     break
                 if msg.date < since:
+                    break
+                total_examined += 1
+                if total_examined > MAX_MESSAGES_PER_SOURCE * 3:
+                    logger.debug("Reached total examined limit (%d) for %s %s", total_examined, source_label, source)
                     break
                 if source_count >= MAX_MESSAGES_PER_SOURCE:
                     logger.debug("Reached MAX_MESSAGES_PER_SOURCE (%d) for %s %s", MAX_MESSAGES_PER_SOURCE, source_label, source)

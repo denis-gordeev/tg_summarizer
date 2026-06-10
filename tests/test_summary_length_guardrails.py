@@ -40,13 +40,29 @@ def _stub_dependencies():
     fake_channel_manager.load_banned_channels = lambda: []
     fake_channel_manager.create_channel_abbreviation = lambda channel: channel.lstrip("@")[:4]
     fake_channel_manager.get_all_source_channels = lambda: []
+    fake_channel_manager.save_discovered_channel = lambda ch: None
     fake_history_manager = types.ModuleType("history_manager")
     fake_history_manager.get_recent_summaries_context = lambda: ""
     fake_history_manager.get_recent_group_summaries_context = lambda: ""
+    fake_history_manager.load_summaries_history = lambda: []
+    fake_history_manager.load_group_summaries_history = lambda: []
+    fake_history_manager.save_summarization_history = lambda *a, **kw: None
+    fake_history_manager.save_group_summarization_history = lambda *a, **kw: None
+    fake_history_manager.save_summary_to_history = lambda *a, **kw: None
+    fake_history_manager.save_group_summary_to_history = lambda *a, **kw: None
+    fake_history_manager.update_group_last_run = lambda: None
+    fake_history_manager.find_relevant_summary_for_update = lambda *a, **kw: None
+    fake_history_manager.update_existing_summary = lambda *a, **kw: None
+    fake_history_manager.save_updated_summary = lambda *a, **kw: None
     fake_prompts = types.ModuleType("prompts")
     fake_prompts.prompts = types.SimpleNamespace(
         CHANNEL_SUMMARY_PROMPT="{max_summary_length}",
         GROUP_SUMMARY_PROMPT="{max_summary_length}",
+        NLP_RELEVANCE_PROMPT="nlp",
+        SUMMARY_COVERAGE_CHECK_PROMPT="cov",
+        GROUP_SUMMARY_COVERAGE_CHECK_PROMPT="gcov",
+        COVERAGE_AND_MATCH_PROMPT="covmatch",
+        FIND_RELEVANT_SUMMARY_PROMPT="find",
     )
     return {
         "dotenv": fake_dotenv,
