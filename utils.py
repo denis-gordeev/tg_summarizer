@@ -125,18 +125,23 @@ async def call_openai(
 
     for attempt in range(max_retries + 1):
         try:
+            t0 = asyncio.get_event_loop().time()
             response = await openai_client.chat.completions.create(**kwargs)
+            elapsed = asyncio.get_event_loop().time() - t0
             result = response.choices[0].message.content
             if result is None:
                 return ""
             if hasattr(response, 'usage') and response.usage:
                 logger.info(
-                    "OpenAI usage: model=%s prompt=%d completion=%d total=%d",
+                    "OpenAI usage: model=%s prompt=%d completion=%d total=%d latency=%.1fs",
                     OPENAI_MODEL,
                     response.usage.prompt_tokens,
                     response.usage.completion_tokens,
                     response.usage.total_tokens,
+                    elapsed,
                 )
+            else:
+                logger.info("OpenAI call: model=%s latency=%.1fs", OPENAI_MODEL, elapsed)
             return result.strip()
         except (RateLimitError, APIConnectionError) as e:
             if attempt < max_retries:

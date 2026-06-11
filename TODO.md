@@ -2,6 +2,25 @@
 
 Живой список задач для автоматических раундов.
 
+## Completed in 2026-06-11 round (Lambda hardening round 17, dead code removal, prompt tightening, observability)
+
+- **Dead code removal**: Removed [`_check_coverage()`](message_processor.py) — superseded by [`_check_coverage_and_match()`](message_processor.py) since round 15 (2026-06-10). The old function was only called from tests, never from production code.
+- **Dead code removal**: Removed [`find_relevant_summary_for_update()`](history_manager.py) and its fallback in [`process_covered_message()`](message_processor.py) — since the coverage+match merge in round 15, `process_covered_message` is always called with a `matching_summary`, making the separate find-relevant call unreachable dead code. Now returns early with a debug log when `matching_summary is None`.
+- **Dead code removal**: Removed `SUMMARY_COVERAGE_CHECK_PROMPT`, `GROUP_SUMMARY_COVERAGE_CHECK_PROMPT`, and `FIND_RELEVANT_SUMMARY_PROMPT` from [`prompts.py`](prompts.py) — only used by the removed `_check_coverage` and `find_relevant_summary_for_update`.
+- **Dead code removal**: Removed [`get_recent_summaries_context()`](history_manager.py), [`get_recent_group_summaries_context()`](history_manager.py), and shared helper [`_get_recent_summaries_context()`](history_manager.py) — only used by the removed `_check_coverage`. The coverage+match check builds its own context inline.
+- **Dead code removal**: Removed `COVERAGE_CHECK_MAX_SUMMARIES` and `COVERAGE_CHECK_MAX_CHARS_PER_SUMMARY` from [`config.py`](config.py) — only used by the removed context functions. `_check_coverage_and_match` uses `UPDATE_MATCH_MAX_SUMMARIES` and `UPDATE_MATCH_MAX_CHARS_PER_SUMMARY` instead.
+- **Dead code removal**: Removed unused `prompts` import and `json` import from [`history_manager.py`](history_manager.py).
+- **Prompt optimization**: Tightened [`COVERAGE_AND_MATCH_PROMPT`](prompts.py) — removed redundant "Игнорируй мелкие детали" line (implied by "существенные детали → НЕТ"), generalized "Разные модели на Hugging Face" to "Разные модели/версии" (broader and shorter). Reduced token count by ~20%.
+- **Prompt optimization**: Tightened [`NLP_RELEVANCE_PROMPT`](prompts.py) — shortened BigTech/AI-assistents list from 11 company/product names to 5 representative ones (OpenAI, Anthropic, Google, Meta, DeepSeek). LLM already knows the full list; enumerating wastes input tokens.
+- **Observability**: Added response latency logging in [`call_openai()`](utils.py) — logs `latency=X.Xs` alongside existing token usage metrics. When usage data is unavailable, logs `OpenAI call: model=X latency=X.Xs`. Enables CloudWatch-based OpenAI API latency monitoring and trend detection.
+- **Tests updated**: Removed 8 obsolete tests (3 `_check_coverage` tests, 1 `COVERAGE_CHECK_MAX` config test, 1 `find_relevant_summary_context_truncation` test, 2 shared context helper tests, 1 `recent_summaries_context_includes_date` test). Added 3 new tests:
+  - `test_skips_update_when_no_matching_summary`: verifies `process_covered_message` skips update when `matching_summary is None`
+  - `test_returns_none_on_digit_out_of_range`: verifies `_check_coverage_and_match` handles out-of-range digit response
+  - `test_call_openai_logs_latency`: verifies latency logging in `call_openai`
+  - Total test count: 166 (down from 171 — net -5 from 8 removed + 3 added)
+- Updated test stubs in [`tests/test_digest_post_processing.py`](tests/test_digest_post_processing.py), [`tests/test_summary_length_guardrails.py`](tests/test_summary_length_guardrails.py), [`tests/test_process_messages_integration.py`](tests/test_process_messages_integration.py) to remove references to deleted functions and prompts.
+- All 166 tests pass without errors.
+
 ## Completed in 2026-06-02 round 2 (Lambda hardening round 8, timeouts, limits, cost optimization)
 
 - **OpenAI request timeout**: Added `OPENAI_REQUEST_TIMEOUT` config (default 30s) in [`config.py`](config.py). Applied in [`call_openai()`](utils.py) — `AsyncOpenAI` client now created with `timeout=float(OPENAI_REQUEST_TIMEOUT)`. Previously, the default httpx timeout was 10 minutes, which could cause the entire Lambda invocation to time out on a single hung OpenAI request.
@@ -530,8 +549,9 @@
 
 - **CI/CD**: Настроить GitHub Actions CI/CD для автоматического деплоя Lambda при мердже в main.
 - **Secrets management**: Перенести реальные секреты в AWS SSM Parameter Store (инфраструктура готова — `*_SSM_PATH` env vars и IAM policies в template.yaml).
-- **Prompt A/B testing**: Продолжить тестирование промптов — отслеживать качество саммари после снижения `max_tokens` до 4000 и при необходимости корректировать.
+- **Prompt A/B testing**: Продолжить тестирование промптов — отслеживать качество саммари после снижения `max_tokens` и при необходимости корректировать.
 - **OpenAI response streaming**: Рассмотреть streaming API для снижения perceived latency (но не стоимости — `max_tokens` уже ограничен).
-- **Intra-batch LLM dedup**: Рассмотреть добавление LLM-проверки для сообщений с ratio между SIMILARITY_LLM_LOWER (0.7) и SIMILARITY_LLM_UPPER (0.95) внутри `_remove_intra_batch_duplicates` — позволит ловить больше дубликатов за дополнительные токены. (Примечание: `are_messages_duplicate` и `_remove_duplicates_generic` удалены в раунде 2026-06-08 — при необходимости восстановления, см. git history.)
-- **Coverage+match accuracy**: Отслеживать точность `_check_coverage_and_match` — если LLM иногда выбирает не лучший дайджест для обновления, можно увеличить `UPDATE_MATCH_MAX_CHARS_PER_SUMMARY` или добавить fallback на `find_relevant_summary_for_update`.
+- **Intra-batch LLM dedup**: Рассмотреть добавление LLM-проверки для сообщений с ratio между SIMILARITY_LLM_LOWER (0.7) и SIMILARITY_LLM_UPPER (0.95) внутри `_remove_intra_batch_duplicates` — позволит ловить больше дубликатов за дополнительные токены.
+- **Coverage+match accuracy**: Отслеживать точность `_check_coverage_and_match` — если LLM иногда выбирает не лучший дайджест для обновления, можно увеличить `UPDATE_MATCH_MAX_CHARS_PER_SUMMARY`.
 - **NLP pre-filter tuning**: Мониторить процент сообщений, отклонённых `_is_obvious_non_nlp` — если ложноположительных срабатываний много, сузить список `NLP_AD_KEYWORDS` или добавить whitelist.
+- **OpenAI latency alerting**: Добавить CloudWatch alarm на OpenAI latency (используя новый `latency` лог в `call_openai`) — если средний latency превышает порог, алертить.

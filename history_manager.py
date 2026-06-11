@@ -1,5 +1,4 @@
 import asyncio
-import json
 import logging
 import os
 from datetime import datetime, timedelta, timezone
@@ -19,15 +18,10 @@ from config import (
     MAX_GROUP_SUMMARIES,
     GROUP_SUMMARIZATION_INTERVAL_SECONDS,
     RESTORE_HISTORY_DAYS,
-    COVERAGE_CHECK_MAX_SUMMARIES,
-    COVERAGE_CHECK_MAX_CHARS_PER_SUMMARY,
-    UPDATE_MATCH_MAX_SUMMARIES,
-    UPDATE_MATCH_MAX_CHARS_PER_SUMMARY,
     UPDATE_SUMMARY_MAX_TOKENS,
     UPDATE_SUMMARY_MAX_INPUT_CHARS,
 )
 from models import MessageInfo, SummaryInfo
-from prompts import prompts
 from utils import call_openai, extract_links, load_json_file, save_json_file, now_iso, text_hash
 
 logger = logging.getLogger(__name__)
@@ -344,91 +338,6 @@ def update_group_last_run() -> None:
         "last_updated": now_iso(),
     }
     save_json_file(GROUP_LAST_RUN_FILE, data, "Error updating group last run")
-
-
-def _get_recent_summaries_context(
-    summaries: list, days: int, max_summaries: int, max_chars: int,
-) -> str:
-    """Shared helper to build truncated context from recent summaries."""
-    if not summaries:
-        return ""
-    cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
-    recent_summaries = [s for s in summaries if s.date >= cutoff_date]
-    if not recent_summaries:
-        return ""
-    recent_summaries = recent_summaries[-max_summaries:]
-    context_parts = []
-    for summary in recent_summaries:
-        truncated = summary.content[:max_chars]
-        context_parts.append(f"Дата: {summary.date.strftime('%Y-%m-%d')}")
-        context_parts.append(f"Содержание: {truncated}")
-        context_parts.append("---")
-    return "\n".join(context_parts)
-
-
-def get_recent_summaries_context(days: int = 3) -> str:
-    """Возвращает контекст последних саммари для дедупликации."""
-    summaries = load_summaries_history()
-    return _get_recent_summaries_context(
-        summaries, days, COVERAGE_CHECK_MAX_SUMMARIES, COVERAGE_CHECK_MAX_CHARS_PER_SUMMARY,
-    )
-
-
-def get_recent_group_summaries_context(days: int = 7) -> str:
-    """Получает контекст последних саммари из групп для дедупликации."""
-    summaries = load_group_summaries_history()
-    return _get_recent_summaries_context(
-        summaries, days, COVERAGE_CHECK_MAX_SUMMARIES, COVERAGE_CHECK_MAX_CHARS_PER_SUMMARY,
-    )
-
-
-async def find_relevant_summary_for_update(
-    msg: MessageInfo, is_group: bool = False
-) -> Optional[SummaryInfo]:
-    """
-    Находит наиболее подходящее существующее саммари для обновления.
-    Возвращает None, если подходящее саммари не найдено.
-    """
-    if is_group:
-        summaries = load_group_summaries_history()
-    else:
-        summaries = load_summaries_history()
-
-    if not summaries:
-        return None
-
-    recent_summaries = summaries[-UPDATE_MATCH_MAX_SUMMARIES:]
-
-    summaries_text = ""
-    for i, summary in enumerate(recent_summaries, 1):
-        truncated = summary.content[:UPDATE_MATCH_MAX_CHARS_PER_SUMMARY]
-        summaries_text += f"Саммари {i}:\n{truncated}\n\n"
-
-    num_summaries = len(recent_summaries)
-    numbers = ", ".join(str(i) for i in range(1, num_summaries + 1))
-
-    user_content = f"""Существующие саммари:
-{summaries_text}
-
-Новое сообщение:
-{msg.text}
-
-В каком саммари ({numbers}) лучше всего добавить ссылку на это сообщение? 
-Если ни одно не подходит, ответьте "НЕТ".
-Отвечайте только номером ({numbers}) или "НЕТ"."""
-
-    try:
-        result = await call_openai(prompts.FIND_RELEVANT_SUMMARY_PROMPT, user_content, max_tokens=3, temperature=0)
-        result = result.strip().upper()
-
-        if result.isdigit():
-            index = int(result) - 1
-            if 0 <= index < len(recent_summaries):
-                return recent_summaries[index]
-    except Exception as e:
-        logger.error("Error finding relevant summary for update: %s", e)
-
-    return None
 
 
 async def update_existing_summary(

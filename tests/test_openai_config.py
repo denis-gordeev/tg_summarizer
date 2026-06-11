@@ -533,6 +533,60 @@ class OpenAITokenUsageLoggingTests(unittest.IsolatedAsyncioTestCase):
                           if "usage" in str(call).lower() or "prompt" in str(call).lower()]
             self.assertTrue(len(usage_logs) > 0, "Expected a token usage log message")
 
+    async def test_call_openai_logs_latency(self):
+        """call_openai should log response latency."""
+        import importlib
+        import sys
+        import types
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_openai = types.ModuleType("openai")
+
+        fake_usage = MagicMock()
+        fake_usage.prompt_tokens = 10
+        fake_usage.completion_tokens = 5
+        fake_usage.total_tokens = 15
+
+        class FakeAsyncOpenAI:
+            def __init__(self, api_key, **kwargs):
+                self.api_key = api_key
+                self.chat = types.SimpleNamespace(
+                    completions=types.SimpleNamespace(
+                        create=AsyncMock(return_value=type(
+                            "Response", (),
+                            {
+                                "choices": [type("Choice", (), {"message": type("Message", (), {"content": "ok"})()})()],
+                                "usage": fake_usage,
+                            },
+                        )())
+                    )
+                )
+
+        class FakeOpenAIError(Exception):
+            pass
+
+        fake_openai.AsyncOpenAI = FakeAsyncOpenAI
+        fake_openai.OpenAI = FakeAsyncOpenAI
+        fake_openai.APIError = FakeOpenAIError
+        fake_openai.RateLimitError = type("RateLimitError", (FakeOpenAIError,), {"status_code": None})
+        fake_openai.APIConnectionError = type("APIConnectionError", (FakeOpenAIError,), {})
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv, "openai": fake_openai}):
+            with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+                sys.modules.pop("config", None)
+                sys.modules.pop("utils", None)
+                config = importlib.import_module("config")
+                utils = importlib.import_module("utils")
+
+        with patch.object(utils.logger, "info") as mock_log:
+            result = await utils.call_openai("system", "user")
+            self.assertEqual(result, "ok")
+            latency_logs = [call for call in mock_log.call_args_list
+                            if "latency" in str(call).lower()]
+            self.assertTrue(len(latency_logs) > 0, "Expected a latency log message")
+
 
 class UpdateSummaryMaxInputCharsTests(unittest.TestCase):
     """Tests for UPDATE_SUMMARY_MAX_INPUT_CHARS config."""

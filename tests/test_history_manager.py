@@ -192,27 +192,6 @@ class HistoryContextLogicTests(unittest.TestCase):
         self.assertIn("Summary 19", result)
         self.assertNotIn("Summary 0", result)
 
-    def test_coverage_check_limits_from_config(self):
-        """Verify that COVERAGE_CHECK_MAX_SUMMARIES and COVERAGE_CHECK_MAX_CHARS_PER_SUMMARY exist in config."""
-        import importlib
-        import sys
-        import types
-        from unittest.mock import patch
-        import os
-
-        fake_dotenv = types.ModuleType("dotenv")
-        fake_dotenv.load_dotenv = lambda: None
-
-        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
-            with patch.dict(os.environ, {}, clear=True):
-                sys.modules.pop("config", None)
-                config = importlib.import_module("config")
-
-        self.assertIsInstance(config.COVERAGE_CHECK_MAX_SUMMARIES, int)
-        self.assertIsInstance(config.COVERAGE_CHECK_MAX_CHARS_PER_SUMMARY, int)
-        self.assertGreater(config.COVERAGE_CHECK_MAX_SUMMARIES, 0)
-        self.assertGreater(config.COVERAGE_CHECK_MAX_CHARS_PER_SUMMARY, 0)
-
     def test_update_match_limits_from_config(self):
         """Verify that UPDATE_MATCH_MAX_SUMMARIES and UPDATE_MATCH_MAX_CHARS_PER_SUMMARY exist in config."""
         import importlib
@@ -234,28 +213,6 @@ class HistoryContextLogicTests(unittest.TestCase):
         self.assertGreater(config.UPDATE_MATCH_MAX_SUMMARIES, 0)
         self.assertGreater(config.UPDATE_MATCH_MAX_CHARS_PER_SUMMARY, 0)
 
-    def test_find_relevant_summary_context_truncation(self):
-        """Verify that find_relevant_summary_for_update truncates context."""
-        max_summaries = 5
-        max_chars = 500
-
-        def build_context(summaries):
-            recent = summaries[-max_summaries:]
-            parts = []
-            for i, s in enumerate(recent, 1):
-                truncated = s["content"][:max_chars]
-                parts.append(f"Саммари {i}:\n{truncated}\n\n")
-            return "".join(parts)
-
-        many_summaries = [
-            {"content": f"summary_{i}: " + "X" * 1000, "date": datetime.now(timezone.utc)}
-            for i in range(20)
-        ]
-        result = build_context(many_summaries)
-        self.assertIn("Саммари 5:", result)
-        self.assertIn("summary_19", result)
-        self.assertNotIn("summary_0", result)
-        self.assertEqual(len(result.split("Саммари")), max_summaries + 1)
 
 
 class RunAsyncWithLoopTests(unittest.TestCase):
@@ -934,108 +891,6 @@ class SaveUpdatedSummaryNoMatchTests(unittest.TestCase):
 
                 asyncio.run(_test())
                 stubs["utils"].save_json_file.assert_not_called()
-
-
-class ContextFormattingConsistencyTests(unittest.TestCase):
-    """Tests for context formatting consistency between channel and group coverage checks."""
-
-    def test_recent_summaries_context_includes_date(self):
-        """get_recent_summaries_context should include date like group version."""
-        max_summaries = 10
-        max_chars = 300
-
-        def extract_context(summaries, days=3):
-            if not summaries:
-                return ""
-            cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
-            recent = [s for s in summaries if s['date'] >= cutoff_date]
-            if not recent:
-                return ""
-            recent = recent[-max_summaries:]
-            context_parts = []
-            for summary in recent:
-                truncated = summary['content'][:max_chars]
-                context_parts.append(f"Дата: {summary['date'].strftime('%Y-%m-%d')}")
-                context_parts.append(f"Содержание: {truncated}")
-                context_parts.append("---")
-            return "\n".join(context_parts)
-
-        recent_summaries = [
-            {
-                'content': "AI breakthrough",
-                'date': datetime.now(timezone.utc) - timedelta(hours=12)
-            }
-        ]
-        result = extract_context(recent_summaries, days=3)
-        self.assertIn("Дата:", result)
-        self.assertIn("Содержание:", result)
-        self.assertIn("---", result)
-        self.assertIn("AI breakthrough", result)
-
-
-class SharedContextHelperTests(unittest.TestCase):
-    """Tests for _get_recent_summaries_context shared helper."""
-
-    def test_shared_helper_returns_empty_for_no_summaries(self):
-        from datetime import datetime, timedelta, timezone
-
-        class FakeSummary:
-            def __init__(self, content, date):
-                self.content = content
-                self.date = date
-
-        def _get_recent_summaries_context(summaries, days, max_summaries, max_chars):
-            if not summaries:
-                return ""
-            cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
-            recent = [s for s in summaries if s.date >= cutoff_date]
-            if not recent:
-                return ""
-            recent = recent[-max_summaries:]
-            parts = []
-            for s in recent:
-                truncated = s.content[:max_chars]
-                parts.append(f"Дата: {s.date.strftime('%Y-%m-%d')}")
-                parts.append(f"Содержание: {truncated}")
-                parts.append("---")
-            return "\n".join(parts)
-
-        self.assertEqual(_get_recent_summaries_context([], days=7, max_summaries=10, max_chars=300), "")
-
-        recent = [FakeSummary("AI news", datetime.now(timezone.utc) - timedelta(hours=1))]
-        result = _get_recent_summaries_context(recent, days=7, max_summaries=10, max_chars=300)
-        self.assertIn("Дата:", result)
-        self.assertIn("AI news", result)
-
-    def test_shared_helper_truncates_long_content(self):
-        from datetime import datetime, timedelta, timezone
-
-        class FakeSummary:
-            def __init__(self, content, date):
-                self.content = content
-                self.date = date
-
-        def _get_recent_summaries_context(summaries, days, max_summaries, max_chars):
-            if not summaries:
-                return ""
-            cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
-            recent = [s for s in summaries if s.date >= cutoff_date]
-            if not recent:
-                return ""
-            recent = recent[-max_summaries:]
-            parts = []
-            for s in recent:
-                truncated = s.content[:max_chars]
-                parts.append(f"Дата: {s.date.strftime('%Y-%m-%d')}")
-                parts.append(f"Содержание: {truncated}")
-                parts.append("---")
-            return "\n".join(parts)
-
-        long_content = "x" * 500
-        recent = [FakeSummary(long_content, datetime.now(timezone.utc) - timedelta(hours=1))]
-        result = _get_recent_summaries_context(recent, days=7, max_summaries=10, max_chars=100)
-        self.assertIn("Содержание: " + "x" * 100, result)
-        self.assertNotIn("x" * 101, result)
 
 
 class UpdateExistingSummaryLLMTests(unittest.TestCase):

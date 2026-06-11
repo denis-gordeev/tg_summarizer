@@ -52,8 +52,6 @@ def _setup_stubs():
 
     # --- Stub history_manager ---
     fake_history = types.ModuleType("history_manager")
-    fake_history.get_recent_summaries_context = MagicMock(return_value="")
-    fake_history.get_recent_group_summaries_context = MagicMock(return_value="")
     fake_history.load_summaries_history = MagicMock(return_value=[])
     fake_history.load_group_summaries_history = MagicMock(return_value=[])
     fake_history.save_summarization_history = MagicMock()
@@ -61,7 +59,6 @@ def _setup_stubs():
     fake_history.save_summary_to_history = MagicMock()
     fake_history.save_group_summary_to_history = MagicMock()
     fake_history.update_group_last_run = MagicMock()
-    fake_history.find_relevant_summary_for_update = AsyncMock(return_value=None)
     fake_history.update_existing_summary = AsyncMock(return_value=None)
     fake_history.save_updated_summary = AsyncMock()
     sys.modules["history_manager"] = fake_history
@@ -85,12 +82,9 @@ def _setup_stubs():
     fake_prompts = types.ModuleType("prompts")
     fake_prompts.prompts = types.SimpleNamespace(
         NLP_RELEVANCE_PROMPT="nlp",
-        SUMMARY_COVERAGE_CHECK_PROMPT="cov",
-        GROUP_SUMMARY_COVERAGE_CHECK_PROMPT="gcov",
         COVERAGE_AND_MATCH_PROMPT="covmatch",
         CHANNEL_SUMMARY_PROMPT="channel summary, max {max_summary_length} chars",
         GROUP_SUMMARY_PROMPT="group summary, max {max_summary_length} chars",
-        FIND_RELEVANT_SUMMARY_PROMPT="find",
     )
     sys.modules["prompts"] = fake_prompts
 
@@ -488,50 +482,6 @@ class SummaryFailureReturnsNoneTests(unittest.TestCase):
             mock_send.assert_not_called()
 
 
-class CoverageCheckStartsWithTests(unittest.TestCase):
-    """Tests for _check_coverage using .startswith('ДА') instead of == 'ДА'."""
-
-    @classmethod
-    def setUpClass(cls):
-        cls._stubs = _setup_stubs()
-        cls._fake_config, cls._fake_history, cls._fake_tg = cls._stubs
-        for mod_name in list(sys.modules.keys()):
-            if mod_name in ("message_processor", "models"):
-                del sys.modules[mod_name]
-        cls.mp = importlib.import_module("message_processor")
-
-    def setUp(self):
-        self.mp.ENABLE_SUMMARIES_DEDUPLICATION = True
-        self._fake_history.get_recent_summaries_context.return_value = "some context"
-
-    def test_coverage_check_matches_da_with_period(self):
-        msg = _make_message(text="AI topic", channel="@ch", message_id=1)
-        context = "some context"
-
-        with patch.object(self.mp, "call_openai", new_callable=AsyncMock) as mock_openai:
-            mock_openai.return_value = "ДА."
-            result = asyncio.run(self.mp._check_coverage(msg, context, "cov", ""))
-            self.assertTrue(result)
-
-    def test_coverage_check_matches_da_with_comma(self):
-        msg = _make_message(text="AI topic", channel="@ch", message_id=1)
-        context = "some context"
-
-        with patch.object(self.mp, "call_openai", new_callable=AsyncMock) as mock_openai:
-            mock_openai.return_value = "ДА, тема совпадает"
-            result = asyncio.run(self.mp._check_coverage(msg, context, "cov", ""))
-            self.assertTrue(result)
-
-    def test_coverage_check_rejects_net(self):
-        msg = _make_message(text="AI topic", channel="@ch", message_id=1)
-        context = "some context"
-
-        with patch.object(self.mp, "call_openai", new_callable=AsyncMock) as mock_openai:
-            mock_openai.return_value = "НЕТ"
-            result = asyncio.run(self.mp._check_coverage(msg, context, "cov", ""))
-            self.assertFalse(result)
-
-
 class IntraBatchDedupBeforeCoverageTests(unittest.TestCase):
     """Tests that intra-batch dedup runs before coverage checks, saving LLM calls."""
 
@@ -749,6 +699,23 @@ class CoverageAndMatchCheckTests(unittest.TestCase):
             result = asyncio.run(self.mp._check_coverage_and_match(msg, summaries, is_group=False))
             self.assertIsNone(result)
 
+    def test_returns_none_on_digit_out_of_range(self):
+        """When LLM returns a digit outside the valid range, return None."""
+        summaries = [
+            SummaryInfo(
+                content="Some summary",
+                date=datetime.now(timezone.utc),
+                message_count=1,
+                channels=["@ch"],
+            ),
+        ]
+        msg = _make_message(text="Some text", channel="@ch", message_id=1)
+
+        with patch.object(self.mp, "call_openai", new_callable=AsyncMock) as mock_openai:
+            mock_openai.return_value = "5"
+            result = asyncio.run(self.mp._check_coverage_and_match(msg, summaries, is_group=False))
+            self.assertIsNone(result)
+
 
 class CoverageMatchTruncationTests(unittest.TestCase):
     """Tests for _check_coverage_and_match truncating msg.text."""
@@ -862,3 +829,27 @@ class StaleSummaryRefreshTests(unittest.TestCase):
             mock_update.assert_called_once()
             call_args = mock_update.call_args
             self.assertEqual(call_args[0][0].content, "Updated content by another message")
+
+
+class ProcessCoveredMessageNoFallbackTests(unittest.TestCase):
+    """Tests for process_covered_message not falling back to find_relevant_summary_for_update."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._stubs = _setup_stubs()
+        cls._fake_config, cls._fake_history, cls._fake_tg = cls._stubs
+        for mod_name in list(sys.modules.keys()):
+            if mod_name in ("message_processor", "models"):
+                del sys.modules[mod_name]
+        cls.mp = importlib.import_module("message_processor")
+
+    def test_skips_update_when_no_matching_summary(self):
+        """process_covered_message should skip update when matching_summary is None."""
+        msg = _make_message(text="New AI details", channel="@ai", message_id=200)
+
+        with patch.object(self.mp, "update_existing_summary", new_callable=AsyncMock) as mock_update:
+            asyncio.run(self.mp.process_covered_message(
+                msg, matching_summary=None, is_group=False,
+            ))
+
+            mock_update.assert_not_called()

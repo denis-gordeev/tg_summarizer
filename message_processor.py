@@ -35,7 +35,6 @@ from history_manager import (
     save_summary_to_history,
     save_group_summary_to_history,
     update_group_last_run,
-    find_relevant_summary_for_update,
     update_existing_summary,
     save_updated_summary,
 )
@@ -130,32 +129,6 @@ def is_message_processed(msg: MessageInfo, processed_messages: Set[str]) -> bool
     text_hash_value = text_hash(msg.text)
     msg_id = f"{msg.channel}_{msg.message_id}_{text_hash_value}"
     return msg_id in processed_messages
-
-
-async def _check_coverage(
-    msg: MessageInfo,
-    recent_summaries: str,
-    prompt,
-    label: str,
-) -> bool:
-    """Check if a message topic is already covered in previous summaries."""
-    if not recent_summaries:
-        return False
-
-    user_content = f"""Предыдущие дайджесты{label}:
-{recent_summaries}
-
-Новое сообщение:
-{msg.text}
-
-Была ли эта тема уже освещена в предыдущих дайджестах{label}?"""
-
-    try:
-        result = await call_openai(prompt, user_content, max_tokens=2, temperature=0)
-        return result.strip().upper().startswith("ДА")
-    except Exception as e:
-        logger.error("Error checking %s coverage: %s", label.strip(), e)
-        return False
 
 
 async def _check_coverage_and_match(
@@ -514,8 +487,8 @@ async def process_covered_message(msg: MessageInfo, matching_summary: SummaryInf
     logger.debug("Checking summary update for: %s...", msg.text[:50])
 
     if matching_summary is None:
-        from history_manager import find_relevant_summary_for_update
-        matching_summary = await find_relevant_summary_for_update(msg, is_group)
+        logger.debug("No matching summary provided — skipping update")
+        return
 
     if matching_summary:
         logger.debug("Found relevant summary for update")
