@@ -1,9 +1,11 @@
 import hashlib
+import json as _json
 import os
 import re
-import json
+import sys
 import asyncio
 import logging
+import time as _time
 from datetime import datetime, timezone
 from openai import AsyncOpenAI, APIError, RateLimitError, APIConnectionError
 from config import OPENAI_API_KEY, OPENAI_DEFAULT_MAX_TOKENS, OPENAI_MODEL, OPENAI_REQUEST_TIMEOUT
@@ -19,7 +21,7 @@ def load_json_file(filepath: str, default: dict = None) -> dict:
         return default
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
-            return json.load(f)
+            return _json.load(f)
     except Exception as e:
         logger.error("Error loading %s: %s", filepath, e)
         return default
@@ -29,7 +31,7 @@ def save_json_file(filepath: str, data: dict, error_msg: str) -> bool:
     """Generic JSON file saver with error handling."""
     try:
         with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+            _json.dump(data, f, ensure_ascii=False, indent=2)
         return True
     except Exception as e:
         logger.error("%s: %s", error_msg, e)
@@ -93,6 +95,33 @@ def extract_all_channels(text: str) -> list[str]:
     return all_channels
 
 
+def _emit_openai_latency(elapsed: float, model: str, total_tokens: int) -> None:
+    """Emit OpenAI latency as a CloudWatch Embedded Metric Format (EMF) metric.
+
+    Prints a JSON line to stdout that CloudWatch automatically processes into a metric.
+    No additional API calls or dependencies required.
+    """
+    try:
+        emf = {
+            "_aws": {
+                "Timestamp": int(_time.time() * 1000),
+                "CloudWatchMetrics": [{
+                    "Namespace": "tg_summarizer/OpenAI",
+                    "Dimensions": [["Function", "Model"]],
+                    "Metrics": [{"Name": "Latency", "Unit": "Seconds"}]
+                }]
+            },
+            "Function": os.getenv("AWS_LAMBDA_FUNCTION_NAME", "local"),
+            "Model": model,
+            "Latency": round(elapsed, 2),
+            "TotalTokens": total_tokens,
+        }
+        sys.stdout.write(_json.dumps(emf, separators=(",", ":")) + "\n")
+        sys.stdout.flush()
+    except Exception:
+        pass
+
+
 async def call_openai(
     system_prompt: str,
     user_content: str,
@@ -131,6 +160,7 @@ async def call_openai(
             result = response.choices[0].message.content
             if result is None:
                 return ""
+            total_tokens = response.usage.total_tokens if hasattr(response, 'usage') and response.usage else 0
             if hasattr(response, 'usage') and response.usage:
                 logger.info(
                     "OpenAI usage: model=%s prompt=%d completion=%d total=%d latency=%.1fs",
@@ -142,6 +172,7 @@ async def call_openai(
                 )
             else:
                 logger.info("OpenAI call: model=%s latency=%.1fs", OPENAI_MODEL, elapsed)
+            _emit_openai_latency(elapsed, OPENAI_MODEL, total_tokens)
             return result.strip()
         except (RateLimitError, APIConnectionError) as e:
             if attempt < max_retries:

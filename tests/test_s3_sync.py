@@ -95,6 +95,62 @@ class S3SyncOperationTests(unittest.TestCase):
             finally:
                 os.chdir(previous_cwd)
 
+    def test_download_logs_summary_counts(self):
+        client = FakeS3Client()
+
+        with tempfile.TemporaryDirectory() as tmpdir, \
+             patch.dict(
+                 os.environ,
+                 {
+                     "STATE_S3_BUCKET": "bucket",
+                     "STATE_S3_PREFIX": "prefix",
+                     "STATE_SYNC_FILES": "state/a.json,state/b.json",
+                 },
+                 clear=False,
+             ), \
+             patch.object(s3_sync, "_get_s3_client", return_value=client), \
+             patch.object(s3_sync.logger, "info") as mock_log:
+            previous_cwd = os.getcwd()
+            os.chdir(tmpdir)
+            try:
+                s3_sync.download_from_s3()
+                summary_logs = [call for call in mock_log.call_args_list
+                                if "S3 download" in str(call)]
+                self.assertTrue(len(summary_logs) > 0, "Expected S3 download summary log")
+                self.assertEqual(summary_logs[0][0][1], 2)
+                self.assertEqual(summary_logs[0][0][2], 0)
+            finally:
+                os.chdir(previous_cwd)
+
+    def test_upload_logs_summary_counts(self):
+        client = FakeS3Client()
+
+        with tempfile.TemporaryDirectory() as tmpdir, \
+             patch.dict(
+                 os.environ,
+                 {
+                     "STATE_S3_BUCKET": "bucket",
+                     "STATE_S3_PREFIX": "prefix",
+                     "STATE_SYNC_FILES": "state/a.json",
+                 },
+                 clear=False,
+             ), \
+             patch.object(s3_sync, "_get_s3_client", return_value=client), \
+             patch.object(s3_sync.logger, "info") as mock_log:
+            previous_cwd = os.getcwd()
+            os.chdir(tmpdir)
+            try:
+                Path("state").mkdir()
+                Path("state/a.json").write_text("content", encoding="utf-8")
+                s3_sync.upload_to_s3()
+                summary_logs = [call for call in mock_log.call_args_list
+                                if "S3 upload" in str(call)]
+                self.assertTrue(len(summary_logs) > 0, "Expected S3 upload summary log")
+                self.assertEqual(summary_logs[0][0][1], 1)
+                self.assertEqual(summary_logs[0][0][2], 0)
+            finally:
+                os.chdir(previous_cwd)
+
 
 class S3ClientCachingTests(unittest.TestCase):
     def test_get_s3_client_caches_client(self):

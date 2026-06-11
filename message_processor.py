@@ -477,26 +477,26 @@ async def process_covered_message(msg: MessageInfo, matching_summary: SummaryInf
         logger.debug("Skipping already covered message: %s...", msg.text[:50])
         return
 
-    if matching_summary is not None and matching_summary.message_id is not None:
-        summaries = load_group_summaries_history() if is_group else load_summaries_history()
-        for s in summaries:
-            if s.message_id == matching_summary.message_id:
-                matching_summary = s
-                break
-
-    logger.debug("Checking summary update for: %s...", msg.text[:50])
-
     if matching_summary is None:
         logger.debug("No matching summary provided — skipping update")
         return
 
-    if matching_summary:
-        logger.debug("Found relevant summary for update")
-        updated_summary = await update_existing_summary(matching_summary, msg, is_group)
-        if updated_summary:
-            await save_updated_summary(matching_summary, updated_summary, is_group)
-            logger.info("Summary updated with new message")
-        else:
-            logger.warning("Failed to update summary")
+    if matching_summary.message_id is not None:
+        summaries = load_group_summaries_history() if is_group else load_summaries_history()
+        refreshed = None
+        for s in summaries:
+            if s.message_id == matching_summary.message_id:
+                refreshed = s
+                break
+        if refreshed is None:
+            logger.debug("Summary %s not found in history — skipping update", matching_summary.message_id)
+            return
+        matching_summary = refreshed
+
+    logger.debug("Checking summary update for: %s...", msg.text[:50])
+    updated_summary = await update_existing_summary(matching_summary, msg, is_group)
+    if updated_summary:
+        await save_updated_summary(matching_summary, updated_summary, is_group)
+        logger.info("Summary updated with new message")
     else:
-        logger.debug("No relevant summary found for update")
+        logger.warning("Failed to update summary")

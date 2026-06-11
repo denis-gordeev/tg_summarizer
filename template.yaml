@@ -336,7 +336,24 @@ Resources:
           Value: !Ref SummarizerFunction
       TreatMissingData: notBreaching
 
-Outputs:
+  OpenAILatencyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-openai-latency"
+      AlarmDescription: "Alarm for high OpenAI API latency (EMF metric from call_openai)"
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 2
+      Threshold: 20
+      MetricName: Latency
+      Namespace: tg_summarizer/OpenAI
+      Period: 300
+      Statistic: Average
+      Dimensions:
+        - Name: Function
+          Value: !Ref SummarizerFunction
+      TreatMissingData: notBreaching
+
+  Outputs:
   SummarizerFunctionArn:
     Description: "Lambda Function ARN"
     Value: !GetAtt SummarizerFunction.Arn

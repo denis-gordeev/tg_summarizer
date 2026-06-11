@@ -545,6 +545,26 @@
 - Updated `should_run_group_summarization` logic test to expect `True` on malformed timestamps (consistent with the bug fix).
 - All 171 tests pass without errors.
 
+## Completed in 2026-06-11 round (Lambda hardening round 18, dead code, prompt quality, observability, config hardening)
+
+- **Dead code removal**: Simplified [`process_covered_message()`](message_processor.py) — removed unreachable `else` branch (line 501-502) after `if matching_summary is None: return` guard. The `if matching_summary:` check (line 493) was always True after the None guard, making the `else` dead code. Also removed redundant `logger.debug("Found relevant summary for update")` log.
+- **Bug fix**: Added missing-summary-in-history guard in [`process_covered_message()`](message_processor.py) — when refreshing a summary from file by `message_id`, if the summary is not found (e.g., deleted between invocations), now skips the update instead of proceeding with stale data. Previously, the refresh loop would leave `matching_summary` unchanged if no match was found, then proceed with the stale object.
+- **Prompt quality**: Added "Не повторяй одну и ту же информацию в разных разделах" rule to both [`CHANNEL_SUMMARY_PROMPT`](prompts.py) and [`GROUP_SUMMARY_PROMPT`](prompts.py) — addresses a common LLM failure mode where the same fact appears under different section headers. Directly improves conciseness per AUTOWORK_INSTRUCTIONS goal.
+- **Observability**: Added OpenAI latency CloudWatch metric via Embedded Metric Format (EMF) in [`_emit_openai_latency()`](utils.py) — after each successful OpenAI API call, prints an EMF JSON line to stdout that CloudWatch automatically processes into a `Latency` metric in the `tg_summarizer/OpenAI` namespace. No additional API calls or dependencies required. Enables CloudWatch-based OpenAI latency monitoring and alerting.
+- **Observability**: Added `OpenAILatencyAlarm` in [`template.yaml`](template.yaml) — CloudWatch alarm on the EMF `Latency` metric (average latency > 20 seconds over 2 consecutive 5-minute periods). Addresses the "OpenAI latency alerting" next action from previous rounds.
+- **Observability**: Added summary logging in [`download_from_s3()`](s3_sync.py) and [`upload_to_s3()`](s3_sync.py) — now logs "S3 download: N files downloaded, M skipped" and "S3 upload: N files uploaded, M failed" at INFO level. Previously logged each file individually at INFO/DEBUG, making it hard to see the overall sync status in CloudWatch at a glance.
+- **Config hardening**: Moved `RESTORE_TIMEOUT_SEC` to [`config.py`](config.py) with `_get_int_env` validation (default 30) — previously used raw `os.getenv("RESTORE_TIMEOUT_SEC", "30")` in three places in [`history_manager.py`](history_manager.py) without validation. Now validates that the value is a positive integer, catching misconfiguration early. Consistent with all other integer configs.
+- **`.env.example` synced**: Added `RESTORE_TIMEOUT_SEC=30` in [`.env.example`](.env.example).
+- **Tests added**: 7 new tests (total 173, up from 166):
+  - `test_config_reads_restore_timeout_sec_from_env`: verifies `RESTORE_TIMEOUT_SEC` env var parsing
+  - `test_config_restore_timeout_sec_default`: verifies default is 30
+  - `test_config_restore_timeout_sec_rejects_zero`: validates `_get_int_env` rejects zero
+  - `test_call_openai_emits_emf_metric`: verifies EMF JSON output on successful API call
+  - `test_skips_update_when_summary_not_found_in_history`: verifies process_covered_message skips when summary not found in file
+  - `test_download_logs_summary_counts`: verifies S3 download summary log with file counts
+  - `test_upload_logs_summary_counts`: verifies S3 upload summary log with file counts
+- All 173 tests pass without errors.
+
 ## Next actions
 
 - **CI/CD**: Настроить GitHub Actions CI/CD для автоматического деплоя Lambda при мердже в main.

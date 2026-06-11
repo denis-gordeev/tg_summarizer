@@ -18,6 +18,7 @@ from config import (
     MAX_GROUP_SUMMARIES,
     GROUP_SUMMARIZATION_INTERVAL_SECONDS,
     RESTORE_HISTORY_DAYS,
+    RESTORE_TIMEOUT_SEC,
     UPDATE_SUMMARY_MAX_TOKENS,
     UPDATE_SUMMARY_MAX_INPUT_CHARS,
 )
@@ -196,7 +197,7 @@ def _run_async_with_loop(coro):
         if tg_loop and tg_loop.is_running():
             future = asyncio.run_coroutine_threadsafe(coro, tg_loop)
             try:
-                return future.result(timeout=float(os.getenv("RESTORE_TIMEOUT_SEC", "30")))
+                return future.result(timeout=float(RESTORE_TIMEOUT_SEC))
             except Exception as e:
                 logger.error("Restore: timeout/wait error: %s", e)
                 return []
@@ -209,7 +210,7 @@ def _run_async_with_loop(coro):
     if tg_loop and tg_loop.is_running() and tg_loop is not current_loop:
         future = asyncio.run_coroutine_threadsafe(coro, tg_loop)
         try:
-            return future.result(timeout=float(os.getenv("RESTORE_TIMEOUT_SEC", "30")))
+            return future.result(timeout=float(RESTORE_TIMEOUT_SEC))
         except Exception as e:
             logger.error("Restore: timeout/wait error: %s", e)
             return []
@@ -226,7 +227,7 @@ def _run_async_with_loop(coro):
 
     t = threading.Thread(target=_run_in_thread, daemon=True)
     t.start()
-    t.join(timeout=float(os.getenv("RESTORE_TIMEOUT_SEC", "30")))
+    t.join(timeout=float(RESTORE_TIMEOUT_SEC))
     if t.is_alive():
         logger.error("Restore: timed out in background thread")
         return []

@@ -68,16 +68,20 @@ def download_from_s3() -> None:
         return
 
     prefix = os.getenv("STATE_S3_PREFIX", "")
-    downloaded = False
+    downloaded = 0
+    skipped = 0
     for relative_name, local_path in _iter_local_files():
         key = _build_s3_key(prefix, relative_name)
         local_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             client.download_file(bucket, key, str(local_path))
-            logger.info("Downloaded s3://%s/%s -> %s", bucket, key, local_path)
-            downloaded = True
+            logger.debug("Downloaded s3://%s/%s -> %s", bucket, key, local_path)
+            downloaded += 1
         except Exception as exc:
             logger.debug("Skipping download for s3://%s/%s: %s", bucket, key, exc)
+            skipped += 1
+
+    logger.info("S3 download: %d files downloaded, %d skipped", downloaded, skipped)
 
     if downloaded:
         try:
@@ -98,12 +102,18 @@ def upload_to_s3() -> None:
         return
 
     prefix = os.getenv("STATE_S3_PREFIX", "")
+    uploaded = 0
+    failed = 0
     for relative_name, local_path in _iter_local_files():
         if not local_path.exists():
             continue
         key = _build_s3_key(prefix, relative_name)
         try:
             client.upload_file(str(local_path), bucket, key)
-            logger.info("Uploaded %s -> s3://%s/%s", local_path, bucket, key)
+            logger.debug("Uploaded %s -> s3://%s/%s", local_path, bucket, key)
+            uploaded += 1
         except Exception as exc:
             logger.error("Failed to upload %s to s3://%s/%s: %s", local_path, bucket, key, exc)
+            failed += 1
+
+    logger.info("S3 upload: %d files uploaded, %d failed", uploaded, failed)

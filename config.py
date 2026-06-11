@@ -171,3 +171,6 @@ UPDATE_SUMMARY_MAX_TOKENS = _get_int_env("UPDATE_SUMMARY_MAX_TOKENS", 2000)
 
 # Debug mode (set DEBUG=1 in environment to enable verbose logging)
 DEBUG = os.getenv("DEBUG", "").lower() in {"1", "true", "yes"}
+
+# Restore timeout (seconds) for channel restore from Telegram
+RESTORE_TIMEOUT_SEC = _get_int_env("RESTORE_TIMEOUT_SEC", 30)

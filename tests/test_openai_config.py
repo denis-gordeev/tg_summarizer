@@ -689,6 +689,95 @@ class ConfigValidationConsistencyTests(unittest.TestCase):
                 config = importlib.import_module("config")
                 self.assertEqual(config.OPENAI_CHANNEL_SUMMARY_MAX_TOKENS, 2000)
 
+    def test_config_reads_restore_timeout_sec_from_env(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, {**REQUIRED_ENV, "RESTORE_TIMEOUT_SEC": "60"}, clear=True):
+                sys.modules.pop("config", None)
+                config = importlib.import_module("config")
+                self.assertEqual(config.RESTORE_TIMEOUT_SEC, 60)
+
+    def test_config_restore_timeout_sec_default(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+                sys.modules.pop("config", None)
+                config = importlib.import_module("config")
+                self.assertEqual(config.RESTORE_TIMEOUT_SEC, 30)
+
+    def test_config_restore_timeout_sec_rejects_zero(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, {**REQUIRED_ENV, "RESTORE_TIMEOUT_SEC": "0"}, clear=True):
+                sys.modules.pop("config", None)
+                with self.assertRaises(ValueError):
+                    importlib.import_module("config")
+
+
+    async def test_call_openai_emits_emf_metric(self):
+        """call_openai should emit EMF metric JSON to stdout on success."""
+        import importlib
+        import sys
+        import types
+        import io
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_openai = types.ModuleType("openai")
+
+        fake_usage = MagicMock()
+        fake_usage.prompt_tokens = 10
+        fake_usage.completion_tokens = 5
+        fake_usage.total_tokens = 15
+
+        class FakeAsyncOpenAI:
+            def __init__(self, api_key, **kwargs):
+                self.api_key = api_key
+                self.chat = types.SimpleNamespace(
+                    completions=types.SimpleNamespace(
+                        create=AsyncMock(return_value=type(
+                            "Response", (),
+                            {
+                                "choices": [type("Choice", (), {"message": type("Message", (), {"content": "ok"})()})()],
+                                "usage": fake_usage,
+                            },
+                        )())
+                    )
+                )
+
+        class FakeOpenAIError(Exception):
+            pass
+
+        fake_openai.AsyncOpenAI = FakeAsyncOpenAI
+        fake_openai.OpenAI = FakeAsyncOpenAI
+        fake_openai.APIError = FakeOpenAIError
+        fake_openai.RateLimitError = type("RateLimitError", (FakeOpenAIError,), {"status_code": None})
+        fake_openai.APIConnectionError = type("APIConnectionError", (FakeOpenAIError,), {})
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv, "openai": fake_openai}):
+            with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+                sys.modules.pop("config", None)
+                sys.modules.pop("utils", None)
+                config = importlib.import_module("config")
+                utils = importlib.import_module("utils")
+
+        captured = io.StringIO()
+        with patch("sys.stdout", captured):
+            result = await utils.call_openai("system", "user")
+            self.assertEqual(result, "ok")
+
+        output = captured.getvalue()
+        self.assertIn("_aws", output)
+        self.assertIn("CloudWatchMetrics", output)
+        self.assertIn("Latency", output)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -853,3 +853,38 @@ class ProcessCoveredMessageNoFallbackTests(unittest.TestCase):
             ))
 
             mock_update.assert_not_called()
+
+
+class ProcessCoveredMessageRefreshTests(unittest.TestCase):
+    """Tests for process_covered_message refreshing and skipping when summary not found in history."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._stubs = _setup_stubs()
+        cls._fake_config, cls._fake_history, cls._fake_tg = cls._stubs
+        for mod_name in list(sys.modules.keys()):
+            if mod_name in ("message_processor", "models"):
+                del sys.modules[mod_name]
+        cls.mp = importlib.import_module("message_processor")
+
+    def test_skips_update_when_summary_not_found_in_history(self):
+        """process_covered_message should skip update when the summary is not found
+        in the history file (e.g., was deleted between invocations)."""
+        original_summary = SummaryInfo(
+            content="Deleted summary",
+            date=datetime.now(timezone.utc),
+            message_count=1,
+            channels=["@ai"],
+            message_id=999,
+        )
+
+        msg = _make_message(text="New AI details", channel="@ai", message_id=200)
+
+        with patch.object(self.mp, "load_summaries_history", return_value=[]) as mock_load, \
+             patch.object(self.mp, "update_existing_summary", new_callable=AsyncMock) as mock_update:
+            asyncio.run(self.mp.process_covered_message(
+                msg, matching_summary=original_summary, is_group=False,
+            ))
+
+            mock_load.assert_called()
+            mock_update.assert_not_called()
