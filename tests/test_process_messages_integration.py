@@ -652,7 +652,7 @@ class CoverageAndMatchCheckTests(unittest.TestCase):
 
         with patch.object(self.mp, "call_openai", new_callable=AsyncMock) as mock_openai:
             mock_openai.return_value = "1"
-            result = asyncio.run(self.mp._check_coverage_and_match(msg, summaries, is_group=False))
+            result = asyncio.run(self.mp._check_coverage_and_match(msg, summaries))
             self.assertIsNotNone(result)
             self.assertEqual(result.message_id, 100)
 
@@ -670,7 +670,7 @@ class CoverageAndMatchCheckTests(unittest.TestCase):
 
         with patch.object(self.mp, "call_openai", new_callable=AsyncMock) as mock_openai:
             mock_openai.return_value = "НЕТ"
-            result = asyncio.run(self.mp._check_coverage_and_match(msg, summaries, is_group=False))
+            result = asyncio.run(self.mp._check_coverage_and_match(msg, summaries))
             self.assertIsNone(result)
 
     def test_returns_none_on_empty_summaries(self):
@@ -678,7 +678,7 @@ class CoverageAndMatchCheckTests(unittest.TestCase):
         msg = _make_message(text="Some text", channel="@ch", message_id=1)
 
         with patch.object(self.mp, "call_openai", new_callable=AsyncMock) as mock_openai:
-            result = asyncio.run(self.mp._check_coverage_and_match(msg, [], is_group=False))
+            result = asyncio.run(self.mp._check_coverage_and_match(msg, []))
             self.assertIsNone(result)
             mock_openai.assert_not_called()
 
@@ -696,7 +696,7 @@ class CoverageAndMatchCheckTests(unittest.TestCase):
 
         with patch.object(self.mp, "call_openai", new_callable=AsyncMock) as mock_openai:
             mock_openai.return_value = "maybe"
-            result = asyncio.run(self.mp._check_coverage_and_match(msg, summaries, is_group=False))
+            result = asyncio.run(self.mp._check_coverage_and_match(msg, summaries))
             self.assertIsNone(result)
 
     def test_returns_none_on_digit_out_of_range(self):
@@ -713,7 +713,7 @@ class CoverageAndMatchCheckTests(unittest.TestCase):
 
         with patch.object(self.mp, "call_openai", new_callable=AsyncMock) as mock_openai:
             mock_openai.return_value = "5"
-            result = asyncio.run(self.mp._check_coverage_and_match(msg, summaries, is_group=False))
+            result = asyncio.run(self.mp._check_coverage_and_match(msg, summaries))
             self.assertIsNone(result)
 
 
@@ -745,7 +745,7 @@ class CoverageMatchTruncationTests(unittest.TestCase):
 
         with patch.object(self.mp, "call_openai", new_callable=AsyncMock) as mock_openai:
             mock_openai.return_value = "НЕТ"
-            asyncio.run(self.mp._check_coverage_and_match(msg, summaries, is_group=False))
+            asyncio.run(self.mp._check_coverage_and_match(msg, summaries))
             user_content = mock_openai.call_args[0][1]
             self.assertIn(long_text[:2000], user_content)
             self.assertNotIn(long_text[2001:], user_content)
@@ -888,3 +888,85 @@ class ProcessCoveredMessageRefreshTests(unittest.TestCase):
 
             mock_load.assert_called()
             mock_update.assert_not_called()
+
+
+class DeadlineInCoveredMessageProcessingTests(unittest.TestCase):
+    """Tests for deadline check during covered message processing loop."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._stubs = _setup_stubs()
+        cls._fake_config, cls._fake_history, cls._fake_tg = cls._stubs
+        for mod_name in list(sys.modules.keys()):
+            if mod_name in ("message_processor", "models"):
+                del sys.modules[mod_name]
+        cls.mp = importlib.import_module("message_processor")
+
+    def test_deadline_skips_remaining_covered_updates(self):
+        """When deadline is exceeded during covered message processing,
+        remaining updates should be skipped."""
+        summaries = [
+            SummaryInfo(
+                content="Summary about AI",
+                date=datetime.now(timezone.utc),
+                message_count=1,
+                channels=["@ai"],
+                message_id=100,
+            ),
+        ]
+
+        messages = [
+            _make_message(text="AI update one " * 20, channel="@ai", message_id=201),
+            _make_message(text="AI update two " * 20, channel="@ai", message_id=202),
+        ]
+
+        self._fake_config.SOURCE_CHANNELS = {"@ai"}
+        self._fake_history.load_summaries_history.return_value = summaries
+
+        past_deadline = time.monotonic() - 100
+
+        with patch.object(self.mp, "is_nlp_related", new_callable=AsyncMock) as mock_nlp, \
+             patch.object(self.mp, "_check_coverage_and_match", new_callable=AsyncMock) as mock_cov, \
+             patch.object(self.mp, "process_covered_message", new_callable=AsyncMock) as mock_process:
+            mock_nlp.return_value = (True, "NLP related")
+            mock_cov.return_value = summaries[0]
+
+            asyncio.run(self.mp.process_messages(
+                messages, save_changes=False, send_message=False, is_group=False,
+                _deadline=past_deadline,
+            ))
+
+            mock_process.assert_not_called()
+
+
+class CreateSummaryInfoSyncTests(unittest.TestCase):
+    """Tests that _create_summary_info is a sync function."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._stubs = _setup_stubs()
+        cls._fake_config, cls._fake_history, cls._fake_tg = cls._stubs
+        for mod_name in list(sys.modules.keys()):
+            if mod_name in ("message_processor", "models"):
+                del sys.modules[mod_name]
+        cls.mp = importlib.import_module("message_processor")
+
+    def test_create_summary_info_returns_summary_info(self):
+        """_create_summary_info should return a SummaryInfo without awaiting."""
+        from models import MessageInfo, SummaryInfo
+        messages = [
+            MessageInfo(
+                text="AI research",
+                channel="@ai",
+                message_id=1,
+                date=datetime.now(timezone.utc),
+                link="",
+            ),
+        ]
+
+        result = self.mp._create_summary_info("summary text", messages, 42, False)
+        self.assertIsInstance(result, SummaryInfo)
+        self.assertEqual(result.content, "summary text")
+        self.assertEqual(result.message_id, 42)
+        self.assertEqual(result.channels, ["@ai"])
+        self.assertEqual(result.message_count, 1)

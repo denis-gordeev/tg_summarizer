@@ -2,6 +2,26 @@
 
 Живой список задач для автоматических раундов.
 
+## Completed in 2026-06-12 round (Lambda hardening round 19, config validation, prompt optimization, deadline hardening)
+
+- **Config validation**: Added [`_get_float_env()`](config.py) — validates float environment variables with range bounds, consistent with existing `_get_int_env()`. Applied to `OPENAI_SUMMARY_TEMPERATURE` (0.0–2.0), `SIMILARITY_LLM_LOWER` (0.0–1.0), `SIMILARITY_LLM_UPPER` (0.0–1.0). Previously used raw `float(os.getenv(...))` which crashed on non-numeric input without a clear error message.
+- **Prompt optimization**: Simplified [`_check_coverage_and_match()`](message_processor.py) user_content — removed duplicated instructions ("Совпадает ли ТЕМА...", answer format rules) that repeated the system prompt. The system prompt ([`COVERAGE_AND_MATCH_PROMPT`](prompts.py)) already contains all necessary instructions. Reduces input tokens per coverage check by ~30%.
+- **Prompt optimization**: Tightened [`COVERAGE_AND_MATCH_PROMPT`](prompts.py) — added "новые" before "существенные детали" for clarity (matches the original intent: same topic but significant NEW details should not be merged). Removed unused `is_group` parameter and `label`/`numbers` variables from [`_check_coverage_and_match()`](message_processor.py).
+- **Lambda hardening**: Added deadline check in covered message processing loop in [`process_messages()`](message_processor.py) — previously, sequential `process_covered_message` calls (each involving an LLM call + Telegram edit) had no deadline check. With many covered messages, this could cause Lambda timeouts. Now breaks out of the loop when deadline is exceeded.
+- **Code quality**: Made [`_create_summary_info()`](message_processor.py) a regular function — was `async` but never used `await`. Removed unnecessary event loop overhead. Updated call site in [`_save_processing_results()`](message_processor.py).
+- **Tests added**: 10 new tests (total 183, up from 173):
+  - `test_config_summary_temperature_rejects_invalid`: verifies `_get_float_env` rejects non-numeric temperature
+  - `test_config_summary_temperature_rejects_out_of_range`: verifies temperature > 2.0 is rejected
+  - `test_config_similarity_llm_lower_from_env`: verifies `SIMILARITY_LLM_LOWER` env var parsing
+  - `test_config_similarity_llm_lower_default`: verifies default is 0.7
+  - `test_config_similarity_llm_lower_rejects_invalid`: verifies non-numeric rejected
+  - `test_config_similarity_llm_upper_from_env`: verifies `SIMILARITY_LLM_UPPER` env var parsing
+  - `test_config_similarity_llm_upper_default`: verifies default is 0.95
+  - `test_config_similarity_llm_upper_rejects_out_of_range`: verifies > 1.0 rejected
+  - `test_deadline_skips_remaining_covered_updates`: verifies deadline breaks covered message processing loop
+  - `test_create_summary_info_returns_summary_info`: verifies sync `_create_summary_info` returns correct `SummaryInfo`
+- All 183 tests pass without errors.
+
 ## Completed in 2026-06-11 round (Lambda hardening round 17, dead code removal, prompt tightening, observability)
 
 - **Dead code removal**: Removed [`_check_coverage()`](message_processor.py) — superseded by [`_check_coverage_and_match()`](message_processor.py) since round 15 (2026-06-10). The old function was only called from tests, never from production code.
@@ -574,4 +594,3 @@
 - **Intra-batch LLM dedup**: Рассмотреть добавление LLM-проверки для сообщений с ratio между SIMILARITY_LLM_LOWER (0.7) и SIMILARITY_LLM_UPPER (0.95) внутри `_remove_intra_batch_duplicates` — позволит ловить больше дубликатов за дополнительные токены.
 - **Coverage+match accuracy**: Отслеживать точность `_check_coverage_and_match` — если LLM иногда выбирает не лучший дайджест для обновления, можно увеличить `UPDATE_MATCH_MAX_CHARS_PER_SUMMARY`.
 - **NLP pre-filter tuning**: Мониторить процент сообщений, отклонённых `_is_obvious_non_nlp` — если ложноположительных срабатываний много, сузить список `NLP_AD_KEYWORDS` или добавить whitelist.
-- **OpenAI latency alerting**: Добавить CloudWatch alarm на OpenAI latency (используя новый `latency` лог в `call_openai`) — если средний latency превышает порог, алертить.

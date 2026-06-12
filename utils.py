@@ -154,9 +154,9 @@ async def call_openai(
 
     for attempt in range(max_retries + 1):
         try:
-            t0 = asyncio.get_event_loop().time()
+            t0 = _time.monotonic()
             response = await openai_client.chat.completions.create(**kwargs)
-            elapsed = asyncio.get_event_loop().time() - t0
+            elapsed = _time.monotonic() - t0
             result = response.choices[0].message.content
             if result is None:
                 return ""
@@ -189,6 +189,7 @@ async def call_openai(
                 await asyncio.sleep(delay)
             elif e.status_code and e.status_code in (401, 403):
                 logger.error("OpenAI auth error (status %d): check OPENAI_API_KEY — %s", e.status_code, e)
+                openai_client = None
                 return ""
             else:
                 logger.error("OpenAI API error (status %s): %s", getattr(e, 'status_code', '?'), e)

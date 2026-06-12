@@ -134,7 +134,6 @@ def is_message_processed(msg: MessageInfo, processed_messages: Set[str]) -> bool
 async def _check_coverage_and_match(
     msg: MessageInfo,
     summaries: List[SummaryInfo],
-    is_group: bool = False,
 ) -> Optional[SummaryInfo]:
     """Combined coverage check + summary match. Returns matching summary if covered, None otherwise.
 
@@ -149,17 +148,8 @@ async def _check_coverage_and_match(
         truncated = s.content[:UPDATE_MATCH_MAX_CHARS_PER_SUMMARY]
         context_parts.append(f"Дайджест {i}:\n{truncated}\n")
 
-    label = " групп" if is_group else ""
-    numbers = ", ".join(str(i) for i in range(1, len(recent) + 1))
-    user_content = f"""Предыдущие дайджесты{label}:
-{"".join(context_parts)}
-Новое сообщение:
-{msg.text[:NLP_CHECK_MAX_INPUT_CHARS]}
-
-Совпадает ли ТЕМА и ОСНОВНАЯ ИДЕЯ нового сообщения с одним из дайджестов?
-- Та же тема → номер дайджеста ({numbers})
-- Новая тема или существенные новые детали → "НЕТ"
-Ответь только номером ({numbers}) или "НЕТ"."""
+    user_content = f"""{"".join(context_parts)}Новое сообщение:
+{msg.text[:NLP_CHECK_MAX_INPUT_CHARS]}"""
 
     try:
         result = await call_openai(
@@ -170,6 +160,7 @@ async def _check_coverage_and_match(
             index = int(result) - 1
             if 0 <= index < len(recent):
                 return recent[index]
+            logger.debug("Coverage+match: LLM returned out-of-range index %d (have %d summaries)", index + 1, len(recent))
     except Exception as e:
         logger.error("Error in coverage+match check: %s", e)
     return None
@@ -325,7 +316,7 @@ async def summarize_group_text(messages: List[MessageInfo]) -> str:
     return result
 
 
-async def _create_summary_info(
+def _create_summary_info(
     summary: str, unique_messages: List[MessageInfo], message_id, is_group: bool
 ) -> SummaryInfo:
     channels = list(set(msg.channel for msg in unique_messages))
@@ -359,7 +350,7 @@ async def _save_processing_results(
         logger.info("Discovered %d new channels: %s", len(discovered_channels), discovered_channels)
 
     if summary and unique_messages:
-        summary_info = await _create_summary_info(summary, unique_messages, message_id, is_group)
+        summary_info = _create_summary_info(summary, unique_messages, message_id, is_group)
         if is_group:
             save_group_summary_to_history(summary_info)
             logger.info("Group summary saved to history (groups: %s)", summary_info.channels)
@@ -435,7 +426,7 @@ async def process_messages(
             if summaries:
                 async def _check_msg_coverage(msg: MessageInfo) -> Optional[SummaryInfo]:
                     async with sem:
-                        return await _check_coverage_and_match(msg, summaries, is_group)
+                        return await _check_coverage_and_match(msg, summaries)
 
                 coverage_results = await asyncio.gather(
                     *[_check_msg_coverage(msg) for msg in unique_messages]
@@ -445,6 +436,9 @@ async def process_messages(
                     msg.is_covered_in_summaries = matching_summary is not None
                     logger.debug("is_covered_in_summaries: %s", msg.is_covered_in_summaries)
                     if matching_summary is not None:
+                        if _deadline and time.monotonic() > _deadline:
+                            logger.warning("Deadline exceeded during covered message processing — skipping remaining updates")
+                            break
                         await process_covered_message(msg, matching_summary=matching_summary, is_group=is_group)
 
     unique_messages = [

@@ -60,6 +60,19 @@ def _get_int_env(name: str, default: int) -> int:
     return parsed
 
 
+def _get_float_env(name: str, default: float, min_val: float = 0.0, max_val: float = float("inf")) -> float:
+    value = os.getenv(name)
+    if value is None or value.strip() == "":
+        return default
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a number") from exc
+    if parsed < min_val or parsed > max_val:
+        raise ValueError(f"{name} must be between {min_val} and {max_val}")
+    return parsed
+
+
 _REQUIRED_VARS = {
     "TELEGRAM_API_ID": "API_ID",
     "TELEGRAM_API_HASH": "API_HASH",
@@ -109,7 +122,7 @@ OPENAI_GROUP_SUMMARY_MAX_TOKENS = _get_int_env(
     "OPENAI_GROUP_SUMMARY_MAX_TOKENS", 4000
 )
 OPENAI_REQUEST_TIMEOUT = _get_int_env("OPENAI_REQUEST_TIMEOUT", 30)
-OPENAI_SUMMARY_TEMPERATURE = float(os.getenv("OPENAI_SUMMARY_TEMPERATURE", "0.3"))
+OPENAI_SUMMARY_TEMPERATURE = _get_float_env("OPENAI_SUMMARY_TEMPERATURE", 0.3, min_val=0.0, max_val=2.0)
 
 NLP_CHECK_MAX_INPUT_CHARS = _get_int_env("NLP_CHECK_MAX_INPUT_CHARS", 2000)
 MAX_MESSAGES_PER_SOURCE = _get_int_env("MAX_MESSAGES_PER_SOURCE", 100)
@@ -141,8 +154,10 @@ GROUP_LAST_RUN_FILE = os.getenv('GROUP_LAST_RUN_FILE', 'group_last_run.json')
 PROMPTS_FILE = os.getenv("PROMPTS_FILE", "prompts.json")
 
 # Constants
-SIMILARITY_LLM_LOWER = float(os.getenv("SIMILARITY_LLM_LOWER", "0.7"))
-SIMILARITY_LLM_UPPER = float(os.getenv("SIMILARITY_LLM_UPPER", "0.95"))
+SIMILARITY_LLM_LOWER = _get_float_env("SIMILARITY_LLM_LOWER", 0.7, min_val=0.0, max_val=1.0)
+SIMILARITY_LLM_UPPER = _get_float_env("SIMILARITY_LLM_UPPER", 0.95, min_val=0.0, max_val=1.0)
+if SIMILARITY_LLM_LOWER >= SIMILARITY_LLM_UPPER:
+    raise ValueError("SIMILARITY_LLM_LOWER must be less than SIMILARITY_LLM_UPPER")
 ENABLE_SUMMARIES_DEDUPLICATION = os.getenv("ENABLE_SUMMARIES_DEDUPLICATION", "true").lower() not in {"0", "false", "no", "off"}
 ENABLE_SUMMARY_UPDATES = os.getenv("ENABLE_SUMMARY_UPDATES", "true").lower() not in {"0", "false", "no", "off"}
 

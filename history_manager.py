@@ -21,6 +21,8 @@ from config import (
     RESTORE_TIMEOUT_SEC,
     UPDATE_SUMMARY_MAX_TOKENS,
     UPDATE_SUMMARY_MAX_INPUT_CHARS,
+    SUMMARY_MAX_LENGTH,
+    GROUP_SUMMARY_MAX_LENGTH,
 )
 from models import MessageInfo, SummaryInfo
 from utils import call_openai, extract_links, load_json_file, save_json_file, now_iso, text_hash
@@ -423,9 +425,12 @@ async def save_updated_summary(
     invalidate_cache(history_file)
 
     if original_summary.message_id:
+        from message_processor import enforce_summary_length
+        max_len = GROUP_SUMMARY_MAX_LENGTH if is_group else SUMMARY_MAX_LENGTH
+        edit_content = enforce_summary_length(updated_summary.content, max_len)
         try:
             await edit_message_in_target_channel(
-                original_summary.message_id, updated_summary.content
+                original_summary.message_id, edit_content
             )
             logger.info("Message %s updated in channel", original_summary.message_id)
         except Exception as e:

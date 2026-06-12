@@ -141,6 +141,70 @@ class ConfigTests(unittest.TestCase):
             config = _reload_module("config")
         self.assertAlmostEqual(config.OPENAI_SUMMARY_TEMPERATURE, 0.3)
 
+    def test_config_summary_temperature_rejects_invalid(self):
+        env = {
+            **REQUIRED_ENV,
+            "OPENAI_SUMMARY_TEMPERATURE": "not_a_number",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            with self.assertRaisesRegex(ValueError, "OPENAI_SUMMARY_TEMPERATURE"):
+                _reload_module("config")
+
+    def test_config_summary_temperature_rejects_out_of_range(self):
+        env = {
+            **REQUIRED_ENV,
+            "OPENAI_SUMMARY_TEMPERATURE": "3.0",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            with self.assertRaisesRegex(ValueError, "OPENAI_SUMMARY_TEMPERATURE"):
+                _reload_module("config")
+
+    def test_config_similarity_llm_lower_from_env(self):
+        env = {
+            **REQUIRED_ENV,
+            "SIMILARITY_LLM_LOWER": "0.8",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            config = _reload_module("config")
+        self.assertAlmostEqual(config.SIMILARITY_LLM_LOWER, 0.8)
+
+    def test_config_similarity_llm_lower_default(self):
+        with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+            config = _reload_module("config")
+        self.assertAlmostEqual(config.SIMILARITY_LLM_LOWER, 0.7)
+
+    def test_config_similarity_llm_lower_rejects_invalid(self):
+        env = {
+            **REQUIRED_ENV,
+            "SIMILARITY_LLM_LOWER": "abc",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            with self.assertRaisesRegex(ValueError, "SIMILARITY_LLM_LOWER"):
+                _reload_module("config")
+
+    def test_config_similarity_llm_upper_from_env(self):
+        env = {
+            **REQUIRED_ENV,
+            "SIMILARITY_LLM_UPPER": "0.99",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            config = _reload_module("config")
+        self.assertAlmostEqual(config.SIMILARITY_LLM_UPPER, 0.99)
+
+    def test_config_similarity_llm_upper_default(self):
+        with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+            config = _reload_module("config")
+        self.assertAlmostEqual(config.SIMILARITY_LLM_UPPER, 0.95)
+
+    def test_config_similarity_llm_upper_rejects_out_of_range(self):
+        env = {
+            **REQUIRED_ENV,
+            "SIMILARITY_LLM_UPPER": "1.5",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            with self.assertRaisesRegex(ValueError, "SIMILARITY_LLM_UPPER"):
+                _reload_module("config")
+
 
 class SsmSecretResolutionTests(unittest.TestCase):
     def test_get_secret_prefers_ssm_over_env(self):
