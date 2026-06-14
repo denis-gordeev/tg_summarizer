@@ -382,6 +382,11 @@ async def update_existing_summary(
         else summary.channels
     )
 
+    max_len = GROUP_SUMMARY_MAX_LENGTH if is_group else SUMMARY_MAX_LENGTH
+    from message_processor import enforce_summary_length, count_characters
+    if count_characters(updated_content) > max_len:
+        updated_content = enforce_summary_length(updated_content, max_len)
+
     return SummaryInfo(
         content=updated_content,
         date=summary.date,

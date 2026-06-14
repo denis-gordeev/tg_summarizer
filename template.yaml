@@ -19,11 +19,13 @@ Globals:
         UPDATE_SUMMARY_MAX_TOKENS: !Ref UpdateSummaryMaxTokens
         UPDATE_SUMMARY_MAX_INPUT_CHARS: !Ref UpdateSummaryMaxInputChars
         NLP_CHECK_MAX_INPUT_CHARS: !Ref NlpCheckMaxInputChars
+        NLP_MIN_TEXT_LENGTH: !Ref NlpMinTextLength
         MAX_MESSAGES_PER_SOURCE: !Ref MaxMessagesPerSource
         SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE: !Ref SummaryMaxInputCharsPerMessage
         NLP_CONCURRENT_CHECKS: !Ref NlpConcurrentChecks
         ENABLE_SUMMARIES_DEDUPLICATION: !Ref EnableSummariesDeduplication
         ENABLE_SUMMARY_UPDATES: !Ref EnableSummaryUpdates
+        RESTORE_TIMEOUT_SEC: !Ref RestoreTimeoutSec
         TARGET_CHANNEL: !Ref TargetChannel
         SOURCE_CHANNELS: !Ref SourceChannels
         SOURCE_GROUPS: !Ref SourceGroups
@@ -130,6 +132,11 @@ Parameters:
     Type: String
     Description: Max chars of message text sent to NLP relevance check
     Default: "2000"
+   
+  NlpMinTextLength:
+    Type: String
+    Description: Minimum text length (chars) for NLP relevance check to run
+    Default: "100"
   
   MaxMessagesPerSource:
     Type: String
@@ -161,6 +168,11 @@ Parameters:
     AllowedValues:
       - "true"
       - "false"
+   
+  RestoreTimeoutSec:
+    Type: String
+    Description: Timeout in seconds for channel restore from Telegram
+    Default: "30"
   
   StateBucket:
     Type: String

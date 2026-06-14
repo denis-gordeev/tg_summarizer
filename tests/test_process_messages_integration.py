@@ -32,18 +32,18 @@ def _setup_stubs():
     fake_config.SOURCE_CHANNELS = set()
     fake_config.DEBUG = False
     fake_config.ENABLE_SUMMARY_UPDATES = True
-    fake_config.ENABLE_SUMMARY_UPDATES = True
     fake_config.SUMMARY_MIN_RATIO = 3
     fake_config.SUMMARY_MIN_LENGTH = 800
     fake_config.SUMMARY_MAX_LENGTH = 4000
     fake_config.GROUP_SUMMARY_MIN_LENGTH = 2000
     fake_config.GROUP_SUMMARY_MAX_LENGTH = 12000
     fake_config.NLP_CHECK_MAX_INPUT_CHARS = 2000
+    fake_config.NLP_MIN_TEXT_LENGTH = 100
     fake_config.SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE = 3000
     fake_config.NLP_CONCURRENT_CHECKS = 5
     fake_config.NLP_AD_KEYWORDS = [
-        "курс", "вебинар", "регистраци", "скидк", "промокод", "бесплатный курс",
-        "платный курс", "мастер-класс", "стажировк", "hire", "hiring day",
+        "курс", "вебинар", "регистраци", "скидк", "промокод",
+        "мастер-класс", "стажировк", "hire", "hiring day",
         "карьерный трек", "bootcamp", "boot camp",
     ]
     fake_config.UPDATE_MATCH_MAX_SUMMARIES = 5
@@ -403,6 +403,18 @@ class NlpCheckTruncationTests(unittest.TestCase):
             call_args = mock_openai.call_args
             user_content = call_args[0][1]
             self.assertEqual(len(user_content), 500)
+
+    def test_nlp_check_uses_max_tokens_10(self):
+        """is_nlp_related should use max_tokens=10 for cost optimization."""
+        from unittest.mock import AsyncMock, patch
+
+        long_enough_text = "A" * 200
+
+        with patch.object(self.mp, "call_openai", new_callable=AsyncMock) as mock_openai:
+            mock_openai.return_value = "да"
+            asyncio.run(self.mp.is_nlp_related(long_enough_text))
+            call_kwargs = mock_openai.call_args
+            self.assertEqual(call_kwargs.kwargs.get("max_tokens"), 10)
 
 
 class SummaryFailureReturnsNoneTests(unittest.TestCase):
@@ -970,3 +982,412 @@ class CreateSummaryInfoSyncTests(unittest.TestCase):
         self.assertEqual(result.message_id, 42)
         self.assertEqual(result.channels, ["@ai"])
         self.assertEqual(result.message_count, 1)
+
+
+class DeadlineUnmarksCoveredMessagesTests(unittest.TestCase):
+    """Tests for deadline un-marking covered messages so they're included in summary."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._stubs = _setup_stubs()
+        cls._fake_config, cls._fake_history, cls._fake_tg = cls._stubs
+        for mod_name in list(sys.modules.keys()):
+            if mod_name in ("message_processor", "models"):
+                del sys.modules[mod_name]
+        cls.mp = importlib.import_module("message_processor")
+
+    def test_deadline_unmarks_covered_messages(self):
+        """When deadline is exceeded during covered message processing,
+        remaining covered messages should be un-marked so they're included
+        in the new summary instead of being silently dropped."""
+        summaries = [
+            SummaryInfo(
+                content="Summary about AI",
+                date=datetime.now(timezone.utc),
+                message_count=1,
+                channels=["@ai"],
+                message_id=100,
+            ),
+        ]
+
+        messages = [
+            _make_message(text="AI update one " * 20, channel="@ai", message_id=201),
+            _make_message(text="AI update two " * 20, channel="@ai", message_id=202),
+        ]
+
+        self._fake_config.SOURCE_CHANNELS = {"@ai"}
+        self._fake_history.load_summaries_history.return_value = summaries
+
+        past_deadline = time.monotonic() - 100
+
+        with patch.object(self.mp, "is_nlp_related", new_callable=AsyncMock) as mock_nlp, \
+             patch.object(self.mp, "_check_coverage_and_match", new_callable=AsyncMock) as mock_cov, \
+             patch.object(self.mp, "process_covered_message", new_callable=AsyncMock) as mock_process, \
+             patch.object(self.mp, "summarize_text", new_callable=AsyncMock) as mock_sum:
+            mock_nlp.return_value = (True, "NLP related")
+            mock_cov.return_value = summaries[0]
+            mock_sum.return_value = "<b>test</b>"
+
+            asyncio.run(self.mp.process_messages(
+                messages, save_changes=False, send_message=False, is_group=False,
+                _deadline=past_deadline,
+            ))
+
+            unmarked = [m for m in messages if not getattr(m, 'is_covered_in_summaries', False)]
+            self.assertGreater(len(unmarked), 0,
+                               "At least some covered messages should be un-marked when deadline exceeded")
+
+
+class NlpMinTextLengthTests(unittest.TestCase):
+    """Tests for configurable NLP_MIN_TEXT_LENGTH."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._stubs = _setup_stubs()
+        cls._fake_config, cls._fake_history, cls._fake_tg = cls._stubs
+        for mod_name in list(sys.modules.keys()):
+            if mod_name in ("message_processor", "models"):
+                del sys.modules[mod_name]
+        cls.mp = importlib.import_module("message_processor")
+
+    def test_nlp_rejects_short_text_with_configurable_threshold(self):
+        """is_nlp_related should reject text shorter than NLP_MIN_TEXT_LENGTH."""
+        with patch.object(self.mp, "NLP_MIN_TEXT_LENGTH", 200), \
+             patch.object(self.mp, "call_openai", new_callable=AsyncMock) as mock_openai:
+            short_text = "x" * 150
+            result = asyncio.run(self.mp.is_nlp_related(short_text))
+            self.assertFalse(result[0])
+            self.assertEqual(result[1], "too_short")
+            mock_openai.assert_not_called()
+
+    def test_nlp_accepts_text_above_threshold(self):
+        """is_nlp_related should not reject text >= NLP_MIN_TEXT_LENGTH."""
+        with patch.object(self.mp, "NLP_MIN_TEXT_LENGTH", 100), \
+             patch.object(self.mp, "call_openai", new_callable=AsyncMock) as mock_openai:
+            mock_openai.return_value = "да"
+            text = "x" * 150
+            result = asyncio.run(self.mp.is_nlp_related(text))
+            mock_openai.assert_called()
+
+
+class CoverageAndMatchResponseRobustnessTests(unittest.TestCase):
+    """Tests for _check_coverage_and_match handling edge-case LLM responses."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._stubs = _setup_stubs()
+        cls._fake_config, cls._fake_history, cls._fake_tg = cls._stubs
+        for mod_name in list(sys.modules.keys()):
+            if mod_name in ("message_processor", "models"):
+                del sys.modules[mod_name]
+        cls.mp = importlib.import_module("message_processor")
+
+    def test_matches_digit_with_trailing_period(self):
+        """LLM returns '1.' instead of '1' — should still match."""
+        summaries = [
+            SummaryInfo(
+                content="Summary about GPT-5",
+                date=datetime.now(timezone.utc),
+                message_count=1,
+                channels=["@ai"],
+                message_id=100,
+            ),
+        ]
+        msg = _make_message(text="GPT-5 details", channel="@ai", message_id=1)
+
+        with patch.object(self.mp, "call_openai", new_callable=AsyncMock) as mock_openai:
+            mock_openai.return_value = "1."
+            result = asyncio.run(self.mp._check_coverage_and_match(msg, summaries))
+            self.assertIsNotNone(result)
+            self.assertEqual(result.message_id, 100)
+
+    def test_matches_digit_with_trailing_comma(self):
+        """LLM returns '2,' instead of '2' — should still match."""
+        summaries = [
+            SummaryInfo(
+                content="Summary about GPT-5",
+                date=datetime.now(timezone.utc),
+                message_count=1,
+                channels=["@ai"],
+                message_id=100,
+            ),
+            SummaryInfo(
+                content="Summary about BERT",
+                date=datetime.now(timezone.utc),
+                message_count=1,
+                channels=["@nlp"],
+                message_id=101,
+            ),
+        ]
+        msg = _make_message(text="BERT details", channel="@nlp", message_id=1)
+
+        with patch.object(self.mp, "call_openai", new_callable=AsyncMock) as mock_openai:
+            mock_openai.return_value = "2,"
+            result = asyncio.run(self.mp._check_coverage_and_match(msg, summaries))
+            self.assertIsNotNone(result)
+            self.assertEqual(result.message_id, 101)
+
+
+class GroupHeaderLengthAccountingTests(unittest.TestCase):
+    """Tests for group summary header being accounted for in length enforcement."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._stubs = _setup_stubs()
+        cls._fake_config, cls._fake_history, cls._fake_tg = cls._stubs
+        for mod_name in list(sys.modules.keys()):
+            if mod_name in ("message_processor", "models"):
+                del sys.modules[mod_name]
+        cls.mp = importlib.import_module("message_processor")
+
+    def test_group_summary_total_length_within_limit(self):
+        """Group summary including header should not exceed GROUP_SUMMARY_MAX_LENGTH."""
+        from models import MessageInfo
+
+        messages = [
+            MessageInfo(
+                text="AI discussion " * 200,
+                channel="@test_group",
+                message_id=1,
+                date=datetime.now(timezone.utc),
+                link="",
+            ),
+        ]
+
+        long_response = "x" * 12000
+        with patch.object(self.mp, "call_openai", new_callable=AsyncMock) as mock_openai:
+            mock_openai.return_value = long_response
+            result = asyncio.run(self.mp.summarize_group_text(messages))
+            self.assertLessEqual(len(result), 12000)
+            self.assertTrue(result.startswith("<b>"))
+
+
+class TelegramMessageLengthGuardTests(unittest.TestCase):
+    """Tests for Telegram message length truncation guard."""
+
+    def test_send_truncates_oversized_message(self):
+        """send_message_to_target_channel_with_id should truncate messages > 4096 chars."""
+        import importlib
+        import sys
+        import types
+        from unittest.mock import AsyncMock, patch
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_telethon = types.ModuleType("telethon")
+        fake_telethon.TelegramClient = MagicMock
+        fake_telethon.errors = types.ModuleType("errors")
+        fake_telethon.errors.FloodWaitError = type("FloodWaitError", (Exception,), {})
+        fake_telethon.tl = types.ModuleType("tl")
+        fake_telethon.tl.functions = types.ModuleType("functions")
+        fake_telethon.tl.functions.channels = types.ModuleType("channels")
+        fake_telethon.tl.functions.channels.GetChannelRecommendationsRequest = MagicMock
+        fake_telethon.tl.types = types.ModuleType("types")
+        fake_telethon.tl.types.InputChannel = MagicMock
+        fake_config = types.ModuleType("config")
+        fake_config.API_ID = 1
+        fake_config.API_HASH = "h"
+        fake_config.BOT_TOKEN = "t"
+        fake_config.TARGET_CHANNEL = "@target"
+        fake_config.SOURCE_GROUPS = set()
+        fake_config.MAX_MESSAGES_PER_SOURCE = 100
+        fake_config.TELEGRAM_MAX_MESSAGE_LENGTH = 4096
+        fake_history = types.ModuleType("history_manager")
+        fake_history.load_group_summarization_history = lambda: set()
+        fake_history.load_summarization_history = lambda: set()
+        fake_cm = types.ModuleType("channel_manager")
+        fake_cm.get_all_source_channels = lambda: []
+        fake_mp = types.ModuleType("message_processor")
+        fake_mp.is_message_processed = lambda msg, proc: False
+        fake_models = types.ModuleType("models")
+        fake_models.MessageInfo = MagicMock
+        fake_utils = types.ModuleType("utils")
+        fake_utils.extract_links = lambda text: []
+
+        with patch.dict(sys.modules, {
+            "dotenv": fake_dotenv,
+            "telethon": fake_telethon,
+            "telethon.errors": fake_telethon.errors,
+            "telethon.tl": fake_telethon.tl,
+            "telethon.tl.functions": fake_telethon.tl.functions,
+            "telethon.tl.functions.channels": fake_telethon.tl.functions.channels,
+            "telethon.tl.types": fake_telethon.tl.types,
+            "config": fake_config,
+            "history_manager": fake_history,
+            "channel_manager": fake_cm,
+            "message_processor": fake_mp,
+            "models": fake_models,
+            "utils": fake_utils,
+        }):
+            sys.modules.pop("telegram_client", None)
+            tg = importlib.import_module("telegram_client")
+
+            sent_message = types.SimpleNamespace(id=123)
+            fake_bot = MagicMock()
+            fake_bot.is_connected = lambda: True
+            fake_bot.send_message = AsyncMock(return_value=sent_message)
+            fake_bot.start = AsyncMock()
+            tg.bot_client = fake_bot
+            tg.user_client = None
+
+            long_msg = "x" * 5000
+            with patch.object(tg, "_ensure_bot_client", new_callable=AsyncMock):
+                result = asyncio.run(tg.send_message_to_target_channel_with_id(long_msg))
+
+            self.assertIsNotNone(result)
+            call_args = fake_bot.send_message.call_args
+            sent_text = call_args[0][1]
+            self.assertLessEqual(len(sent_text), 4096)
+
+    def test_edit_truncates_oversized_message(self):
+        """edit_message_in_target_channel should truncate messages > 4096 chars."""
+        import importlib
+        import sys
+        import types
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_telethon = types.ModuleType("telethon")
+        fake_telethon.TelegramClient = MagicMock
+        fake_telethon.errors = types.ModuleType("errors")
+        fake_telethon.errors.FloodWaitError = type("FloodWaitError", (Exception,), {"seconds": 60})
+        fake_telethon.tl = types.ModuleType("tl")
+        fake_telethon.tl.functions = types.ModuleType("functions")
+        fake_telethon.tl.functions.channels = types.ModuleType("channels")
+        fake_telethon.tl.functions.channels.GetChannelRecommendationsRequest = MagicMock
+        fake_telethon.tl.types = types.ModuleType("types")
+        fake_telethon.tl.types.InputChannel = MagicMock
+        fake_config = types.ModuleType("config")
+        fake_config.API_ID = 1
+        fake_config.API_HASH = "h"
+        fake_config.BOT_TOKEN = "t"
+        fake_config.TARGET_CHANNEL = "@target"
+        fake_config.SOURCE_GROUPS = set()
+        fake_config.MAX_MESSAGES_PER_SOURCE = 100
+        fake_config.TELEGRAM_MAX_MESSAGE_LENGTH = 4096
+        fake_history = types.ModuleType("history_manager")
+        fake_history.load_group_summarization_history = lambda: set()
+        fake_history.load_summarization_history = lambda: set()
+        fake_cm = types.ModuleType("channel_manager")
+        fake_cm.get_all_source_channels = lambda: []
+        fake_mp = types.ModuleType("message_processor")
+        fake_mp.is_message_processed = lambda msg, proc: False
+        fake_models = types.ModuleType("models")
+        fake_models.MessageInfo = MagicMock
+        fake_utils = types.ModuleType("utils")
+        fake_utils.extract_links = lambda text: []
+
+        with patch.dict(sys.modules, {
+            "dotenv": fake_dotenv,
+            "telethon": fake_telethon,
+            "telethon.errors": fake_telethon.errors,
+            "telethon.tl": fake_telethon.tl,
+            "telethon.tl.functions": fake_telethon.tl.functions,
+            "telethon.tl.functions.channels": fake_telethon.tl.functions.channels,
+            "telethon.tl.types": fake_telethon.tl.types,
+            "config": fake_config,
+            "history_manager": fake_history,
+            "channel_manager": fake_cm,
+            "message_processor": fake_mp,
+            "models": fake_models,
+            "utils": fake_utils,
+        }):
+            sys.modules.pop("telegram_client", None)
+            tg = importlib.import_module("telegram_client")
+
+            fake_bot = MagicMock()
+            fake_bot.is_connected = lambda: True
+            fake_bot.edit_message = AsyncMock()
+            fake_bot.start = AsyncMock()
+            tg.bot_client = fake_bot
+            tg.user_client = None
+
+            long_msg = "x" * 5000
+            with patch.object(tg, "_ensure_bot_client", new_callable=AsyncMock):
+                asyncio.run(tg.edit_message_in_target_channel(1, long_msg))
+
+            call_args = fake_bot.edit_message.call_args
+            sent_text = call_args[0][2]
+            self.assertLessEqual(len(sent_text), 4096)
+
+
+class FloodWaitErrorHandlingTests(unittest.TestCase):
+    """Tests for FloodWaitError handling in _fetch_from_sources."""
+
+    def test_fetch_skips_source_on_flood_wait(self):
+        """_fetch_from_sources should skip a source that raises FloodWaitError
+        and continue to the next source."""
+        import importlib
+        import sys
+        import types
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_telethon = types.ModuleType("telethon")
+        fake_telethon.TelegramClient = MagicMock
+        FloodWaitError = type("FloodWaitError", (Exception,), {"seconds": 60})
+        fake_telethon.errors = types.ModuleType("errors")
+        fake_telethon.errors.FloodWaitError = FloodWaitError
+        fake_telethon.tl = types.ModuleType("tl")
+        fake_telethon.tl.functions = types.ModuleType("functions")
+        fake_telethon.tl.functions.channels = types.ModuleType("channels")
+        fake_telethon.tl.functions.channels.GetChannelRecommendationsRequest = MagicMock
+        fake_telethon.tl.types = types.ModuleType("types")
+        fake_telethon.tl.types.InputChannel = MagicMock
+        fake_config = types.ModuleType("config")
+        fake_config.API_ID = 1
+        fake_config.API_HASH = "h"
+        fake_config.BOT_TOKEN = "t"
+        fake_config.TARGET_CHANNEL = "@target"
+        fake_config.SOURCE_GROUPS = set()
+        fake_config.MAX_MESSAGES_PER_SOURCE = 100
+        fake_config.TELEGRAM_MAX_MESSAGE_LENGTH = 4096
+        fake_history = types.ModuleType("history_manager")
+        fake_history.load_group_summarization_history = lambda: set()
+        fake_history.load_summarization_history = lambda: set()
+        fake_cm = types.ModuleType("channel_manager")
+        fake_cm.get_all_source_channels = lambda: []
+        fake_mp = types.ModuleType("message_processor")
+        fake_mp.is_message_processed = lambda msg, proc: False
+        fake_models = types.ModuleType("models")
+        fake_models.MessageInfo = MagicMock
+        fake_utils = types.ModuleType("utils")
+        fake_utils.extract_links = lambda text: []
+
+        with patch.dict(sys.modules, {
+            "dotenv": fake_dotenv,
+            "telethon": fake_telethon,
+            "telethon.errors": fake_telethon.errors,
+            "telethon.tl": fake_telethon.tl,
+            "telethon.tl.functions": fake_telethon.tl.functions,
+            "telethon.tl.functions.channels": fake_telethon.tl.functions.channels,
+            "telethon.tl.types": fake_telethon.tl.types,
+            "config": fake_config,
+            "history_manager": fake_history,
+            "channel_manager": fake_cm,
+            "message_processor": fake_mp,
+            "models": fake_models,
+            "utils": fake_utils,
+        }):
+            sys.modules.pop("telegram_client", None)
+            tg = importlib.import_module("telegram_client")
+
+            fake_user = MagicMock()
+            fake_user.is_connected = lambda: True
+            fake_user.start = AsyncMock()
+
+            async def iter_flood(*args, **kwargs):
+                raise FloodWaitError("flood", request=60)
+                yield
+
+            fake_user.iter_messages = iter_flood
+            tg.user_client = fake_user
+            tg.bot_client = None
+
+            result = asyncio.run(tg._fetch_from_sources(
+                ["@ch1", "@ch2"], set(), "channel"
+            ))
+
+            self.assertEqual(result, [])

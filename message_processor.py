@@ -21,11 +21,13 @@ from config import (
     GROUP_SUMMARY_MIN_LENGTH,
     GROUP_SUMMARY_MAX_LENGTH,
     NLP_CHECK_MAX_INPUT_CHARS,
+    NLP_MIN_TEXT_LENGTH,
     SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE,
     NLP_CONCURRENT_CHECKS,
     NLP_AD_KEYWORDS,
     UPDATE_MATCH_MAX_SUMMARIES,
     UPDATE_MATCH_MAX_CHARS_PER_SUMMARY,
+    ENABLE_SUMMARY_UPDATES,
 )
 from history_manager import (
     load_summaries_history,
@@ -43,8 +45,6 @@ from channel_manager import (
     save_discovered_channel,
 )
 from prompts import prompts
-from config import ENABLE_SUMMARY_UPDATES
-
 logger = logging.getLogger(__name__)
 
 
@@ -156,8 +156,9 @@ async def _check_coverage_and_match(
             prompts.COVERAGE_AND_MATCH_PROMPT, user_content, max_tokens=3, temperature=0,
         )
         result = result.strip().upper()
-        if result.isdigit():
-            index = int(result) - 1
+        digits = re.match(r"^(\d+)", result)
+        if digits:
+            index = int(digits.group(1)) - 1
             if 0 <= index < len(recent):
                 return recent[index]
             logger.debug("Coverage+match: LLM returned out-of-range index %d (have %d summaries)", index + 1, len(recent))
@@ -176,12 +177,12 @@ def _is_obvious_non_nlp(text: str) -> bool:
 
 async def is_nlp_related(text: str) -> tuple[bool, str]:
     """Use the LLM to decide if a message is NLP related and not advertising."""
-    if len(text) < 100:
+    if len(text) < NLP_MIN_TEXT_LENGTH:
         return False, "too_short"
     if _is_obvious_non_nlp(text):
         return False, "ad_keyword"
     truncated = text[:NLP_CHECK_MAX_INPUT_CHARS]
-    answer = await call_openai(prompts.NLP_RELEVANCE_PROMPT, truncated, max_tokens=20, temperature=0)
+    answer = await call_openai(prompts.NLP_RELEVANCE_PROMPT, truncated, max_tokens=10, temperature=0)
     return answer.lower().strip().startswith("да"), answer
 
 
@@ -309,8 +310,7 @@ async def summarize_group_text(messages: List[MessageInfo]) -> str:
     community_name = ", ".join(group_names)
     header = f"<b>👥 Обзор сообщества {community_name}</b>\n\n"
 
-    result = header + result
-    result = enforce_summary_length(result, max_summary_length)
+    result = header + enforce_summary_length(result, max_summary_length - len(header))
     if DEBUG:
         logger.debug("Group summary result:\n%s", result)
     return result
@@ -433,13 +433,15 @@ async def process_messages(
                 )
 
                 for msg, matching_summary in zip(unique_messages, coverage_results):
-                    msg.is_covered_in_summaries = matching_summary is not None
-                    logger.debug("is_covered_in_summaries: %s", msg.is_covered_in_summaries)
                     if matching_summary is not None:
                         if _deadline and time.monotonic() > _deadline:
-                            logger.warning("Deadline exceeded during covered message processing — skipping remaining updates")
-                            break
+                            logger.warning("Deadline exceeded during covered message processing — un-marking remaining covered messages")
+                            msg.is_covered_in_summaries = False
+                            continue
+                        msg.is_covered_in_summaries = True
                         await process_covered_message(msg, matching_summary=matching_summary, is_group=is_group)
+                    else:
+                        msg.is_covered_in_summaries = False
 
     unique_messages = [
         msg for msg in unique_messages

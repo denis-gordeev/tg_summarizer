@@ -46,7 +46,9 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         pass
 
     # Pull state from S3 if configured
+    t0 = time.monotonic()
     download_from_s3()
+    t_download = time.monotonic() - t0
 
     # Defaults can be overridden via EventBridge input transform
     send_message = _parse_event_flag(event.get('send_message'), True)
@@ -64,6 +66,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     else:
         deadline = time.monotonic() + 180 - SAFETY_MARGIN_SECONDS
 
+    t0 = time.monotonic()
     try:
         from config import validate_config
         validate_config()
@@ -79,6 +82,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             )
         )
     except Exception as e:
+        t_summarizer = time.monotonic() - t0
         elapsed = time.monotonic() - start_time
         logger.error("Lambda execution failed after %.1fs: %s", elapsed, e, exc_info=True)
         # Push state to S3 even on failure to preserve partial updates
@@ -91,12 +95,18 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             'send_message': send_message,
             'save_changes': save_changes,
         }
+    t_summarizer = time.monotonic() - t0
 
     # Push updated state back to S3
+    t0 = time.monotonic()
     upload_to_s3()
+    t_upload = time.monotonic() - t0
 
     elapsed = time.monotonic() - start_time
-    logger.info("Lambda completed in %.1fs", elapsed)
+    logger.info(
+        "Lambda completed in %.1fs (download=%.1fs, summarizer=%.1fs, upload=%.1fs)",
+        elapsed, t_download, t_summarizer, t_upload,
+    )
 
     return {
         'status': 'ok',

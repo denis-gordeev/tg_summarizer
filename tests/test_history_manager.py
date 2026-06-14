@@ -1770,5 +1770,91 @@ class UpdateSummaryInputTruncationTests(unittest.TestCase):
                     self.assertLessEqual(len(summary_part), 2001)
 
 
+class UpdateSummaryEnforcesLengthTests(unittest.TestCase):
+    """Tests for update_existing_summary enforcing summary max length on the result."""
+
+    def test_enforces_length_on_oversized_update(self):
+        """When update_existing_summary produces content exceeding SUMMARY_MAX_LENGTH,
+        the returned SummaryInfo content should be length-enforced."""
+        import types
+        import importlib
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        fake_channel_manager = types.ModuleType("channel_manager")
+        fake_channel_manager.create_channel_abbreviation = lambda ch: "AB"
+        fake_channel_manager.load_channel_abbreviations = lambda: {}
+
+        class FakeSummaryInfo:
+            def __init__(self, content="", date=None, message_count=0, channels=None, message_id=None):
+                self.content = content
+                self.date = date or datetime.now(timezone.utc)
+                self.message_count = message_count
+                self.channels = channels or []
+                self.message_id = message_id
+
+            def to_dict(self):
+                return {"content": self.content, "date": self.date.isoformat() if self.date else "",
+                        "message_count": self.message_count, "channels": self.channels, "message_id": self.message_id}
+
+        class FakeMessageInfo:
+            def __init__(self, text="", channel="", message_id=0, date=None, link=""):
+                self.text = text
+                self.channel = channel
+                self.message_id = message_id
+                self.date = date or datetime.now(timezone.utc)
+                self.link = link
+
+            def get_telegram_link(self):
+                return f"https://t.me/{self.channel.lstrip('@')}/{self.message_id}"
+
+        fake_models = types.ModuleType("models")
+        fake_models.SummaryInfo = FakeSummaryInfo
+        fake_models.MessageInfo = FakeMessageInfo
+        fake_prompts = types.ModuleType("prompts")
+        fake_prompts.prompts = types.SimpleNamespace()
+
+        oversized_response = "X" * 5000
+        fake_utils = types.ModuleType("utils")
+        fake_utils.call_openai = AsyncMock(return_value=oversized_response)
+        fake_utils.extract_links = lambda text: []
+        fake_utils.load_json_file = lambda *a, **kw: {"summaries": [], "last_updated": ""}
+        fake_utils.save_json_file = MagicMock(return_value=True)
+        fake_utils.now_iso = lambda: "2026-01-01T00:00:00"
+        fake_utils.text_hash = lambda text: "abc123"
+        fake_utils.count_characters = lambda text: len(text)
+
+        fake_mp = types.ModuleType("message_processor")
+        fake_mp.enforce_summary_length = lambda text, max_chars: text[:max_chars]
+        fake_mp.count_characters = fake_utils.count_characters
+
+        stubs = {
+            "dotenv": fake_dotenv,
+            "channel_manager": fake_channel_manager,
+            "models": fake_models,
+            "prompts": fake_prompts,
+            "utils": fake_utils,
+            "message_processor": fake_mp,
+        }
+
+        with patch.dict(sys.modules, stubs):
+            with patch.dict(os.environ, {}, clear=True):
+                sys.modules.pop("history_manager", None)
+                sys.modules.pop("config", None)
+                hm = importlib.import_module("history_manager")
+
+                self.assertEqual(hm.SUMMARY_MAX_LENGTH, 4000)
+
+                summary = FakeSummaryInfo(content="A" * 2000, message_id=1)
+                msg = FakeMessageInfo(text="New info", channel="@test", message_id=42)
+
+                async def _test():
+                    return await hm.update_existing_summary(summary, msg)
+
+                updated = asyncio.run(_test())
+                self.assertLessEqual(len(updated.content), 4000)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -159,29 +159,6 @@ class ConfigTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "OPENAI_SUMMARY_TEMPERATURE"):
                 _reload_module("config")
 
-    def test_config_similarity_llm_lower_from_env(self):
-        env = {
-            **REQUIRED_ENV,
-            "SIMILARITY_LLM_LOWER": "0.8",
-        }
-        with patch.dict(os.environ, env, clear=True):
-            config = _reload_module("config")
-        self.assertAlmostEqual(config.SIMILARITY_LLM_LOWER, 0.8)
-
-    def test_config_similarity_llm_lower_default(self):
-        with patch.dict(os.environ, REQUIRED_ENV, clear=True):
-            config = _reload_module("config")
-        self.assertAlmostEqual(config.SIMILARITY_LLM_LOWER, 0.7)
-
-    def test_config_similarity_llm_lower_rejects_invalid(self):
-        env = {
-            **REQUIRED_ENV,
-            "SIMILARITY_LLM_LOWER": "abc",
-        }
-        with patch.dict(os.environ, env, clear=True):
-            with self.assertRaisesRegex(ValueError, "SIMILARITY_LLM_LOWER"):
-                _reload_module("config")
-
     def test_config_similarity_llm_upper_from_env(self):
         env = {
             **REQUIRED_ENV,
@@ -841,6 +818,74 @@ class ConfigValidationConsistencyTests(unittest.TestCase):
         self.assertIn("_aws", output)
         self.assertIn("CloudWatchMetrics", output)
         self.assertIn("Latency", output)
+
+
+class NlpMinTextLengthConfigTests(unittest.TestCase):
+    """Tests for NLP_MIN_TEXT_LENGTH config."""
+
+    def test_config_reads_nlp_min_text_length_from_env(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, {
+                **REQUIRED_ENV,
+                "NLP_MIN_TEXT_LENGTH": "200",
+            }, clear=True):
+                sys.modules.pop("config", None)
+                config = importlib.import_module("config")
+                self.assertEqual(config.NLP_MIN_TEXT_LENGTH, 200)
+
+    def test_config_nlp_min_text_length_default(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+                sys.modules.pop("config", None)
+                config = importlib.import_module("config")
+                self.assertEqual(config.NLP_MIN_TEXT_LENGTH, 100)
+
+    def test_config_nlp_min_text_length_rejects_zero(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, {
+                **REQUIRED_ENV,
+                "NLP_MIN_TEXT_LENGTH": "0",
+            }, clear=True):
+                sys.modules.pop("config", None)
+                with self.assertRaises(ValueError):
+                    importlib.import_module("config")
+
+
+class NlpAdKeywordsNoRedundancyTests(unittest.TestCase):
+    """Tests that NLP_AD_KEYWORDS has no redundant entries."""
+
+    def test_no_substring_redundancy_in_ad_keywords(self):
+        """No keyword should be a substring of another keyword that appears
+        earlier in the list, since the regex alternation matches left-to-right."""
+        import importlib
+        import sys
+        import types
+        from unittest.mock import patch
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+                sys.modules.pop("config", None)
+                config = importlib.import_module("config")
+
+        keywords = config.NLP_AD_KEYWORDS
+        for i, kw in enumerate(keywords):
+            for j, earlier in enumerate(keywords[:i]):
+                self.assertNotIn(
+                    earlier.lower(), kw.lower(),
+                    f"Keyword '{kw}' at index {i} is redundant — '{earlier}' at index {j} is a substring"
+                )
 
 
 if __name__ == "__main__":

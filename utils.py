@@ -49,11 +49,12 @@ LINK_REGEX = re.compile(r"https?://\S+")
 TRAILING_PUNCTUATION_REGEX = re.compile(r"""[.,;:!?)\]}'">]+$""")
 TELEGRAM_CHANNEL_REGEX = re.compile(r"https://t\.me/([^/]+)/\d+")
 ABBREVIATION_REGEX = re.compile(r'\[([A-Z0-9]+)\]')
+HTML_TAG_REGEX = re.compile(r'<[^>]+>')
 
 
 def count_characters(text: str) -> int:
     """Подсчитывает количество символов в тексте, исключая HTML-теги."""
-    clean_text = re.sub(r'<[^>]+>', '', text)
+    clean_text = HTML_TAG_REGEX.sub('', text)
     return len(clean_text)
 
 

@@ -238,6 +238,27 @@ class HandlerTests(unittest.TestCase):
         self.assertEqual(result["status"], "error")
         self.assertIn("Missing required", result["error"])
 
+    def test_handler_logs_phase_timing_on_success(self):
+        """Handler should log per-phase timing (download, summarizer, upload) on success."""
+        event = {"send_message": True, "save_changes": True}
+
+        async_mock = AsyncMock()
+
+        def _run_and_close(coro):
+            coro.close()
+
+        with patch.object(self.lambda_handler.os, "chdir"), \
+             patch.object(self.lambda_handler, "download_from_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.object(self.lambda_handler, "run_summarizer", async_mock), \
+             patch.object(self.lambda_handler.asyncio, "run", side_effect=_run_and_close), \
+             patch.object(self.lambda_handler.logger, "info") as mock_log:
+            self.lambda_handler.handler(event, context=None)
+
+        phase_logs = [call for call in mock_log.call_args_list
+                      if "download=" in str(call) and "summarizer=" in str(call) and "upload=" in str(call)]
+        self.assertTrue(len(phase_logs) > 0, "Expected a per-phase timing log message")
+
 
 if __name__ == "__main__":
     unittest.main()

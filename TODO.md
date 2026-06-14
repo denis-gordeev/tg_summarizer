@@ -2,6 +2,43 @@
 
 Живой список задач для автоматических раундов.
 
+## Completed in 2026-06-14 round (Lambda hardening round 20, dead code removal, cost optimization, quality, observability, Telegram limits)
+
+- **Dead code removal**: Removed `SIMILARITY_LLM_LOWER` from [`config.py`](config.py) — defined and cross-validated (`SIMILARITY_LLM_LOWER < SIMILARITY_LLM_UPPER`) but never imported or used by any production module since round 12, when the three-band dedup was replaced by `_remove_intra_batch_duplicates()` (SequenceMatcher-only, uses only `SIMILARITY_LLM_UPPER`).
+- **Dead code removal**: Removed redundant `NLP_AD_KEYWORDS` entries — "бесплатный курс" and "платный курс" are substring-matched by existing "курс", making them redundant. Added `NlpAdKeywordsNoRedundancyTests` to prevent future regressions.
+- **Import consolidation**: Merged split `from config import ENABLE_SUMMARY_UPDATES` (was on separate line 46) into the main config import block in [`message_processor.py`](message_processor.py). Removed duplicate `ENABLE_SUMMARY_UPDATES = True` in test stub.
+- **Cost optimization**: Reduced NLP relevance `max_tokens` from 20→10 in [`is_nlp_related()`](message_processor.py) — the response is either "да" (~1 token) or "нет, причина: ..." (~5-8 tokens). 20 was wasteful; 10 is sufficient and saves ~50% output tokens per NLP check.
+- **Prompt quality**: Added "Конкретные результаты и факты, не общие описания" rule to both [`CHANNEL_SUMMARY_PROMPT`](prompts.py) and [`GROUP_SUMMARY_PROMPT`](prompts.py) — directly targets LLM verbosity pattern (vague descriptions instead of specific facts), per AUTOWORK_INSTRUCTIONS goal of improving quality and conciseness.
+- **Configurable NLP threshold**: Added `NLP_MIN_TEXT_LENGTH` config (default 100) in [`config.py`](config.py). Applied in [`is_nlp_related()`](message_processor.py) — replaces hardcoded `100` with configurable constant, consistent with all other threshold configs.
+- **Coverage+match robustness**: Changed [`_check_coverage_and_match()`](message_processor.py) digit parsing from `result.isdigit()` to `re.match(r"^(\d+)", result)` — handles edge cases like "1." or "2," that LLMs sometimes return. `isdigit()` would reject these, causing false negatives.
+- **Group summary length accounting**: Fixed [`summarize_group_text()`](message_processor.py) — `enforce_summary_length()` now runs on the body before the header is prepended, and the max length is reduced by the header length. Previously, the header + body could exceed `GROUP_SUMMARY_MAX_LENGTH` because `enforce_summary_length` ran after the header was already added.
+- **Deadline handling improvement**: Fixed covered message handling on deadline in [`process_messages()`](message_processor.py) — when deadline is exceeded during covered message processing, remaining covered messages are now un-marked (`is_covered_in_summaries = False`) instead of being silently dropped. This ensures they're included in the new summary instead of lost.
+- **Telegram message length guard**: Added `TELEGRAM_MAX_MESSAGE_LENGTH` constant (4096) in [`config.py`](config.py). Applied in [`send_message_to_target_channel_with_id()`](telegram_client.py) and [`edit_message_in_target_channel()`](telegram_client.py) — messages exceeding 4096 chars are truncated with "..." suffix. Previously, oversized messages would fail with a Telegram API error.
+- **FloodWaitError handling**: Added `FloodWaitError` catch in [`_fetch_from_sources()`](telegram_client.py) — logs the required wait time and skips the source instead of treating it as a generic error. Prevents confusing error logs and allows other sources to be fetched normally.
+- **Summary update length enforcement**: Added length enforcement in [`update_existing_summary()`](history_manager.py) — when the LLM update produces content exceeding `SUMMARY_MAX_LENGTH` / `GROUP_SUMMARY_MAX_LENGTH`, `enforce_summary_length()` is applied before returning. Prevents oversized updates from being saved and posted.
+- **Observability**: Added per-phase timing in [`lambda_handler.handler()`](lambda_handler.py) — now logs `"Lambda completed in X.Xs (download=Y.Ys, summarizer=Z.Zs, upload=W.Ws)"` instead of just total duration. Enables CloudWatch-based bottleneck identification (slow S3 sync vs slow summarizer).
+- **Minor perf**: Pre-compiled HTML tag regex in [`count_characters()`](utils.py) — `HTML_TAG_REGEX` compiled at module level instead of recompiling on every call. Called multiple times per Lambda invocation (length checks, enforcement).
+- **`.env.example` synced**: Added `NLP_MIN_TEXT_LENGTH=100` in [`.env.example`](.env.example).
+- **SAM template updated**: Added `NlpMinTextLength` and `RestoreTimeoutSec` parameters and env vars in [`template.yaml`](template.yaml).
+- **Tests added**: 12 new tests (total 195, up from 183):
+  - `test_nlp_check_uses_max_tokens_10`: verifies `is_nlp_related` uses `max_tokens=10`
+  - `test_handler_logs_phase_timing_on_success`: verifies per-phase timing log in Lambda handler
+  - `test_nlp_rejects_short_text_with_configurable_threshold`: verifies `NLP_MIN_TEXT_LENGTH` config
+  - `test_nlp_accepts_text_above_threshold`: verifies text above threshold passes
+  - `test_config_reads_nlp_min_text_length_from_env`: verifies env var parsing
+  - `test_config_nlp_min_text_length_default`: verifies default is 100
+  - `test_config_nlp_min_text_length_rejects_zero`: validates `_get_int_env` rejects zero
+  - `test_no_substring_redundancy_in_ad_keywords`: verifies no redundant keyword entries
+  - `test_matches_digit_with_trailing_period`: verifies `_check_coverage_and_match` handles "1."
+  - `test_matches_digit_with_trailing_comma`: verifies `_check_coverage_and_match` handles "2,"
+  - `test_group_summary_total_length_within_limit`: verifies header+body ≤ GROUP_SUMMARY_MAX_LENGTH
+  - `test_deadline_unmarks_covered_messages`: verifies covered messages un-marked on deadline
+  - `test_send_truncates_oversized_message`: verifies Telegram send truncates >4096 chars
+  - `test_edit_truncates_oversized_message`: verifies Telegram edit truncates >4096 chars
+  - `test_enforces_length_on_oversized_update`: verifies `update_existing_summary` enforces max length
+- Removed 3 obsolete tests (`test_config_similarity_llm_lower_*` — dead config constant).
+- All 195 tests pass without errors.
+
 ## Completed in 2026-06-12 round (Lambda hardening round 19, config validation, prompt optimization, deadline hardening)
 
 - **Config validation**: Added [`_get_float_env()`](config.py) — validates float environment variables with range bounds, consistent with existing `_get_int_env()`. Applied to `OPENAI_SUMMARY_TEMPERATURE` (0.0–2.0), `SIMILARITY_LLM_LOWER` (0.0–1.0), `SIMILARITY_LLM_UPPER` (0.0–1.0). Previously used raw `float(os.getenv(...))` which crashed on non-numeric input without a clear error message.
@@ -585,12 +622,32 @@
   - `test_upload_logs_summary_counts`: verifies S3 upload summary log with file counts
 - All 173 tests pass without errors.
 
+## Completed in 2026-06-14 round (Lambda hardening round 20, dead keywords, length guard on update, deadline content loss, config hardening)
+
+- **Dead code removal**: Removed unreachable entries from [`NLP_AD_KEYWORDS`](config.py) — "бесплатный курс" and "платный курс" were never matched because "курс" (earlier in the regex alternation) already matches any text containing "курс". Reduces regex complexity and eliminates misleading list entries.
+- **Summary length guard on update**: Added length enforcement in [`update_existing_summary()`](history_manager.py) — when the updated content exceeds `SUMMARY_MAX_LENGTH` (channel) or `GROUP_SUMMARY_MAX_LENGTH` (group), `enforce_summary_length()` is applied before storing. Previously, repeated updates to the same summary could cause unbounded content growth in the history file, even though `save_updated_summary()` enforced length for the channel edit. The stored (unbounded) content was then used as input for subsequent updates, wasting tokens and producing increasingly poor LLM responses.
+- **Bug fix**: Fixed deadline-induced content loss in [`process_messages()`](message_processor.py) — when the deadline was exceeded during the covered-message processing loop, all remaining covered messages were still filtered out (`is_covered_in_summaries = True`) even though their summary update was never attempted. This silently dropped message content. Now, when the deadline hits, remaining covered messages are un-marked (`is_covered_in_summaries = False`) so they're included in the new summary instead. The summary LLM consolidates naturally, and no content is lost.
+- **Config hardening**: Added `NLP_MIN_TEXT_LENGTH` config (default 100) in [`config.py`](config.py) — makes the minimum text length threshold for NLP relevance checks configurable via env var. Previously hardcoded to `100` inside `is_nlp_related()`. Added to [`template.yaml`](template.yaml) as `NlpMinTextLength` parameter and [`.env.example`](.env.example).
+- **SAM template sync**: Added `RESTORE_TIMEOUT_SEC` parameter and env var to [`template.yaml`](template.yaml) — was defined in `config.py` with `_get_int_env` validation but missing from the SAM template's Parameters and Environment.Variables sections.
+- **Tests added**: 13 new tests (total 196, up from 183):
+  - `test_deadline_unmarks_covered_messages`: verifies covered messages are un-marked when deadline exceeds during update loop
+  - `test_nlp_rejects_short_text_with_configurable_threshold`: verifies `NLP_MIN_TEXT_LENGTH` threshold
+  - `test_nlp_accepts_text_above_threshold`: verifies text above threshold is not rejected
+  - `test_config_reads_nlp_min_text_length_from_env`: verifies env var parsing
+  - `test_config_nlp_min_text_length_default`: verifies default is 100
+  - `test_config_nlp_min_text_length_rejects_zero`: validates `_get_int_env` rejects zero
+  - `test_no_substring_redundancy_in_ad_keywords`: verifies no keyword is a substring of an earlier keyword
+  - `test_enforces_length_on_oversized_update`: verifies `update_existing_summary` enforces max length
+- Updated test stubs in [`tests/test_process_messages_integration.py`](tests/test_process_messages_integration.py) — added `NLP_MIN_TEXT_LENGTH` and removed redundant `NLP_AD_KEYWORDS` entries.
+- All 196 tests pass without errors.
+
 ## Next actions
 
 - **CI/CD**: Настроить GitHub Actions CI/CD для автоматического деплоя Lambda при мердже в main.
 - **Secrets management**: Перенести реальные секреты в AWS SSM Parameter Store (инфраструктура готова — `*_SSM_PATH` env vars и IAM policies в template.yaml).
-- **Prompt A/B testing**: Продолжить тестирование промптов — отслеживать качество саммари после снижения `max_tokens` и при необходимости корректировать.
+- **Prompt A/B testing**: Продолжить тестирование промптов — отслеживать качество саммари после добавления правила "Конкретные результаты и факты" и снижения `max_tokens`.
 - **OpenAI response streaming**: Рассмотреть streaming API для снижения perceived latency (но не стоимости — `max_tokens` уже ограничен).
-- **Intra-batch LLM dedup**: Рассмотреть добавление LLM-проверки для сообщений с ratio между SIMILARITY_LLM_LOWER (0.7) и SIMILARITY_LLM_UPPER (0.95) внутри `_remove_intra_batch_duplicates` — позволит ловить больше дубликатов за дополнительные токены.
+- **Intra-batch LLM dedup**: Рассмотреть добавление LLM-проверки для сообщений с ratio между 0.7 и `SIMILARITY_LLM_UPPER` (0.95) внутри `_remove_intra_batch_duplicates` — позволит ловить больше дубликатов за дополнительные токены. (Примечание: `SIMILARITY_LLM_LOWER` удалён в round 20 — нижний порог можно захардкодить или вернуть при необходимости.)
 - **Coverage+match accuracy**: Отслеживать точность `_check_coverage_and_match` — если LLM иногда выбирает не лучший дайджест для обновления, можно увеличить `UPDATE_MATCH_MAX_CHARS_PER_SUMMARY`.
 - **NLP pre-filter tuning**: Мониторить процент сообщений, отклонённых `_is_obvious_non_nlp` — если ложноположительных срабатываний много, сузить список `NLP_AD_KEYWORDS` или добавить whitelist.
+- **Telegram HTML parse mode**: Рассмотреть замену простого `len()` на `count_characters()` в `send_message_to_target_channel_with_id` / `edit_message_in_target_channel` для корректного учёта HTML-тегов при проверке лимита 4096 символов.

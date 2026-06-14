@@ -125,14 +125,15 @@ OPENAI_REQUEST_TIMEOUT = _get_int_env("OPENAI_REQUEST_TIMEOUT", 30)
 OPENAI_SUMMARY_TEMPERATURE = _get_float_env("OPENAI_SUMMARY_TEMPERATURE", 0.3, min_val=0.0, max_val=2.0)
 
 NLP_CHECK_MAX_INPUT_CHARS = _get_int_env("NLP_CHECK_MAX_INPUT_CHARS", 2000)
+NLP_MIN_TEXT_LENGTH = _get_int_env("NLP_MIN_TEXT_LENGTH", 100)
 MAX_MESSAGES_PER_SOURCE = _get_int_env("MAX_MESSAGES_PER_SOURCE", 100)
 SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE = _get_int_env("SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE", 3000)
 NLP_CONCURRENT_CHECKS = _get_int_env("NLP_CONCURRENT_CHECKS", 5)
 UPDATE_SUMMARY_MAX_INPUT_CHARS = _get_int_env("UPDATE_SUMMARY_MAX_INPUT_CHARS", 2000)
 
 NLP_AD_KEYWORDS = [
-    "курс", "вебинар", "регистраци", "скидк", "промокод", "бесплатный курс",
-    "платный курс", "мастер-класс", "стажировк", "hire", "hiring day",
+    "курс", "вебинар", "регистраци", "скидк", "промокод",
+    "мастер-класс", "стажировк", "hire", "hiring day",
     "карьерный трек", "bootcamp", "boot camp",
 ]
 
@@ -154,10 +155,7 @@ GROUP_LAST_RUN_FILE = os.getenv('GROUP_LAST_RUN_FILE', 'group_last_run.json')
 PROMPTS_FILE = os.getenv("PROMPTS_FILE", "prompts.json")
 
 # Constants
-SIMILARITY_LLM_LOWER = _get_float_env("SIMILARITY_LLM_LOWER", 0.7, min_val=0.0, max_val=1.0)
 SIMILARITY_LLM_UPPER = _get_float_env("SIMILARITY_LLM_UPPER", 0.95, min_val=0.0, max_val=1.0)
-if SIMILARITY_LLM_LOWER >= SIMILARITY_LLM_UPPER:
-    raise ValueError("SIMILARITY_LLM_LOWER must be less than SIMILARITY_LLM_UPPER")
 ENABLE_SUMMARIES_DEDUPLICATION = os.getenv("ENABLE_SUMMARIES_DEDUPLICATION", "true").lower() not in {"0", "false", "no", "off"}
 ENABLE_SUMMARY_UPDATES = os.getenv("ENABLE_SUMMARY_UPDATES", "true").lower() not in {"0", "false", "no", "off"}
 
@@ -189,3 +187,6 @@ DEBUG = os.getenv("DEBUG", "").lower() in {"1", "true", "yes"}
 
 # Restore timeout (seconds) for channel restore from Telegram
 RESTORE_TIMEOUT_SEC = _get_int_env("RESTORE_TIMEOUT_SEC", 30)
+
+# Telegram message length limit (platform constant, not configurable)
+TELEGRAM_MAX_MESSAGE_LENGTH = 4096

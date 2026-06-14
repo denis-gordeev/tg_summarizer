@@ -5,12 +5,13 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Any
 
 from telethon import TelegramClient  # type: ignore[reportMissingTypeStubs]
+from telethon.errors import FloodWaitError  # type: ignore[reportMissingTypeStubs]
 from telethon.tl.functions.channels import (  # type: ignore[reportMissingTypeStubs]
     GetChannelRecommendationsRequest,
 )
 from telethon.tl.types import InputChannel  # type: ignore[reportMissingTypeStubs]
 
-from config import API_HASH, API_ID, BOT_TOKEN, SOURCE_GROUPS, MAX_MESSAGES_PER_SOURCE
+from config import API_HASH, API_ID, BOT_TOKEN, SOURCE_GROUPS, MAX_MESSAGES_PER_SOURCE, TELEGRAM_MAX_MESSAGE_LENGTH
 from history_manager import load_group_summarization_history, load_summarization_history
 from channel_manager import get_all_source_channels
 from message_processor import is_message_processed
@@ -139,6 +140,10 @@ async def _fetch_from_sources(
                         logger.debug("Skipping already processed message %s from %s", msg.id, source)
 
             logger.info("Found %d new messages from %s %s", source_count, source_label, source)
+        except FloodWaitError as e:
+            wait_seconds = e.seconds
+            logger.warning("FloodWaitError from %s %s: must wait %ds — skipping source", source_label, source, wait_seconds)
+            continue
         except Exception as e:
             logger.error("Error fetching messages from %s %s: %s", source_label, source, e, exc_info=True)
             continue
@@ -170,6 +175,10 @@ async def edit_message_in_target_channel(message_id: int, new_message: str) -> N
     """Редактирует сообщение в целевом канале."""
     from config import TARGET_CHANNEL
 
+    if len(new_message) > TELEGRAM_MAX_MESSAGE_LENGTH:
+        logger.warning("Edited message too long (%d chars), truncating to %d", len(new_message), TELEGRAM_MAX_MESSAGE_LENGTH)
+        new_message = new_message[:TELEGRAM_MAX_MESSAGE_LENGTH - 3] + "..."
+
     try:
         await _ensure_bot_client()
         await bot_client.edit_message(
@@ -183,6 +192,10 @@ async def edit_message_in_target_channel(message_id: int, new_message: str) -> N
 async def send_message_to_target_channel_with_id(message: str) -> Optional[int]:
     """Отправляет сообщение в целевой канал и возвращает message_id."""
     from config import TARGET_CHANNEL
+
+    if len(message) > TELEGRAM_MAX_MESSAGE_LENGTH:
+        logger.warning("Message too long (%d chars), truncating to %d", len(message), TELEGRAM_MAX_MESSAGE_LENGTH)
+        message = message[:TELEGRAM_MAX_MESSAGE_LENGTH - 3] + "..."
 
     try:
         await _ensure_bot_client()
