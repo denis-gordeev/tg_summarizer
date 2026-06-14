@@ -2,6 +2,22 @@
 
 Живой список задач для автоматических раундов.
 
+## Completed in 2026-06-14 round 2 (Lambda hardening round 21, architecture, correctness, cost)
+
+- **Architecture — eliminate circular import**: Moved [`_truncate_html_preserving_tags()`](utils.py) and [`enforce_summary_length()`](utils.py) from [`message_processor.py`](message_processor.py) to [`utils.py`](utils.py). Both functions only depend on [`count_characters()`](utils.py) (already in utils), so the move is natural. [`history_manager.py`](history_manager.py) previously imported `enforce_summary_length` and `count_characters` from `message_processor` at function level (lines 386, 433) to avoid circular imports. Now imports them from `utils` at module level, eliminating the circular dependency entirely. [`message_processor.py`](message_processor.py) re-imports `enforce_summary_length` from `utils` for backward compatibility.
+- **Correctness — HTML-aware Telegram length check**: Changed [`send_message_to_target_channel_with_id()`](telegram_client.py) and [`edit_message_in_target_channel()`](telegram_client.py) from `len(message) > TELEGRAM_MAX_MESSAGE_LENGTH` to `count_characters(message) > TELEGRAM_MAX_MESSAGE_LENGTH`. Telegram's 4096-character limit applies to visible characters, not raw string length including HTML tags. Previously, summaries with many HTML links (e.g., `<a href="...">[1]</a>`) could be prematurely truncated because `<a>` tags added to the raw length without affecting visible content. Now only visible characters are counted against the 4096 limit.
+- **Correctness — HTML-aware update fallback**: Changed [`update_existing_summary()`](history_manager.py) fallback comparison from `len(updated_content) < len(summary.content) * 0.8` to `count_characters(updated_content) < count_characters(summary.content) * 0.8`. The 80% threshold check determines whether the LLM response is truncated; it should compare visible content length (excluding HTML tags), consistent with how `enforce_summary_length` counts.
+- **Code quality — remove redundant enforce_summary_length**: Removed redundant `enforce_summary_length()` call in [`save_updated_summary()`](history_manager.py). The length is already enforced in `update_existing_summary()` before returning the `SummaryInfo` object. The previous code called `enforce_summary_length` again on the same content before passing it to `edit_message_in_target_channel`, which was wasteful and could produce different results if the enforcement logic changed between calls. Now passes `updated_summary.content` directly.
+- **Prompt quality — tighter update prompt**: Tightened summary update LLM prompt in [`update_existing_summary()`](history_manager.py) — replaced contradictory "Не переписывай всё саммари — только добавь ссылку" with clearer "Скопируй саммари и добавь ссылку рядом с релевантным абзацем. Остальной текст не меняй." The old wording told the LLM not to rewrite while also asking it to return the full updated summary, which was confusing. The new wording is explicit: copy the summary and insert the link, don't change the rest.
+- **Tests added**: 5 new tests (total 201, up from 196):
+  - `test_send_uses_count_characters_not_len`: verifies Telegram send uses `count_characters` for 4096 limit, allowing messages with HTML tags whose raw `len()` exceeds 4096 but visible chars are within limit
+  - `test_enforce_summary_length_importable_from_utils`: verifies `enforce_summary_length` is importable from `utils` module
+  - `test_history_manager_no_message_processor_import`: verifies `history_manager` no longer imports `enforce_summary_length` or `count_characters` from `message_processor` (static AST check)
+  - `test_fallback_uses_count_characters_for_html_content`: verifies `update_existing_summary` fallback comparison uses `count_characters` for HTML content
+  - `test_save_updated_summary_passes_content_directly`: verifies `save_updated_summary` passes `updated_summary.content` directly to `edit_message_in_target_channel` without re-enforcing length
+- Updated test stubs in [`tests/test_process_messages_integration.py`](tests/test_process_messages_integration.py), [`tests/test_history_manager.py`](tests/test_history_manager.py), [`tests/test_digest_post_processing.py`](tests/test_digest_post_processing.py), [`tests/test_summary_length_guardrails.py`](tests/test_summary_length_guardrails.py) — added `enforce_summary_length` and `count_characters` to fake `utils` module stubs to support the new import path.
+- All 201 tests pass without errors.
+
 ## Completed in 2026-06-14 round (Lambda hardening round 20, dead code removal, cost optimization, quality, observability, Telegram limits)
 
 - **Dead code removal**: Removed `SIMILARITY_LLM_LOWER` from [`config.py`](config.py) — defined and cross-validated (`SIMILARITY_LLM_LOWER < SIMILARITY_LLM_UPPER`) but never imported or used by any production module since round 12, when the three-band dedup was replaced by `_remove_intra_batch_duplicates()` (SequenceMatcher-only, uses only `SIMILARITY_LLM_UPPER`).
@@ -622,13 +638,22 @@
   - `test_upload_logs_summary_counts`: verifies S3 upload summary log with file counts
 - All 173 tests pass without errors.
 
-## Completed in 2026-06-14 round (Lambda hardening round 20, dead keywords, length guard on update, deadline content loss, config hardening)
+## Completed in 2026-06-14 round (Lambda hardening round 20, dead keywords, length guard on update, deadline content loss, config hardening, FloodWait, Telegram limits)
 
 - **Dead code removal**: Removed unreachable entries from [`NLP_AD_KEYWORDS`](config.py) — "бесплатный курс" and "платный курс" were never matched because "курс" (earlier in the regex alternation) already matches any text containing "курс". Reduces regex complexity and eliminates misleading list entries.
 - **Summary length guard on update**: Added length enforcement in [`update_existing_summary()`](history_manager.py) — when the updated content exceeds `SUMMARY_MAX_LENGTH` (channel) or `GROUP_SUMMARY_MAX_LENGTH` (group), `enforce_summary_length()` is applied before storing. Previously, repeated updates to the same summary could cause unbounded content growth in the history file, even though `save_updated_summary()` enforced length for the channel edit. The stored (unbounded) content was then used as input for subsequent updates, wasting tokens and producing increasingly poor LLM responses.
 - **Bug fix**: Fixed deadline-induced content loss in [`process_messages()`](message_processor.py) — when the deadline was exceeded during the covered-message processing loop, all remaining covered messages were still filtered out (`is_covered_in_summaries = True`) even though their summary update was never attempted. This silently dropped message content. Now, when the deadline hits, remaining covered messages are un-marked (`is_covered_in_summaries = False`) so they're included in the new summary instead. The summary LLM consolidates naturally, and no content is lost.
 - **Config hardening**: Added `NLP_MIN_TEXT_LENGTH` config (default 100) in [`config.py`](config.py) — makes the minimum text length threshold for NLP relevance checks configurable via env var. Previously hardcoded to `100` inside `is_nlp_related()`. Added to [`template.yaml`](template.yaml) as `NlpMinTextLength` parameter and [`.env.example`](.env.example).
 - **SAM template sync**: Added `RESTORE_TIMEOUT_SEC` parameter and env var to [`template.yaml`](template.yaml) — was defined in `config.py` with `_get_int_env` validation but missing from the SAM template's Parameters and Environment.Variables sections.
+- **Dead config cleanup**: Removed `SIMILARITY_LLM_LOWER` from [`config.py`](config.py) — not used in production code since LLM dedup was removed in round 12. Only `SIMILARITY_LLM_UPPER` is used by `_remove_intra_batch_duplicates()`. Removed cross-validation check (`SIMILARITY_LLM_LOWER >= SIMILARITY_LLM_UPPER`). Removed 3 obsolete tests from [`tests/test_openai_config.py`](tests/test_openai_config.py).
+- **Lambda hardening**: Added `FloodWaitError` handling in [`_fetch_from_sources()`](telegram_client.py) — when Telegram rate-limits a source channel, the source is skipped gracefully with a warning log instead of raising an unhandled exception that could abort the entire message-fetch phase. Other sources continue to be fetched.
+- **Coverage+match robustness**: Changed [`_check_coverage_and_match()`](message_processor.py) from `result.isdigit()` to `re.match(r"^(\d+)", result)` — handles LLM responses with trailing punctuation (e.g., "1." or "2,") that would fail strict `isdigit()`. Uses regex to extract leading digits.
+- **Prompt quality**: Added "Объединяй близкие подтемы под один заголовок" rule to both [`CHANNEL_SUMMARY_PROMPT`](prompts.py) and [`GROUP_SUMMARY_PROMPT`](prompts.py) — encourages the LLM to merge closely related sub-topics under a single header instead of creating separate sections. Directly improves conciseness per AUTOWORK_INSTRUCTIONS goal.
+- **Group header length accounting**: Fixed [`summarize_group_text()`](message_processor.py) — previously applied `enforce_summary_length()` on `header + result`, which could exceed the target because the header wasn't accounted for. Now enforces `max_summary_length - len(header)` before prepending the header, ensuring the total stays within `GROUP_SUMMARY_MAX_LENGTH`.
+- **Telegram message length guard**: Added `TELEGRAM_MAX_MESSAGE_LENGTH` (4096) constant in [`config.py`](config.py). Applied in [`send_message_to_target_channel_with_id()`](telegram_client.py) and [`edit_message_in_target_channel()`](telegram_client.py) — messages exceeding 4096 chars are truncated with "..." before sending. Prevents Telegram API errors on oversized messages.
+- **Observability**: Added per-phase timing in [`lambda_handler.handler()`](lambda_handler.py) — logs `download=Xs, summarizer=Ys, upload=Zs` alongside total elapsed time. Enables identifying which phase (S3 download, summarizer, S3 upload) is consuming the most Lambda time.
+- **HTML tag regex optimization**: Pre-compiled `HTML_TAG_REGEX` in [`utils.py`](utils.py) — `count_characters()` was calling `re.sub(r'<[^>]+>', '', text)` on every invocation, recompiling the regex each time. Now uses a module-level compiled pattern.
+- **Import cleanup**: Consolidated `from config import ENABLE_SUMMARY_UPDATES` into the main config import block in [`message_processor.py`](message_processor.py) — was a separate import line after the main block.
 - **Tests added**: 13 new tests (total 196, up from 183):
   - `test_deadline_unmarks_covered_messages`: verifies covered messages are un-marked when deadline exceeds during update loop
   - `test_nlp_rejects_short_text_with_configurable_threshold`: verifies `NLP_MIN_TEXT_LENGTH` threshold
@@ -638,16 +663,26 @@
   - `test_config_nlp_min_text_length_rejects_zero`: validates `_get_int_env` rejects zero
   - `test_no_substring_redundancy_in_ad_keywords`: verifies no keyword is a substring of an earlier keyword
   - `test_enforces_length_on_oversized_update`: verifies `update_existing_summary` enforces max length
-- Updated test stubs in [`tests/test_process_messages_integration.py`](tests/test_process_messages_integration.py) — added `NLP_MIN_TEXT_LENGTH` and removed redundant `NLP_AD_KEYWORDS` entries.
+  - `test_matches_digit_with_trailing_period`: verifies `_check_coverage_and_match` handles "1." response
+  - `test_matches_digit_with_trailing_comma`: verifies `_check_coverage_and_match` handles "2," response
+  - `test_group_summary_total_length_within_limit`: verifies group header accounted for in length enforcement
+  - `test_send_truncates_oversized_message`: verifies Telegram send truncates > 4096 chars
+  - `test_edit_truncates_oversized_message`: verifies Telegram edit truncates > 4096 chars
+  - `test_fetch_skips_source_on_flood_wait`: verifies `_fetch_from_sources` skips rate-limited sources
+  - `test_config_telegram_max_message_length_is_4096`: verifies constant value
+  - `test_handler_logs_phase_timing_on_success`: verifies per-phase timing in Lambda handler
+- Removed 3 obsolete tests (`test_config_similarity_llm_lower_from_env`, `test_config_similarity_llm_lower_default`, `test_config_similarity_llm_lower_rejects_invalid`) — testing removed `SIMILARITY_LLM_LOWER` config constant.
+- Updated test stubs in [`tests/test_process_messages_integration.py`](tests/test_process_messages_integration.py) — added `NLP_MIN_TEXT_LENGTH`, `ENABLE_SUMMARY_UPDATES`, fixed `NLP_MIN_TEXT_LENGTH` patching to use `patch.object` on module attribute.
 - All 196 tests pass without errors.
 
 ## Next actions
 
 - **CI/CD**: Настроить GitHub Actions CI/CD для автоматического деплоя Lambda при мердже в main.
 - **Secrets management**: Перенести реальные секреты в AWS SSM Parameter Store (инфраструктура готова — `*_SSM_PATH` env vars и IAM policies в template.yaml).
-- **Prompt A/B testing**: Продолжить тестирование промптов — отслеживать качество саммари после добавления правила "Конкретные результаты и факты" и снижения `max_tokens`.
+- **Prompt A/B testing**: Продолжить тестирование промптов — отслеживать качество саммари после добавления правила "Объединяй близкие подтемы" и снижения `max_tokens`.
 - **OpenAI response streaming**: Рассмотреть streaming API для снижения perceived latency (но не стоимости — `max_tokens` уже ограничен).
-- **Intra-batch LLM dedup**: Рассмотреть добавление LLM-проверки для сообщений с ratio между 0.7 и `SIMILARITY_LLM_UPPER` (0.95) внутри `_remove_intra_batch_duplicates` — позволит ловить больше дубликатов за дополнительные токены. (Примечание: `SIMILARITY_LLM_LOWER` удалён в round 20 — нижний порог можно захардкодить или вернуть при необходимости.)
+- **Intra-batch LLM dedup**: Рассмотреть добавление LLM-проверки для сообщений с ratio между 0.7 и `SIMILARITY_LLM_UPPER` (0.95) внутри `_remove_intra_batch_duplicates` — позволит ловить больше дубликатов за дополнительные токены.
 - **Coverage+match accuracy**: Отслеживать точность `_check_coverage_and_match` — если LLM иногда выбирает не лучший дайджест для обновления, можно увеличить `UPDATE_MATCH_MAX_CHARS_PER_SUMMARY`.
 - **NLP pre-filter tuning**: Мониторить процент сообщений, отклонённых `_is_obvious_non_nlp` — если ложноположительных срабатываний много, сузить список `NLP_AD_KEYWORDS` или добавить whitelist.
-- **Telegram HTML parse mode**: Рассмотреть замену простого `len()` на `count_characters()` в `send_message_to_target_channel_with_id` / `edit_message_in_target_channel` для корректного учёта HTML-тегов при проверке лимита 4096 символов.
+- **Summary update LLM prompt**: Оценить эффект от нового промпта "Скопируй саммари и добавь ссылку" — если LLM всё ещё переписывает, можно ещё сильнее ограничить (например, "Ответь только строку, которую нужно вставить").
+- **Channel abbreviation caching**: `create_channel_abbreviation()` в [`channel_manager.py`](channel_manager.py) загружает `channel_abbreviations.json` при каждом вызове — рассмотреть кеширование для снижения I/O в Lambda.

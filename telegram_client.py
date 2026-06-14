@@ -16,7 +16,7 @@ from history_manager import load_group_summarization_history, load_summarization
 from channel_manager import get_all_source_channels
 from message_processor import is_message_processed
 from models import MessageInfo
-from utils import extract_links
+from utils import count_characters, extract_links
 
 logger = logging.getLogger(__name__)
 
@@ -175,8 +175,8 @@ async def edit_message_in_target_channel(message_id: int, new_message: str) -> N
     """Редактирует сообщение в целевом канале."""
     from config import TARGET_CHANNEL
 
-    if len(new_message) > TELEGRAM_MAX_MESSAGE_LENGTH:
-        logger.warning("Edited message too long (%d chars), truncating to %d", len(new_message), TELEGRAM_MAX_MESSAGE_LENGTH)
+    if count_characters(new_message) > TELEGRAM_MAX_MESSAGE_LENGTH:
+        logger.warning("Edited message too long (%d visible chars), truncating to %d", count_characters(new_message), TELEGRAM_MAX_MESSAGE_LENGTH)
         new_message = new_message[:TELEGRAM_MAX_MESSAGE_LENGTH - 3] + "..."
 
     try:
@@ -193,8 +193,8 @@ async def send_message_to_target_channel_with_id(message: str) -> Optional[int]:
     """Отправляет сообщение в целевой канал и возвращает message_id."""
     from config import TARGET_CHANNEL
 
-    if len(message) > TELEGRAM_MAX_MESSAGE_LENGTH:
-        logger.warning("Message too long (%d chars), truncating to %d", len(message), TELEGRAM_MAX_MESSAGE_LENGTH)
+    if count_characters(message) > TELEGRAM_MAX_MESSAGE_LENGTH:
+        logger.warning("Message too long (%d visible chars), truncating to %d", count_characters(message), TELEGRAM_MAX_MESSAGE_LENGTH)
         message = message[:TELEGRAM_MAX_MESSAGE_LENGTH - 3] + "..."
 
     try:

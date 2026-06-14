@@ -19,6 +19,28 @@ REQUIRED_ENV = {
 }
 
 
+def _stub_count_characters(text):
+    return len(re.sub(r'<[^>]+>', '', text))
+
+
+def _stub_enforce_summary_length(text, max_chars):
+    if _stub_count_characters(text) <= max_chars:
+        return text
+    truncated = text[:max_chars]
+    tag_stack = []
+    for tag in re.finditer(r'<(/?)(\w+)[^>]*>', truncated):
+        is_closing = tag.group(1) == '/'
+        tag_name = tag.group(2).lower()
+        if is_closing:
+            if tag_stack and tag_stack[-1] == tag_name:
+                tag_stack.pop()
+        else:
+            tag_stack.append(tag_name)
+    for t in reversed(tag_stack):
+        truncated += f'</{t}>'
+    return truncated
+
+
 def _stub_dependencies(fake_openai_response: str = "[1] New AI breakthrough"):
     """Create stub modules and return the openai response to use."""
     fake_dotenv = types.ModuleType("dotenv")
@@ -62,7 +84,8 @@ def _stub_dependencies(fake_openai_response: str = "[1] New AI breakthrough"):
     fake_utils.extract_links = lambda text: [
         m for m in re.findall(r'(https?://\S+)', text)
     ]
-    fake_utils.count_characters = lambda text: len(re.sub(r'<[^>]+>', '', text))
+    fake_utils.count_characters = _stub_count_characters
+    fake_utils.enforce_summary_length = _stub_enforce_summary_length
 
     async def fake_call_openai(system_prompt, user_content, max_tokens=None, **kwargs):
         return fake_openai_response

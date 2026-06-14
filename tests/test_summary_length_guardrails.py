@@ -1,8 +1,9 @@
 import os
+import re
 import sys
 import types
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 
 REQUIRED_ENV = {
@@ -12,6 +13,28 @@ REQUIRED_ENV = {
     "TARGET_CHANNEL": "@target",
     "OPENAI_API_KEY": "test-key",
 }
+
+
+def _stub_count_characters(text):
+    return len(re.sub(r'<[^>]+>', '', text))
+
+
+def _stub_enforce_summary_length(text, max_chars):
+    if _stub_count_characters(text) <= max_chars:
+        return text
+    truncated = text[:max_chars]
+    tag_stack = []
+    for tag in re.finditer(r'<(/?)(\w+)[^>]*>', truncated):
+        is_closing = tag.group(1) == '/'
+        tag_name = tag.group(2).lower()
+        if is_closing:
+            if tag_stack and tag_stack[-1] == tag_name:
+                tag_stack.pop()
+        else:
+            tag_stack.append(tag_name)
+    for t in reversed(tag_stack):
+        truncated += f'</{t}>'
+    return truncated
 
 
 def _stub_dependencies():
@@ -58,12 +81,20 @@ def _stub_dependencies():
         NLP_RELEVANCE_PROMPT="nlp",
         COVERAGE_AND_MATCH_PROMPT="covmatch",
     )
+    fake_utils = types.ModuleType("utils")
+    fake_utils.call_openai = MagicMock()
+    fake_utils.extract_links = lambda text: []
+    fake_utils.count_characters = _stub_count_characters
+    fake_utils.enforce_summary_length = _stub_enforce_summary_length
+    fake_utils.text_hash = lambda text: "abc123"
+
     return {
         "dotenv": fake_dotenv,
         "openai": fake_openai,
         "channel_manager": fake_channel_manager,
         "history_manager": fake_history_manager,
         "prompts": fake_prompts,
+        "utils": fake_utils,
     }
 
 

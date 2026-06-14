@@ -25,7 +25,7 @@ from config import (
     GROUP_SUMMARY_MAX_LENGTH,
 )
 from models import MessageInfo, SummaryInfo
-from utils import call_openai, extract_links, load_json_file, save_json_file, now_iso, text_hash
+from utils import call_openai, extract_links, count_characters, enforce_summary_length, load_json_file, save_json_file, now_iso, text_hash
 
 logger = logging.getLogger(__name__)
 
@@ -358,9 +358,9 @@ async def update_existing_summary(
     else:
         new_link = f'<a href="{telegram_link}">[{channel_abbr}]</a>'
 
-    update_prompt = f"""Вставь ссылку на новое сообщение в подходящее место саммари.
-Не переписывай всё саммари — только добавь ссылку {new_link} рядом с релевантным абзацем.
-Если нет подходящего места — добавь строку "Другие ссылки: {new_link}" в конец.
+    update_prompt = f"""Вставь ссылку {new_link} в подходящее место саммари.
+Скопируй саммари и добавь ссылку рядом с релевантным абзацем. Остальной текст не меняй.
+Если нет подходящего места — добавь "Другие ссылки: {new_link}" в конец.
 Ответь только обновлённое саммари."""
 
     truncated_summary = summary.content[:UPDATE_SUMMARY_MAX_INPUT_CHARS]
@@ -369,8 +369,8 @@ async def update_existing_summary(
 
     try:
         updated_content = await call_openai(update_prompt, user_content, max_tokens=UPDATE_SUMMARY_MAX_TOKENS, temperature=0)
-        if not updated_content or len(updated_content) < len(summary.content) * 0.8:
-            logger.warning("LLM update response too short (%d < %d*0.8); falling back to append", len(updated_content or ""), len(summary.content))
+        if not updated_content or count_characters(updated_content) < count_characters(summary.content) * 0.8:
+            logger.warning("LLM update response too short (%d < %d*0.8); falling back to append", count_characters(updated_content or ""), count_characters(summary.content))
             updated_content = summary.content + f"\n\nДругие ссылки: {new_link}"
     except Exception as e:
         logger.error("Error updating summary via LLM: %s; falling back to append", e)
@@ -383,7 +383,6 @@ async def update_existing_summary(
     )
 
     max_len = GROUP_SUMMARY_MAX_LENGTH if is_group else SUMMARY_MAX_LENGTH
-    from message_processor import enforce_summary_length, count_characters
     if count_characters(updated_content) > max_len:
         updated_content = enforce_summary_length(updated_content, max_len)
 
@@ -430,12 +429,9 @@ async def save_updated_summary(
     invalidate_cache(history_file)
 
     if original_summary.message_id:
-        from message_processor import enforce_summary_length
-        max_len = GROUP_SUMMARY_MAX_LENGTH if is_group else SUMMARY_MAX_LENGTH
-        edit_content = enforce_summary_length(updated_summary.content, max_len)
         try:
             await edit_message_in_target_channel(
-                original_summary.message_id, edit_content
+                original_summary.message_id, updated_summary.content
             )
             logger.info("Message %s updated in channel", original_summary.message_id)
         except Exception as e:

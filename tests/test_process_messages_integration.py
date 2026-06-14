@@ -20,6 +20,7 @@ def _setup_stubs():
     fake_utils.extract_links = lambda text: []
     fake_utils.count_characters = lambda text: len(text)
     fake_utils.text_hash = lambda text: "abc123"
+    fake_utils.enforce_summary_length = lambda text, max_chars: text[:max_chars]
     sys.modules["utils"] = fake_utils
 
     # --- Stub config ---
@@ -1203,6 +1204,7 @@ class TelegramMessageLengthGuardTests(unittest.TestCase):
         fake_models.MessageInfo = MagicMock
         fake_utils = types.ModuleType("utils")
         fake_utils.extract_links = lambda text: []
+        fake_utils.count_characters = lambda text: len(text)
 
         with patch.dict(sys.modules, {
             "dotenv": fake_dotenv,
@@ -1277,6 +1279,7 @@ class TelegramMessageLengthGuardTests(unittest.TestCase):
         fake_models.MessageInfo = MagicMock
         fake_utils = types.ModuleType("utils")
         fake_utils.extract_links = lambda text: []
+        fake_utils.count_characters = lambda text: len(text)
 
         with patch.dict(sys.modules, {
             "dotenv": fake_dotenv,
@@ -1355,6 +1358,7 @@ class FloodWaitErrorHandlingTests(unittest.TestCase):
         fake_models.MessageInfo = MagicMock
         fake_utils = types.ModuleType("utils")
         fake_utils.extract_links = lambda text: []
+        fake_utils.count_characters = lambda text: len(text)
 
         with patch.dict(sys.modules, {
             "dotenv": fake_dotenv,
@@ -1391,3 +1395,113 @@ class FloodWaitErrorHandlingTests(unittest.TestCase):
             ))
 
             self.assertEqual(result, [])
+
+
+class TelegramHTMLAwareLengthTests(unittest.TestCase):
+    """Tests for Telegram length checks using count_characters() instead of len()."""
+
+    def test_send_uses_count_characters_not_len(self):
+        """send_message_to_target_channel_with_id should use count_characters for 4096 limit,
+        allowing messages with HTML tags that have <= 4096 visible characters."""
+        import importlib
+        import re
+        import sys
+        import types
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_telethon = types.ModuleType("telethon")
+        fake_telethon.TelegramClient = MagicMock
+        fake_telethon.errors = types.ModuleType("errors")
+        fake_telethon.errors.FloodWaitError = type("FloodWaitError", (Exception,), {})
+        fake_telethon.tl = types.ModuleType("tl")
+        fake_telethon.tl.functions = types.ModuleType("functions")
+        fake_telethon.tl.functions.channels = types.ModuleType("channels")
+        fake_telethon.tl.functions.channels.GetChannelRecommendationsRequest = MagicMock
+        fake_telethon.tl.types = types.ModuleType("types")
+        fake_telethon.tl.types.InputChannel = MagicMock
+        fake_config = types.ModuleType("config")
+        fake_config.API_ID = 1
+        fake_config.API_HASH = "h"
+        fake_config.BOT_TOKEN = "t"
+        fake_config.TARGET_CHANNEL = "@target"
+        fake_config.SOURCE_GROUPS = set()
+        fake_config.MAX_MESSAGES_PER_SOURCE = 100
+        fake_config.TELEGRAM_MAX_MESSAGE_LENGTH = 4096
+        fake_history = types.ModuleType("history_manager")
+        fake_history.load_group_summarization_history = lambda: set()
+        fake_history.load_summarization_history = lambda: set()
+        fake_cm = types.ModuleType("channel_manager")
+        fake_cm.get_all_source_channels = lambda: []
+        fake_mp = types.ModuleType("message_processor")
+        fake_mp.is_message_processed = lambda msg, proc: False
+        fake_models = types.ModuleType("models")
+        fake_models.MessageInfo = MagicMock
+        fake_utils = types.ModuleType("utils")
+        fake_utils.extract_links = lambda text: []
+        fake_utils.count_characters = lambda text: len(re.sub(r'<[^>]+>', '', text))
+
+        with patch.dict(sys.modules, {
+            "dotenv": fake_dotenv,
+            "telethon": fake_telethon,
+            "telethon.errors": fake_telethon.errors,
+            "telethon.tl": fake_telethon.tl,
+            "telethon.tl.functions": fake_telethon.tl.functions,
+            "telethon.tl.functions.channels": fake_telethon.tl.functions.channels,
+            "telethon.tl.types": fake_telethon.tl.types,
+            "config": fake_config,
+            "history_manager": fake_history,
+            "channel_manager": fake_cm,
+            "message_processor": fake_mp,
+            "models": fake_models,
+            "utils": fake_utils,
+        }):
+            sys.modules.pop("telegram_client", None)
+            tg = importlib.import_module("telegram_client")
+
+            sent_message = types.SimpleNamespace(id=123)
+            fake_bot = MagicMock()
+            fake_bot.is_connected = lambda: True
+            fake_bot.send_message = AsyncMock(return_value=sent_message)
+            fake_bot.start = AsyncMock()
+            tg.bot_client = fake_bot
+            tg.user_client = None
+
+            visible_chars = 3900
+            html_tags = '<a href="https://example.com/very/long/url/path">[1]</a> ' * 20
+            html_msg = html_tags + "x" * visible_chars
+            self.assertGreater(len(html_msg), 4096)
+
+            with patch.object(tg, "_ensure_bot_client", new_callable=AsyncMock):
+                result = asyncio.run(tg.send_message_to_target_channel_with_id(html_msg))
+
+            self.assertIsNotNone(result)
+            fake_bot.send_message.assert_called_once()
+            sent_text = fake_bot.send_message.call_args[0][1]
+            self.assertEqual(sent_text, html_msg)
+
+
+class EnforceSummaryLengthInUtilsTests(unittest.TestCase):
+    """Tests that enforce_summary_length is available from utils module."""
+
+    def test_enforce_summary_length_importable_from_utils(self):
+        """enforce_summary_length should be importable directly from utils."""
+        from utils import enforce_summary_length
+        self.assertTrue(callable(enforce_summary_length))
+
+
+class NoCircularImportTests(unittest.TestCase):
+    """Tests that history_manager no longer imports from message_processor."""
+
+    def test_history_manager_no_message_processor_import(self):
+        """history_manager should not import enforce_summary_length or count_characters
+        from message_processor — they should come from utils."""
+        import ast
+        with open("history_manager.py") as f:
+            tree = ast.parse(f.read())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module == "message_processor":
+                for alias in node.names:
+                    self.assertNotIn(alias.name, ("enforce_summary_length", "count_characters"),
+                                     f"history_manager should not import {alias.name} from message_processor")
