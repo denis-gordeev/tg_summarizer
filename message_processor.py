@@ -242,7 +242,7 @@ async def summarize_group_text(messages: List[MessageInfo]) -> str:
     community_name = ", ".join(group_names)
     header = f"<b>👥 Обзор сообщества {community_name}</b>\n\n"
 
-    result = header + enforce_summary_length(result, max_summary_length - len(header))
+    result = header + enforce_summary_length(result, max_summary_length - count_characters(header))
     if DEBUG:
         logger.debug("Group summary result:\n%s", result)
     return result
@@ -343,6 +343,15 @@ async def process_messages(
 
         if msg.is_nlp_related:
             nlp_related_messages.append(msg)
+
+    ad_filtered = sum(1 for m in all_checked_messages if getattr(m, 'is_nlp_related_reason', '') == "ad_keyword")
+    short_filtered = sum(1 for m in all_checked_messages if getattr(m, 'is_nlp_related_reason', '') == "too_short")
+    rejected = len(all_checked_messages) - len(nlp_related_messages)
+    logger.info(
+        "NLP filter (%s): %d total, %d accepted, %d rejected (ad=%d, short=%d, other=%d)",
+        stream_label, len(messages), len(nlp_related_messages), rejected,
+        ad_filtered, short_filtered, rejected - ad_filtered - short_filtered,
+    )
 
     unique_messages = nlp_related_messages
     if unique_messages:

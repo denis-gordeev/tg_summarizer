@@ -14,7 +14,7 @@ class PromptManager:
     It first loads default prompts defined in the class, and then overrides them
     with any custom prompts defined in an external `prompts.json` file.
 
-    Prompts can be accessed as attributes, e.g., `prompts.DUPLICATE_CHECK_PROMPT`.
+    Prompts can be accessed as attributes, e.g., `prompts.CHANNEL_SUMMARY_PROMPT`.
     """
 
     def __init__(self):

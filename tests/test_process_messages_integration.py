@@ -1,5 +1,6 @@
 import asyncio
 import importlib
+import re
 import sys
 import time
 import types
@@ -7,6 +8,48 @@ import unittest
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from models import MessageInfo, SummaryInfo
+
+
+def _truncate_html_preserving_tags(text, max_visible_chars):
+    if max_visible_chars <= 0:
+        return ""
+    result = []
+    open_tags = []
+    visible_chars = 0
+    i = 0
+    truncated = False
+    while i < len(text):
+        char = text[i]
+        if char == "<":
+            end = text.find(">", i)
+            if end == -1:
+                break
+            tag = text[i:end + 1]
+            result.append(tag)
+            tag_body = tag[1:-1].strip()
+            if tag_body and not tag_body.startswith(("!", "?")):
+                is_closing = tag_body.startswith("/")
+                tag_name = tag_body[1:].split()[0].lower() if is_closing else tag_body.split()[0].lower()
+                is_self_closing = tag_body.endswith("/")
+                if is_closing:
+                    if open_tags and open_tags[-1] == tag_name:
+                        open_tags.pop()
+                elif not is_self_closing:
+                    open_tags.append(tag_name)
+            i = end + 1
+            continue
+        if visible_chars >= max_visible_chars:
+            truncated = True
+            break
+        result.append(char)
+        visible_chars += 1
+        i += 1
+    output = "".join(result).rstrip()
+    if truncated and visible_chars > 0 and not output.endswith("..."):
+        output = output.rstrip(" ,;:\n") + "..."
+    for tag_name in reversed(open_tags):
+        output += f"</{tag_name}>"
+    return output.strip()
 
 
 def _setup_stubs():
@@ -1204,7 +1247,8 @@ class TelegramMessageLengthGuardTests(unittest.TestCase):
         fake_models.MessageInfo = MagicMock
         fake_utils = types.ModuleType("utils")
         fake_utils.extract_links = lambda text: []
-        fake_utils.count_characters = lambda text: len(text)
+        fake_utils.count_characters = lambda text: len(re.sub(r'<[^>]+>', '', text))
+        fake_utils._truncate_html_preserving_tags = _truncate_html_preserving_tags
 
         with patch.dict(sys.modules, {
             "dotenv": fake_dotenv,
@@ -1239,7 +1283,7 @@ class TelegramMessageLengthGuardTests(unittest.TestCase):
             self.assertIsNotNone(result)
             call_args = fake_bot.send_message.call_args
             sent_text = call_args[0][1]
-            self.assertLessEqual(len(sent_text), 4096)
+            self.assertLessEqual(fake_utils.count_characters(sent_text), 4096)
 
     def test_edit_truncates_oversized_message(self):
         """edit_message_in_target_channel should truncate messages > 4096 chars."""
@@ -1279,7 +1323,8 @@ class TelegramMessageLengthGuardTests(unittest.TestCase):
         fake_models.MessageInfo = MagicMock
         fake_utils = types.ModuleType("utils")
         fake_utils.extract_links = lambda text: []
-        fake_utils.count_characters = lambda text: len(text)
+        fake_utils.count_characters = lambda text: len(re.sub(r'<[^>]+>', '', text))
+        fake_utils._truncate_html_preserving_tags = _truncate_html_preserving_tags
 
         with patch.dict(sys.modules, {
             "dotenv": fake_dotenv,
@@ -1312,7 +1357,90 @@ class TelegramMessageLengthGuardTests(unittest.TestCase):
 
             call_args = fake_bot.edit_message.call_args
             sent_text = call_args[0][2]
-            self.assertLessEqual(len(sent_text), 4096)
+            self.assertLessEqual(fake_utils.count_characters(sent_text), 4096)
+
+    def test_send_uses_html_aware_truncation(self):
+        """send_message_to_target_channel_with_id should use _truncate_html_preserving_tags
+        instead of raw string slicing, preserving HTML tags on truncation."""
+        import importlib
+        import sys
+        import types
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_telethon = types.ModuleType("telethon")
+        fake_telethon.TelegramClient = MagicMock
+        fake_telethon.errors = types.ModuleType("errors")
+        fake_telethon.errors.FloodWaitError = type("FloodWaitError", (Exception,), {})
+        fake_telethon.tl = types.ModuleType("tl")
+        fake_telethon.tl.functions = types.ModuleType("functions")
+        fake_telethon.tl.functions.channels = types.ModuleType("channels")
+        fake_telethon.tl.functions.channels.GetChannelRecommendationsRequest = MagicMock
+        fake_telethon.tl.types = types.ModuleType("types")
+        fake_telethon.tl.types.InputChannel = MagicMock
+        fake_config = types.ModuleType("config")
+        fake_config.API_ID = 1
+        fake_config.API_HASH = "h"
+        fake_config.BOT_TOKEN = "t"
+        fake_config.TARGET_CHANNEL = "@target"
+        fake_config.SOURCE_GROUPS = set()
+        fake_config.MAX_MESSAGES_PER_SOURCE = 100
+        fake_config.TELEGRAM_MAX_MESSAGE_LENGTH = 4096
+        fake_history = types.ModuleType("history_manager")
+        fake_history.load_group_summarization_history = lambda: set()
+        fake_history.load_summarization_history = lambda: set()
+        fake_cm = types.ModuleType("channel_manager")
+        fake_cm.get_all_source_channels = lambda: []
+        fake_mp = types.ModuleType("message_processor")
+        fake_mp.is_message_processed = lambda msg, proc: False
+        fake_models = types.ModuleType("models")
+        fake_models.MessageInfo = MagicMock
+
+        truncate_called = [False]
+        def _fake_truncate(text, max_visible):
+            truncate_called[0] = True
+            return _truncate_html_preserving_tags(text, max_visible)
+
+        fake_utils = types.ModuleType("utils")
+        fake_utils.extract_links = lambda text: []
+        fake_utils.count_characters = lambda text: len(re.sub(r'<[^>]+>', '', text))
+        fake_utils._truncate_html_preserving_tags = _fake_truncate
+
+        with patch.dict(sys.modules, {
+            "dotenv": fake_dotenv,
+            "telethon": fake_telethon,
+            "telethon.errors": fake_telethon.errors,
+            "telethon.tl": fake_telethon.tl,
+            "telethon.tl.functions": fake_telethon.tl.functions,
+            "telethon.tl.functions.channels": fake_telethon.tl.functions.channels,
+            "telethon.tl.types": fake_telethon.tl.types,
+            "config": fake_config,
+            "history_manager": fake_history,
+            "channel_manager": fake_cm,
+            "message_processor": fake_mp,
+            "models": fake_models,
+            "utils": fake_utils,
+        }):
+            sys.modules.pop("telegram_client", None)
+            tg = importlib.import_module("telegram_client")
+
+            sent_message = types.SimpleNamespace(id=123)
+            fake_bot = MagicMock()
+            fake_bot.is_connected = lambda: True
+            fake_bot.send_message = AsyncMock(return_value=sent_message)
+            fake_bot.start = AsyncMock()
+            tg.bot_client = fake_bot
+            tg.user_client = None
+
+            msg_with_html = "<b>" + "x" * 5000 + "</b>"
+            with patch.object(tg, "_ensure_bot_client", new_callable=AsyncMock):
+                asyncio.run(tg.send_message_to_target_channel_with_id(msg_with_html))
+
+            self.assertTrue(truncate_called[0], "_truncate_html_preserving_tags should be called for oversized messages")
+            call_args = fake_bot.send_message.call_args
+            sent_text = call_args[0][1]
+            self.assertTrue(sent_text.endswith("</b>"), "Truncated message should close HTML tags")
 
 
 class FloodWaitErrorHandlingTests(unittest.TestCase):
@@ -1359,6 +1487,7 @@ class FloodWaitErrorHandlingTests(unittest.TestCase):
         fake_utils = types.ModuleType("utils")
         fake_utils.extract_links = lambda text: []
         fake_utils.count_characters = lambda text: len(text)
+        fake_utils._truncate_html_preserving_tags = _truncate_html_preserving_tags
 
         with patch.dict(sys.modules, {
             "dotenv": fake_dotenv,
@@ -1441,6 +1570,7 @@ class TelegramHTMLAwareLengthTests(unittest.TestCase):
         fake_utils = types.ModuleType("utils")
         fake_utils.extract_links = lambda text: []
         fake_utils.count_characters = lambda text: len(re.sub(r'<[^>]+>', '', text))
+        fake_utils._truncate_html_preserving_tags = _truncate_html_preserving_tags
 
         with patch.dict(sys.modules, {
             "dotenv": fake_dotenv,
@@ -1505,3 +1635,80 @@ class NoCircularImportTests(unittest.TestCase):
                 for alias in node.names:
                     self.assertNotIn(alias.name, ("enforce_summary_length", "count_characters"),
                                      f"history_manager should not import {alias.name} from message_processor")
+
+
+class NlpFilterStatsTests(unittest.TestCase):
+    """Tests for NLP filter statistics logging."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._stubs = _setup_stubs()
+        cls._fake_config, cls._fake_history, cls._fake_tg = cls._stubs
+        for mod_name in list(sys.modules.keys()):
+            if mod_name in ("message_processor", "models"):
+                del sys.modules[mod_name]
+        cls.mp = importlib.import_module("message_processor")
+
+    def test_process_messages_logs_nlp_filter_stats(self):
+        """process_messages should log NLP filter stats (accepted, rejected, ad, short)."""
+        msgs = [
+            _make_message(text="A" * 200, channel="@ch1", message_id=1),
+            _make_message(text="short", channel="@ch2", message_id=2),
+            _make_message(text="Курс по ML с сертификацией! " + "B" * 200, channel="@ch3", message_id=3),
+        ]
+
+        async def _fake_nlp(text):
+            if len(text) < 100:
+                return (False, "too_short")
+            if "курс" in text.lower():
+                return (False, "ad_keyword")
+            return (True, "да")
+
+        with patch.object(self.mp, "is_nlp_related", side_effect=_fake_nlp), \
+             patch.object(self.mp, "call_openai", new_callable=AsyncMock, return_value="summary"), \
+             patch("telegram_client.send_message_to_target_channel_with_id", new_callable=AsyncMock, return_value=42), \
+             patch.object(self.mp.logger, "info") as mock_log:
+            asyncio.run(self.mp.process_messages(
+                msgs, save_changes=False, send_message=True, is_group=False,
+            ))
+
+        stats_logs = [call for call in mock_log.call_args_list
+                      if "NLP filter" in str(call)]
+        self.assertTrue(len(stats_logs) > 0, "Expected NLP filter stats log message")
+
+        log_text = str(stats_logs[0])
+        self.assertIn("accepted", log_text)
+        self.assertIn("rejected", log_text)
+
+
+class GroupSummaryHeaderLengthTests(unittest.TestCase):
+    """Tests that group summary header length is accounted for using count_characters."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._stubs = _setup_stubs()
+        cls._fake_config, cls._fake_history, cls._fake_tg = cls._stubs
+        for mod_name in list(sys.modules.keys()):
+            if mod_name in ("message_processor", "models"):
+                del sys.modules[mod_name]
+        cls.mp = importlib.import_module("message_processor")
+
+    def test_group_summary_uses_count_characters_for_header(self):
+        """summarize_group_text should account for header length using count_characters,
+        not len(), so HTML tags in the header don't over-reduce the body allowance."""
+        import ast
+        with open("message_processor.py") as f:
+            source = f.read()
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == "summarize_group_text":
+                found_count_characters = False
+                for child in ast.walk(node):
+                    if isinstance(child, ast.Call):
+                        func = child.func
+                        if isinstance(func, ast.Name) and func.id == "count_characters":
+                            found_count_characters = True
+                self.assertTrue(
+                    found_count_characters,
+                    "summarize_group_text should call count_characters for header length"
+                )

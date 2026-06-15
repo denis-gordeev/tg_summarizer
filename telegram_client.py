@@ -16,7 +16,7 @@ from history_manager import load_group_summarization_history, load_summarization
 from channel_manager import get_all_source_channels
 from message_processor import is_message_processed
 from models import MessageInfo
-from utils import count_characters, extract_links
+from utils import count_characters, extract_links, _truncate_html_preserving_tags
 
 logger = logging.getLogger(__name__)
 
@@ -177,7 +177,7 @@ async def edit_message_in_target_channel(message_id: int, new_message: str) -> N
 
     if count_characters(new_message) > TELEGRAM_MAX_MESSAGE_LENGTH:
         logger.warning("Edited message too long (%d visible chars), truncating to %d", count_characters(new_message), TELEGRAM_MAX_MESSAGE_LENGTH)
-        new_message = new_message[:TELEGRAM_MAX_MESSAGE_LENGTH - 3] + "..."
+        new_message = _truncate_html_preserving_tags(new_message, TELEGRAM_MAX_MESSAGE_LENGTH - 3)
 
     try:
         await _ensure_bot_client()
@@ -195,7 +195,7 @@ async def send_message_to_target_channel_with_id(message: str) -> Optional[int]:
 
     if count_characters(message) > TELEGRAM_MAX_MESSAGE_LENGTH:
         logger.warning("Message too long (%d visible chars), truncating to %d", count_characters(message), TELEGRAM_MAX_MESSAGE_LENGTH)
-        message = message[:TELEGRAM_MAX_MESSAGE_LENGTH - 3] + "..."
+        message = _truncate_html_preserving_tags(message, TELEGRAM_MAX_MESSAGE_LENGTH - 3)
 
     try:
         await _ensure_bot_client()

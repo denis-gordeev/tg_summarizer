@@ -2,6 +2,19 @@
 
 Живой список задач для автоматических раундов.
 
+## Completed in 2026-06-15 round (Lambda hardening round 22, correctness, observability)
+
+- **Correctness — HTML-aware Telegram truncation**: Changed [`send_message_to_target_channel_with_id()`](telegram_client.py) and [`edit_message_in_target_channel()`](telegram_client.py) from raw string slicing `message[:4096-3] + "..."` to [`_truncate_html_preserving_tags()`](utils.py). Previously, raw slicing could break HTML tags mid-tag (e.g., `<a href="...">` cut to `<a href="...`) and leave unclosed tags. Now truncation is HTML-aware: visible characters are counted against the 4096 limit, HTML tags are preserved, and open tags are properly closed. The max is reduced by 3 chars to reserve space for the "..." suffix.
+- **Correctness — Group summary header length accounting**: Fixed [`summarize_group_text()`](message_processor.py) — `len(header)` was used to subtract header length from `max_summary_length`, but `len(header)` counts raw chars including `<b>`/`</b>` HTML tags, while `max_summary_length` is in visible characters (as used by `enforce_summary_length`). This over-reduced the body allowance by ~7 chars per header. Changed to `count_characters(header)` for consistency with the visible-character accounting used throughout the codebase.
+- **Observability — NLP filter stats**: Added structured logging in [`process_messages()`](message_processor.py) after the NLP gather phase — logs `"NLP filter (channels): N total, M accepted, K rejected (ad=X, short=Y, other=Z)"`. Enables CloudWatch-based monitoring of NLP filter effectiveness (are we rejecting too many messages? Are ad/short filters working?).
+- **Code quality — PromptManager docstring**: Removed stale `DUPLICATE_CHECK_PROMPT` reference from [`PromptManager`](prompts.py) docstring — the prompt was removed in round 17 (2026-06-11) but the docstring still referenced it as an example.
+- **Tests added**: 3 new tests (total 204, up from 201):
+  - `test_send_uses_html_aware_truncation`: verifies `send_message_to_target_channel_with_id` calls `_truncate_html_preserving_tags` and properly closes HTML tags on truncation
+  - `test_process_messages_logs_nlp_filter_stats`: verifies `process_messages` logs NLP filter statistics (accepted, rejected, ad, short)
+  - `test_group_summary_uses_count_characters_for_header`: verifies `summarize_group_text` uses `count_characters` (not `len`) for header length accounting (static AST check)
+- Updated test stubs in [`tests/test_process_messages_integration.py`](tests/test_process_messages_integration.py) — added `_truncate_html_preserving_tags` to all `fake_utils` stubs that import `telegram_client`, updated `count_characters` stubs to strip HTML tags, updated truncation assertions to check visible chars instead of raw string length.
+- All 204 tests pass without errors.
+
 ## Completed in 2026-06-14 round 2 (Lambda hardening round 21, architecture, correctness, cost)
 
 - **Architecture — eliminate circular import**: Moved [`_truncate_html_preserving_tags()`](utils.py) and [`enforce_summary_length()`](utils.py) from [`message_processor.py`](message_processor.py) to [`utils.py`](utils.py). Both functions only depend on [`count_characters()`](utils.py) (already in utils), so the move is natural. [`history_manager.py`](history_manager.py) previously imported `enforce_summary_length` and `count_characters` from `message_processor` at function level (lines 386, 433) to avoid circular imports. Now imports them from `utils` at module level, eliminating the circular dependency entirely. [`message_processor.py`](message_processor.py) re-imports `enforce_summary_length` from `utils` for backward compatibility.
