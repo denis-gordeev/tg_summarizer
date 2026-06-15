@@ -2,6 +2,34 @@
 
 Живой список задач для автоматических раундов.
 
+## Completed in 2026-06-15 round 2 (Lambda hardening round 23, caching, update cap, observability, cost monitoring)
+
+- **Channel abbreviation caching**: Added `_abbreviations_cache` in-memory cache and `_invalidate_abbreviations_cache()` in [`channel_manager.py`](channel_manager.py). [`load_channel_abbreviations()`](channel_manager.py) now caches the result after first load, avoiding repeated `channel_abbreviations.json` disk reads. Cache is invalidated on [`save_channel_abbreviation()`](channel_manager.py). Previously, each call to [`create_channel_abbreviation()`](channel_manager.py) — invoked once per message in [`_replace_source_with_links()`](message_processor.py) — triggered a full file read. With 10–30 messages per invocation, this eliminated 10–30 redundant disk reads.
+- **Covered message update limit**: Added `MAX_COVERED_MESSAGE_UPDATES` config (default 5) in [`config.py`](config.py). Applied in [`process_messages()`](message_processor.py) — when more messages are covered by existing summaries than the cap, excess messages are un-marked (`is_covered_in_summaries = False`) and included in the new summary instead. Previously, a batch with many covered messages (e.g., a slow news day where most messages are updates to existing summaries) could trigger N sequential LLM calls + Telegram edits, potentially consuming the entire Lambda timeout on updates alone with no time left for summary generation.
+- **Lambda error categorization**: Added [`_classify_error()`](lambda_handler.py) and `error_type` field to Lambda error responses. Errors are classified as `"timeout"` (`DeadlineExceededError`), `"config"` (`ValueError` from `validate_config`), `"connection"` (connection/timeout errors), or `"runtime"` (all others). Error log now includes the category: `"Lambda execution failed after Xs [timeout]: ..."`. Enables CloudWatch metric filters on specific error types (e.g., `{ $.error_type = "config" }` to alert on misconfiguration).
+- **OpenAI EMF token metrics**: Extended [`_emit_openai_latency()`](utils.py) to include `PromptTokens` and `CompletionTokens` as EMF metrics alongside `Latency`. Enables CloudWatch-based cost monitoring (token consumption trends) and alerting without additional API calls.
+- **Redundant `count_characters` calls**: Eliminated duplicate `count_characters()` calls in [`send_message_to_target_channel_with_id()`](telegram_client.py) and [`edit_message_in_target_channel()`](telegram_client.py) — `count_characters(message)` was called twice (once for the length check, once for the warning log). Now computed once and stored in `visible_chars`.
+- **`.env.example` and `template.yaml` synced**: Added `SIMILARITY_LLM_UPPER=0.95` and `MAX_COVERED_MESSAGE_UPDATES=5` to [`.env.example`](.env.example). Added `SimilarityLlmUpper` and `MaxCoveredMessageUpdates` parameters and env vars to [`template.yaml`](template.yaml).
+- **Tests added**: 15 new tests (total 219, up from 204):
+  - `test_abbreviations_cache_returns_same_dict_on_repeated_calls`: verifies cache avoids second file read
+  - `test_save_channel_abbreviation_invalidates_cache`: verifies cache cleared after save
+  - `test_covered_updates_capped_at_max`: verifies `MAX_COVERED_MESSAGE_UPDATES` cap triggers log
+  - `test_covered_messages_beyond_cap_unmarked`: verifies excess covered messages are un-marked and only cap-many updates happen
+  - `test_error_type_timeout_for_deadline_exceeded`: verifies `_classify_error` returns "timeout"
+  - `test_error_type_config_for_value_error`: verifies `_classify_error` returns "config"
+  - `test_error_type_connection_for_connection_error`: verifies `_classify_error` returns "connection"
+  - `test_error_type_runtime_for_generic_exception`: verifies `_classify_error` returns "runtime"
+  - `test_handler_includes_error_type_in_error_response`: verifies `error_type` in Lambda error response
+  - `test_handler_includes_error_type_config_on_value_error`: verifies "config" error_type on ValueError
+  - `test_emf_includes_prompt_tokens`: verifies `PromptTokens` in EMF output
+  - `test_emf_includes_completion_tokens`: verifies `CompletionTokens` in EMF output
+  - `test_config_max_covered_message_updates_default`: verifies default is 5
+  - `test_config_reads_max_covered_message_updates_from_env`: verifies env var parsing
+  - `test_config_max_covered_message_updates_rejects_zero`: validates `_get_int_env` rejects zero
+- Updated test stubs in [`tests/test_lambda_handler.py`](tests/test_lambda_handler.py) — added `DeadlineExceededError` to fake `summarizer` module, added error categorization tests.
+- Updated test stubs in [`tests/test_process_messages_integration.py`](tests/test_process_messages_integration.py) — added `MAX_COVERED_MESSAGE_UPDATES` to fake config, used `patch.object` for `ENABLE_SUMMARIES_DEDUPLICATION` and `MAX_COVERED_MESSAGE_UPDATES` in cap tests.
+- All 219 tests pass without errors.
+
 ## Completed in 2026-06-15 round (Lambda hardening round 22, correctness, observability)
 
 - **Correctness — HTML-aware Telegram truncation**: Changed [`send_message_to_target_channel_with_id()`](telegram_client.py) and [`edit_message_in_target_channel()`](telegram_client.py) from raw string slicing `message[:4096-3] + "..."` to [`_truncate_html_preserving_tags()`](utils.py). Previously, raw slicing could break HTML tags mid-tag (e.g., `<a href="...">` cut to `<a href="...`) and leave unclosed tags. Now truncation is HTML-aware: visible characters are counted against the 4096 limit, HTML tags are preserved, and open tags are properly closed. The max is reduced by 3 chars to reserve space for the "..." suffix.
@@ -698,4 +726,5 @@
 - **Coverage+match accuracy**: Отслеживать точность `_check_coverage_and_match` — если LLM иногда выбирает не лучший дайджест для обновления, можно увеличить `UPDATE_MATCH_MAX_CHARS_PER_SUMMARY`.
 - **NLP pre-filter tuning**: Мониторить процент сообщений, отклонённых `_is_obvious_non_nlp` — если ложноположительных срабатываний много, сузить список `NLP_AD_KEYWORDS` или добавить whitelist.
 - **Summary update LLM prompt**: Оценить эффект от нового промпта "Скопируй саммари и добавь ссылку" — если LLM всё ещё переписывает, можно ещё сильнее ограничить (например, "Ответь только строку, которую нужно вставить").
-- **Channel abbreviation caching**: `create_channel_abbreviation()` в [`channel_manager.py`](channel_manager.py) загружает `channel_abbreviations.json` при каждом вызове — рассмотреть кеширование для снижения I/O в Lambda.
+- **OpenAI cost dashboard**: Используя новые EMF `PromptTokens`/`CompletionTokens` метрики, создать CloudWatch dashboard для мониторинга стоимости OpenAI API.
+- **Lambda error alerting by type**: Используя новый `error_type` в ответах Lambda, настроить CloudWatch metric filters для алертинга по типам ошибок (например, `error_type="config"` → немедленный алерт).

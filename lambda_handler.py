@@ -4,17 +4,27 @@ import asyncio
 import time
 from typing import Any, Dict
 from s3_sync import download_from_s3, upload_to_s3
-from summarizer import run_summarizer
+from summarizer import run_summarizer, DeadlineExceededError
 
 SAFETY_MARGIN_SECONDS = 10
 
-# Configure structured logging for CloudWatch
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _classify_error(exc: Exception) -> str:
+    if isinstance(exc, DeadlineExceededError):
+        return "timeout"
+    if isinstance(exc, ValueError):
+        return "config"
+    exc_name = type(exc).__name__.lower()
+    if "connection" in exc_name or "timeout" in exc_name:
+        return "connection"
+    return "runtime"
 
 def _parse_event_flag(value: Any, default: bool) -> bool:
     if value is None:
@@ -84,12 +94,13 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     except Exception as e:
         t_summarizer = time.monotonic() - t0
         elapsed = time.monotonic() - start_time
-        logger.error("Lambda execution failed after %.1fs: %s", elapsed, e, exc_info=True)
-        # Push state to S3 even on failure to preserve partial updates
+        error_type = _classify_error(e)
+        logger.error("Lambda execution failed after %.1fs [%s]: %s", elapsed, error_type, e, exc_info=True)
         upload_to_s3()
         return {
             'status': 'error',
             'error': str(e),
+            'error_type': error_type,
             'request_id': request_id,
             'elapsed_seconds': round(elapsed, 1),
             'send_message': send_message,

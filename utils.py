@@ -96,7 +96,7 @@ def extract_all_channels(text: str) -> list[str]:
     return all_channels
 
 
-def _emit_openai_latency(elapsed: float, model: str, total_tokens: int) -> None:
+def _emit_openai_latency(elapsed: float, model: str, total_tokens: int, prompt_tokens: int = 0, completion_tokens: int = 0) -> None:
     """Emit OpenAI latency as a CloudWatch Embedded Metric Format (EMF) metric.
 
     Prints a JSON line to stdout that CloudWatch automatically processes into a metric.
@@ -109,12 +109,18 @@ def _emit_openai_latency(elapsed: float, model: str, total_tokens: int) -> None:
                 "CloudWatchMetrics": [{
                     "Namespace": "tg_summarizer/OpenAI",
                     "Dimensions": [["Function", "Model"]],
-                    "Metrics": [{"Name": "Latency", "Unit": "Seconds"}]
+                    "Metrics": [
+                        {"Name": "Latency", "Unit": "Seconds"},
+                        {"Name": "PromptTokens", "Unit": "None"},
+                        {"Name": "CompletionTokens", "Unit": "None"},
+                    ]
                 }]
             },
             "Function": os.getenv("AWS_LAMBDA_FUNCTION_NAME", "local"),
             "Model": model,
             "Latency": round(elapsed, 2),
+            "PromptTokens": prompt_tokens,
+            "CompletionTokens": completion_tokens,
             "TotalTokens": total_tokens,
         }
         sys.stdout.write(_json.dumps(emf, separators=(",", ":")) + "\n")
@@ -162,6 +168,8 @@ async def call_openai(
             if result is None:
                 return ""
             total_tokens = response.usage.total_tokens if hasattr(response, 'usage') and response.usage else 0
+            prompt_tokens = response.usage.prompt_tokens if hasattr(response, 'usage') and response.usage else 0
+            completion_tokens = response.usage.completion_tokens if hasattr(response, 'usage') and response.usage else 0
             if hasattr(response, 'usage') and response.usage:
                 logger.info(
                     "OpenAI usage: model=%s prompt=%d completion=%d total=%d latency=%.1fs",
@@ -173,7 +181,7 @@ async def call_openai(
                 )
             else:
                 logger.info("OpenAI call: model=%s latency=%.1fs", OPENAI_MODEL, elapsed)
-            _emit_openai_latency(elapsed, OPENAI_MODEL, total_tokens)
+            _emit_openai_latency(elapsed, OPENAI_MODEL, total_tokens, prompt_tokens, completion_tokens)
             return result.strip()
         except (RateLimitError, APIConnectionError) as e:
             if attempt < max_retries:

@@ -28,6 +28,7 @@ from config import (
     UPDATE_MATCH_MAX_SUMMARIES,
     UPDATE_MATCH_MAX_CHARS_PER_SUMMARY,
     ENABLE_SUMMARY_UPDATES,
+    MAX_COVERED_MESSAGE_UPDATES,
 )
 from history_manager import (
     load_summaries_history,
@@ -373,14 +374,20 @@ async def process_messages(
                     *[_check_msg_coverage(msg) for msg in unique_messages]
                 )
 
+                updated_count = 0
                 for msg, matching_summary in zip(unique_messages, coverage_results):
                     if matching_summary is not None:
                         if _deadline and time.monotonic() > _deadline:
                             logger.warning("Deadline exceeded during covered message processing — un-marking remaining covered messages")
                             msg.is_covered_in_summaries = False
                             continue
+                        if updated_count >= MAX_COVERED_MESSAGE_UPDATES:
+                            logger.info("Reached MAX_COVERED_MESSAGE_UPDATES (%d) — un-marking remaining covered messages", MAX_COVERED_MESSAGE_UPDATES)
+                            msg.is_covered_in_summaries = False
+                            continue
                         msg.is_covered_in_summaries = True
                         await process_covered_message(msg, matching_summary=matching_summary, is_group=is_group)
+                        updated_count += 1
                     else:
                         msg.is_covered_in_summaries = False
 

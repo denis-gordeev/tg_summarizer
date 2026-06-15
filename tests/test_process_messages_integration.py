@@ -92,6 +92,7 @@ def _setup_stubs():
     ]
     fake_config.UPDATE_MATCH_MAX_SUMMARIES = 5
     fake_config.UPDATE_MATCH_MAX_CHARS_PER_SUMMARY = 500
+    fake_config.MAX_COVERED_MESSAGE_UPDATES = 5
     sys.modules["config"] = fake_config
 
     # --- Stub history_manager ---
@@ -1712,3 +1713,85 @@ class GroupSummaryHeaderLengthTests(unittest.TestCase):
                     found_count_characters,
                     "summarize_group_text should call count_characters for header length"
                 )
+
+
+class MaxCoveredMessageUpdatesTests(unittest.TestCase):
+    """Tests for MAX_COVERED_MESSAGE_UPDATES cap on summary updates."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._stubs = _setup_stubs()
+        cls._fake_config, cls._fake_history, cls._fake_tg = cls._stubs
+        for mod_name in list(sys.modules.keys()):
+            if mod_name in ("message_processor", "models"):
+                del sys.modules[mod_name]
+        cls.mp = importlib.import_module("message_processor")
+
+    def test_covered_updates_capped_at_max(self):
+        """When more messages are covered than MAX_COVERED_MESSAGE_UPDATES,
+        excess messages should be un-marked and included in the new summary."""
+        msgs = [
+            MessageInfo(text=f"NLP text about AI topic {i} " * 10, channel=f"@ch{i}",
+                        message_id=i, date=datetime.now(timezone.utc), link="")
+            for i in range(8)
+        ]
+
+        matching = SummaryInfo(
+            content="Existing summary",
+            date=datetime.now(timezone.utc),
+            message_count=1,
+            channels=["@ch0"],
+            message_id=100,
+        )
+
+        self._fake_history.load_summaries_history.return_value = [matching]
+
+        with patch.object(self.mp, "is_nlp_related", new_callable=AsyncMock, return_value=(True, "да")), \
+             patch.object(self.mp, "_check_coverage_and_match", new_callable=AsyncMock, return_value=matching), \
+             patch.object(self.mp, "process_covered_message", new_callable=AsyncMock), \
+             patch.object(self.mp, "summarize_text", new_callable=AsyncMock, return_value="new summary"), \
+             patch.object(self.mp, "ENABLE_SUMMARIES_DEDUPLICATION", True), \
+             patch.object(self.mp, "MAX_COVERED_MESSAGE_UPDATES", 3), \
+             patch("telegram_client.send_message_to_target_channel_with_id", new_callable=AsyncMock, return_value=42), \
+             patch.object(self.mp, "_save_processing_results", new_callable=AsyncMock), \
+             patch.object(self.mp.logger, "info") as mock_log:
+            asyncio.run(self.mp.process_messages(
+                msgs, save_changes=False, send_message=True, is_group=False,
+            ))
+
+        cap_logs = [call for call in mock_log.call_args_list
+                    if "MAX_COVERED_MESSAGE_UPDATES" in str(call)]
+        self.assertTrue(len(cap_logs) > 0, "Expected a cap log message")
+
+    def test_covered_messages_beyond_cap_unmarked(self):
+        """Messages beyond the cap should have is_covered_in_summaries=False
+        so they're included in the new summary instead of dropped."""
+        msgs = [
+            MessageInfo(text=f"NLP AI text {i} " * 10, channel=f"@ch{i}",
+                        message_id=i, date=datetime.now(timezone.utc), link="")
+            for i in range(6)
+        ]
+
+        matching = SummaryInfo(
+            content="Existing summary",
+            date=datetime.now(timezone.utc),
+            message_count=1,
+            channels=["@ch0"],
+            message_id=100,
+        )
+
+        self._fake_history.load_summaries_history.return_value = [matching]
+
+        with patch.object(self.mp, "is_nlp_related", new_callable=AsyncMock, return_value=(True, "да")), \
+             patch.object(self.mp, "_check_coverage_and_match", new_callable=AsyncMock, return_value=matching), \
+             patch.object(self.mp, "process_covered_message", new_callable=AsyncMock) as mock_process, \
+             patch.object(self.mp, "summarize_text", new_callable=AsyncMock, return_value="new summary"), \
+             patch.object(self.mp, "ENABLE_SUMMARIES_DEDUPLICATION", True), \
+             patch.object(self.mp, "MAX_COVERED_MESSAGE_UPDATES", 2), \
+             patch("telegram_client.send_message_to_target_channel_with_id", new_callable=AsyncMock, return_value=42), \
+             patch.object(self.mp, "_save_processing_results", new_callable=AsyncMock):
+            asyncio.run(self.mp.process_messages(
+                msgs, save_changes=False, send_message=True, is_group=False,
+            ))
+
+        self.assertEqual(mock_process.call_count, 2, "Only 2 covered messages should be updated (MAX_COVERED_MESSAGE_UPDATES=2)")

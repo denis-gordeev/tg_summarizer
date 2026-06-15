@@ -13,7 +13,11 @@ def _load_lambda_handler():
     async def fake_run_summarizer(**kwargs):
         return kwargs
 
+    class DeadlineExceededError(Exception):
+        pass
+
     fake_summarizer.run_summarizer = fake_run_summarizer
+    fake_summarizer.DeadlineExceededError = DeadlineExceededError
     fake_config = types.ModuleType("config")
     fake_config.validate_config = lambda: None
     sys.modules["summarizer"] = fake_summarizer
@@ -258,6 +262,53 @@ class HandlerTests(unittest.TestCase):
         phase_logs = [call for call in mock_log.call_args_list
                       if "download=" in str(call) and "summarizer=" in str(call) and "upload=" in str(call)]
         self.assertTrue(len(phase_logs) > 0, "Expected a per-phase timing log message")
+
+    def test_error_type_timeout_for_deadline_exceeded(self):
+        DeadlineExceededError = self.lambda_handler.DeadlineExceededError
+        exc = DeadlineExceededError("approaching timeout")
+        self.assertEqual(self.lambda_handler._classify_error(exc), "timeout")
+
+    def test_error_type_config_for_value_error(self):
+        exc = ValueError("Missing required environment variables")
+        self.assertEqual(self.lambda_handler._classify_error(exc), "config")
+
+    def test_error_type_connection_for_connection_error(self):
+        exc = ConnectionError("refused")
+        self.assertEqual(self.lambda_handler._classify_error(exc), "connection")
+
+    def test_error_type_runtime_for_generic_exception(self):
+        exc = RuntimeError("something went wrong")
+        self.assertEqual(self.lambda_handler._classify_error(exc), "runtime")
+
+    def test_handler_includes_error_type_in_error_response(self):
+        event = {"send_message": True, "save_changes": True}
+
+        async def _raise(**kwargs):
+            raise RuntimeError("test error")
+
+        with patch.object(self.lambda_handler.os, "chdir"), \
+             patch.object(self.lambda_handler, "download_from_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.object(self.lambda_handler, "run_summarizer", _raise):
+            result = self.lambda_handler.handler(event, context=None)
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["error_type"], "runtime")
+
+    def test_handler_includes_error_type_config_on_value_error(self):
+        event = {"send_message": True, "save_changes": True}
+
+        def _raise_value_error():
+            raise ValueError("Missing required environment variables: FOO, BAR")
+
+        with patch.object(self.lambda_handler.os, "chdir"), \
+             patch.object(self.lambda_handler, "download_from_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.dict(sys.modules, {"config": types.SimpleNamespace(validate_config=_raise_value_error)}):
+            result = self.lambda_handler.handler(event, context=None)
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["error_type"], "config")
 
 
 if __name__ == "__main__":

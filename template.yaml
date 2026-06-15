@@ -25,6 +25,8 @@ Globals:
         NLP_CONCURRENT_CHECKS: !Ref NlpConcurrentChecks
         ENABLE_SUMMARIES_DEDUPLICATION: !Ref EnableSummariesDeduplication
         ENABLE_SUMMARY_UPDATES: !Ref EnableSummaryUpdates
+        SIMILARITY_LLM_UPPER: !Ref SimilarityLlmUpper
+        MAX_COVERED_MESSAGE_UPDATES: !Ref MaxCoveredMessageUpdates
         RESTORE_TIMEOUT_SEC: !Ref RestoreTimeoutSec
         TARGET_CHANNEL: !Ref TargetChannel
         SOURCE_CHANNELS: !Ref SourceChannels
@@ -168,6 +170,16 @@ Parameters:
     AllowedValues:
       - "true"
       - "false"
+  
+  SimilarityLlmUpper:
+    Type: String
+    Description: SequenceMatcher ratio threshold above which messages are considered near-duplicates
+    Default: "0.95"
+  
+  MaxCoveredMessageUpdates:
+    Type: String
+    Description: Max number of covered-message summary updates per invocation
+    Default: "5"
    
   RestoreTimeoutSec:
     Type: String

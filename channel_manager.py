@@ -7,6 +7,13 @@ from utils import load_json_file, save_json_file, now_iso
 
 logger = logging.getLogger(__name__)
 
+_abbreviations_cache: dict | None = None
+
+
+def _invalidate_abbreviations_cache() -> None:
+    global _abbreviations_cache
+    _abbreviations_cache = None
+
 
 def _load_channel_list(key: str) -> list[str]:
     """Generic function to load a channel list from the discovered channels file."""
@@ -30,8 +37,12 @@ def _save_channel_list(key: str, channel_name: str, success_msg: str) -> None:
 
 
 def load_channel_abbreviations() -> dict:
-    """Загружает существующие аббревиатуры каналов из JSON файла."""
-    return load_json_file(ABBREVIATIONS_FILE, {}).get('channel_abbreviations', {})
+    """Загружает существующие аббревиатуры каналов из JSON файла (cached)."""
+    global _abbreviations_cache
+    if _abbreviations_cache is not None:
+        return _abbreviations_cache
+    _abbreviations_cache = load_json_file(ABBREVIATIONS_FILE, {}).get('channel_abbreviations', {})
+    return _abbreviations_cache
 
 
 def save_channel_abbreviation(channel_name: str, abbreviation: str) -> None:
@@ -40,6 +51,7 @@ def save_channel_abbreviation(channel_name: str, abbreviation: str) -> None:
     abbreviations[channel_name] = abbreviation
     data = {"channel_abbreviations": abbreviations, "last_updated": now_iso()}
     save_json_file(ABBREVIATIONS_FILE, data, "Error saving channel abbreviation")
+    _invalidate_abbreviations_cache()
 
 
 def create_channel_abbreviation(channel_name: str) -> str:

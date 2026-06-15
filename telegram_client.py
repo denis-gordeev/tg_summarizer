@@ -175,8 +175,9 @@ async def edit_message_in_target_channel(message_id: int, new_message: str) -> N
     """Редактирует сообщение в целевом канале."""
     from config import TARGET_CHANNEL
 
-    if count_characters(new_message) > TELEGRAM_MAX_MESSAGE_LENGTH:
-        logger.warning("Edited message too long (%d visible chars), truncating to %d", count_characters(new_message), TELEGRAM_MAX_MESSAGE_LENGTH)
+    visible_chars = count_characters(new_message)
+    if visible_chars > TELEGRAM_MAX_MESSAGE_LENGTH:
+        logger.warning("Edited message too long (%d visible chars), truncating to %d", visible_chars, TELEGRAM_MAX_MESSAGE_LENGTH)
         new_message = _truncate_html_preserving_tags(new_message, TELEGRAM_MAX_MESSAGE_LENGTH - 3)
 
     try:
@@ -193,8 +194,9 @@ async def send_message_to_target_channel_with_id(message: str) -> Optional[int]:
     """Отправляет сообщение в целевой канал и возвращает message_id."""
     from config import TARGET_CHANNEL
 
-    if count_characters(message) > TELEGRAM_MAX_MESSAGE_LENGTH:
-        logger.warning("Message too long (%d visible chars), truncating to %d", count_characters(message), TELEGRAM_MAX_MESSAGE_LENGTH)
+    visible_chars = count_characters(message)
+    if visible_chars > TELEGRAM_MAX_MESSAGE_LENGTH:
+        logger.warning("Message too long (%d visible chars), truncating to %d", visible_chars, TELEGRAM_MAX_MESSAGE_LENGTH)
         message = _truncate_html_preserving_tags(message, TELEGRAM_MAX_MESSAGE_LENGTH - 3)
 
     try:

@@ -76,5 +76,95 @@ class GetAllSourceChannelsLogicTests(unittest.TestCase):
         self.assertEqual(len(all_channels), 5)
 
 
+class ChannelAbbreviationCachingTests(unittest.TestCase):
+    """Tests for channel abbreviation caching."""
+
+    def test_abbreviations_cache_returns_same_dict_on_repeated_calls(self):
+        """load_channel_abbreviations should return cached result on 2nd call."""
+        import importlib
+        import types
+        import sys
+
+        fake_utils = types.ModuleType("utils")
+        call_count = 0
+
+        def fake_load_json_file(filepath, default=None):
+            nonlocal call_count
+            call_count += 1
+            return {"channel_abbreviations": {"@test_channel": "TC"}}
+
+        fake_utils.load_json_file = fake_load_json_file
+        fake_utils.save_json_file = lambda *a, **kw: True
+        fake_utils.now_iso = lambda: "2026-01-01T00:00:00"
+
+        fake_config = types.ModuleType("config")
+        fake_config.ABBREVIATIONS_FILE = "abbrev.json"
+        fake_config.DISCOVERED_CHANNELS_FILE = "discovered.json"
+
+        sys.modules["utils"] = fake_utils
+        sys.modules["config"] = fake_config
+        sys.modules.pop("channel_manager", None)
+
+        cm = importlib.import_module("channel_manager")
+
+        try:
+            cm._abbreviations_cache = None
+            result1 = cm.load_channel_abbreviations()
+            self.assertEqual(call_count, 1)
+            result2 = cm.load_channel_abbreviations()
+            self.assertEqual(call_count, 1, "Second call should use cache, not read file again")
+            self.assertIs(result1, result2)
+        finally:
+            cm._abbreviations_cache = None
+            sys.modules.pop("channel_manager", None)
+
+    def test_save_channel_abbreviation_invalidates_cache(self):
+        """save_channel_abbreviation should invalidate the cache so next load reads fresh data."""
+        import importlib
+        import types
+        import sys
+
+        call_count = 0
+
+        def fake_load_json_file(filepath, default=None):
+            nonlocal call_count
+            call_count += 1
+            return {"channel_abbreviations": {"@ch1": "C1"}}
+
+        saved_data = {}
+
+        def fake_save_json_file(filepath, data, msg):
+            saved_data.update(data)
+
+        fake_utils = types.ModuleType("utils")
+        fake_utils.load_json_file = fake_load_json_file
+        fake_utils.save_json_file = fake_save_json_file
+        fake_utils.now_iso = lambda: "2026-01-01T00:00:00"
+
+        fake_config = types.ModuleType("config")
+        fake_config.ABBREVIATIONS_FILE = "abbrev.json"
+        fake_config.DISCOVERED_CHANNELS_FILE = "discovered.json"
+
+        sys.modules["utils"] = fake_utils
+        sys.modules["config"] = fake_config
+        sys.modules.pop("channel_manager", None)
+
+        cm = importlib.import_module("channel_manager")
+
+        try:
+            cm._abbreviations_cache = None
+            cm.load_channel_abbreviations()
+            self.assertEqual(call_count, 1)
+
+            cm.save_channel_abbreviation("@ch2", "C2")
+            self.assertIsNone(cm._abbreviations_cache, "Cache should be invalidated after save")
+
+            cm.load_channel_abbreviations()
+            self.assertEqual(call_count, 2, "After invalidation, should re-read from file")
+        finally:
+            cm._abbreviations_cache = None
+            sys.modules.pop("channel_manager", None)
+
+
 if __name__ == '__main__':
     unittest.main()

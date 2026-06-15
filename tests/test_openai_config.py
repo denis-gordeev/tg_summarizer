@@ -888,5 +888,118 @@ class NlpAdKeywordsNoRedundancyTests(unittest.TestCase):
                 )
 
 
+class EmfTokenMetricsTests(unittest.TestCase):
+    """Tests for EMF token metrics in call_openai output."""
+
+    async def _run_call_openai_with_fake(self, env_extra=None):
+        import importlib
+        import sys
+        import types
+        import io
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_openai = types.ModuleType("openai")
+
+        fake_usage = MagicMock()
+        fake_usage.prompt_tokens = 42
+        fake_usage.completion_tokens = 7
+        fake_usage.total_tokens = 49
+
+        class FakeAsyncOpenAI:
+            def __init__(self, api_key, **kwargs):
+                self.api_key = api_key
+                self.chat = types.SimpleNamespace(
+                    completions=types.SimpleNamespace(
+                        create=AsyncMock(return_value=type(
+                            "Response", (),
+                            {
+                                "choices": [type("Choice", (), {"message": type("Message", (), {"content": "ok"})()})()],
+                                "usage": fake_usage,
+                            },
+                        )())
+                    )
+                )
+
+        class FakeOpenAIError(Exception):
+            pass
+
+        fake_openai.AsyncOpenAI = FakeAsyncOpenAI
+        fake_openai.OpenAI = FakeAsyncOpenAI
+        fake_openai.APIError = FakeOpenAIError
+        fake_openai.RateLimitError = type("RateLimitError", (FakeOpenAIError,), {"status_code": None})
+        fake_openai.APIConnectionError = type("APIConnectionError", (FakeOpenAIError,), {})
+
+        env = {**REQUIRED_ENV}
+        if env_extra:
+            env.update(env_extra)
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv, "openai": fake_openai}):
+            with patch.dict(os.environ, env, clear=True):
+                sys.modules.pop("config", None)
+                sys.modules.pop("utils", None)
+                config = importlib.import_module("config")
+                utils = importlib.import_module("utils")
+
+        captured = io.StringIO()
+        with patch("sys.stdout", captured):
+            await utils.call_openai("system", "user")
+
+        return captured.getvalue()
+
+    def test_emf_includes_prompt_tokens(self):
+        import asyncio
+        output = asyncio.run(self._run_call_openai_with_fake())
+        self.assertIn("PromptTokens", output)
+        self.assertIn('"PromptTokens":42', output.replace(" ", ""))
+
+    def test_emf_includes_completion_tokens(self):
+        import asyncio
+        output = asyncio.run(self._run_call_openai_with_fake())
+        self.assertIn("CompletionTokens", output)
+        self.assertIn('"CompletionTokens":7', output.replace(" ", ""))
+
+
+class MaxCoveredMessageUpdatesConfigTests(unittest.TestCase):
+    """Tests for MAX_COVERED_MESSAGE_UPDATES config."""
+
+    def test_config_max_covered_message_updates_default(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+                sys.modules.pop("config", None)
+                config = importlib.import_module("config")
+                self.assertEqual(config.MAX_COVERED_MESSAGE_UPDATES, 5)
+
+    def test_config_reads_max_covered_message_updates_from_env(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, {
+                **REQUIRED_ENV,
+                "MAX_COVERED_MESSAGE_UPDATES": "10",
+            }, clear=True):
+                sys.modules.pop("config", None)
+                config = importlib.import_module("config")
+                self.assertEqual(config.MAX_COVERED_MESSAGE_UPDATES, 10)
+
+    def test_config_max_covered_message_updates_rejects_zero(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, {
+                **REQUIRED_ENV,
+                "MAX_COVERED_MESSAGE_UPDATES": "0",
+            }, clear=True):
+                sys.modules.pop("config", None)
+                with self.assertRaises(ValueError):
+                    importlib.import_module("config")
+
+
 if __name__ == "__main__":
     unittest.main()
