@@ -11,7 +11,7 @@ from telethon.tl.functions.channels import (  # type: ignore[reportMissingTypeSt
 )
 from telethon.tl.types import InputChannel  # type: ignore[reportMissingTypeStubs]
 
-from config import API_HASH, API_ID, BOT_TOKEN, SOURCE_GROUPS, MAX_MESSAGES_PER_SOURCE, TELEGRAM_MAX_MESSAGE_LENGTH
+from config import API_HASH, API_ID, BOT_TOKEN, SOURCE_GROUPS, MAX_MESSAGES_PER_SOURCE, TELEGRAM_MAX_MESSAGE_LENGTH, FETCH_EXAMINED_MULTIPLIER
 from history_manager import load_group_summarization_history, load_summarization_history
 from channel_manager import get_all_source_channels
 from message_processor import is_message_processed
@@ -113,7 +113,7 @@ async def _fetch_from_sources(
                 if msg.date < since:
                     break
                 total_examined += 1
-                if total_examined > MAX_MESSAGES_PER_SOURCE * 3:
+                if total_examined > MAX_MESSAGES_PER_SOURCE * FETCH_EXAMINED_MULTIPLIER:
                     logger.debug("Reached total examined limit (%d) for %s %s", total_examined, source_label, source)
                     break
                 if source_count >= MAX_MESSAGES_PER_SOURCE:

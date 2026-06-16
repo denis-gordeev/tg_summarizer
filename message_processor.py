@@ -21,6 +21,7 @@ from config import (
     GROUP_SUMMARY_MIN_LENGTH,
     GROUP_SUMMARY_MAX_LENGTH,
     NLP_CHECK_MAX_INPUT_CHARS,
+    COVERAGE_CHECK_MAX_INPUT_CHARS,
     NLP_MIN_TEXT_LENGTH,
     SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE,
     NLP_CONCURRENT_CHECKS,
@@ -82,7 +83,7 @@ async def _check_coverage_and_match(
         context_parts.append(f"Дайджест {i}:\n{truncated}\n")
 
     user_content = f"""{"".join(context_parts)}Новое сообщение:
-{msg.text[:NLP_CHECK_MAX_INPUT_CHARS]}"""
+{msg.text[:COVERAGE_CHECK_MAX_INPUT_CHARS]}"""
 
     try:
         result = await call_openai(
@@ -151,24 +152,30 @@ def _remove_intra_batch_duplicates(messages: List[MessageInfo]) -> List[MessageI
 
 def _replace_source_with_links(messages: List[MessageInfo], result: str) -> str:
     """Replace source numbers [1], [2,3], etc. with HTML links in LLM output."""
+    msg_data: dict[int, tuple[list[str], str, str]] = {}
+    for i, msg in enumerate(messages, 1):
+        links = extract_links(msg.text)
+        telegram_link = msg.get_telegram_link()
+        channel_abbr = create_channel_abbreviation(msg.channel)
+        msg_data[i] = (links, telegram_link, channel_abbr)
+
     def _replacer(match):
         numbers = [num.strip() for num in match.group(1).split(",")]
         source_links = []
         for num_str in numbers:
             try:
                 num = int(num_str)
-                if 1 <= num <= len(messages):
-                    msg = messages[num - 1]
-                    links = extract_links(msg.text)
-                    telegram_link = msg.get_telegram_link()
-                    channel_abbr = create_channel_abbreviation(msg.channel)
-                    if links:
-                        main_link = links[0]
-                        source_links.append(
-                            f'<a href="{main_link}">[{num}]</a> <a href="{telegram_link}">[{channel_abbr}]</a>'
-                        )
-                    else:
-                        source_links.append(f'<a href="{telegram_link}">[{channel_abbr}]</a>')
+                data = msg_data.get(num)
+                if data is None:
+                    continue
+                links, telegram_link, channel_abbr = data
+                if links:
+                    main_link = links[0]
+                    source_links.append(
+                        f'<a href="{main_link}">[{num}]</a> <a href="{telegram_link}">[{channel_abbr}]</a>'
+                    )
+                else:
+                    source_links.append(f'<a href="{telegram_link}">[{channel_abbr}]</a>')
             except ValueError:
                 continue
         return ", ".join(source_links)
@@ -395,6 +402,13 @@ async def process_messages(
         msg for msg in unique_messages
         if not getattr(msg, 'is_covered_in_summaries', False)
     ]
+
+    covered_count = sum(1 for msg in nlp_related_messages if getattr(msg, 'is_covered_in_summaries', False))
+    if ENABLE_SUMMARIES_DEDUPLICATION and covered_count > 0:
+        logger.info(
+            "Coverage dedup (%s): %d covered, %d new (of %d deduped)",
+            stream_label, covered_count, len(unique_messages), len(nlp_related_messages),
+        )
 
     summary = None
     message_id = None

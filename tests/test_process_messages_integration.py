@@ -82,6 +82,7 @@ def _setup_stubs():
     fake_config.GROUP_SUMMARY_MIN_LENGTH = 2000
     fake_config.GROUP_SUMMARY_MAX_LENGTH = 12000
     fake_config.NLP_CHECK_MAX_INPUT_CHARS = 2000
+    fake_config.COVERAGE_CHECK_MAX_INPUT_CHARS = 2000
     fake_config.NLP_MIN_TEXT_LENGTH = 100
     fake_config.SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE = 3000
     fake_config.NLP_CONCURRENT_CHECKS = 5
@@ -775,7 +776,7 @@ class CoverageAndMatchCheckTests(unittest.TestCase):
 
 
 class CoverageMatchTruncationTests(unittest.TestCase):
-    """Tests for _check_coverage_and_match truncating msg.text."""
+    """Tests for _check_coverage_and_match truncating msg.text using COVERAGE_CHECK_MAX_INPUT_CHARS."""
 
     @classmethod
     def setUpClass(cls):
@@ -797,7 +798,7 @@ class CoverageMatchTruncationTests(unittest.TestCase):
             ),
         ]
         long_text = "AI breakthrough " * 500
-        self._fake_config.NLP_CHECK_MAX_INPUT_CHARS = 2000
+        self._fake_config.COVERAGE_CHECK_MAX_INPUT_CHARS = 2000
         msg = _make_message(text=long_text, channel="@ai", message_id=1)
 
         with patch.object(self.mp, "call_openai", new_callable=AsyncMock) as mock_openai:
@@ -806,6 +807,118 @@ class CoverageMatchTruncationTests(unittest.TestCase):
             user_content = mock_openai.call_args[0][1]
             self.assertIn(long_text[:2000], user_content)
             self.assertNotIn(long_text[2001:], user_content)
+
+    def test_coverage_match_uses_coverage_check_max_input_chars(self):
+        """_check_coverage_and_match should use COVERAGE_CHECK_MAX_INPUT_CHARS, not NLP_CHECK_MAX_INPUT_CHARS."""
+        summaries = [
+            SummaryInfo(
+                content="Summary about AI",
+                date=datetime.now(timezone.utc),
+                message_count=1,
+                channels=["@ai"],
+                message_id=100,
+            ),
+        ]
+        long_text = "AI breakthrough " * 500
+        self._fake_config.COVERAGE_CHECK_MAX_INPUT_CHARS = 1500
+        self._fake_config.NLP_CHECK_MAX_INPUT_CHARS = 2000
+        msg = _make_message(text=long_text, channel="@ai", message_id=1)
+
+        with patch.object(self.mp, "call_openai", new_callable=AsyncMock) as mock_openai:
+            mock_openai.return_value = "НЕТ"
+            asyncio.run(self.mp._check_coverage_and_match(msg, summaries))
+            user_content = mock_openai.call_args[0][1]
+            self.assertNotIn(long_text[1501:], user_content)
+
+
+class ReplaceSourceWithLinksPrecomputeTests(unittest.TestCase):
+    """Tests for _replace_source_with_links pre-computing per-message data."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._stubs = _setup_stubs()
+        cls._fake_config, cls._fake_history, cls._fake_tg = cls._stubs
+        for mod_name in list(sys.modules.keys()):
+            if mod_name in ("message_processor", "models"):
+                del sys.modules[mod_name]
+        cls.mp = importlib.import_module("message_processor")
+
+    def test_replaces_source_numbers_with_links(self):
+        """_replace_source_with_links should replace [1] with HTML link."""
+        messages = [
+            MessageInfo(
+                text="AI text https://example.com/article",
+                channel="@ai_ch",
+                message_id=1,
+                date=datetime.now(timezone.utc),
+                link="https://example.com/article",
+            ),
+        ]
+
+        result = self.mp._replace_source_with_links(messages, "AI news [1]")
+        self.assertIn('<a href="https://t.me/ai_ch/1">[AI_CH]</a>', result)
+        self.assertNotIn("[1]", result.replace('<a href="https://t.me/ai_ch/1">[AI_CH]</a>', ""))
+
+    def test_handles_multiple_references_to_same_source(self):
+        """When [1] appears multiple times, each should be replaced."""
+        messages = [
+            MessageInfo(
+                text="AI text https://example.com/a",
+                channel="@ai_ch",
+                message_id=1,
+                date=datetime.now(timezone.utc),
+                link="https://example.com/a",
+            ),
+        ]
+
+        result = self.mp._replace_source_with_links(messages, "AI news [1] and more [1]")
+        self.assertEqual(result.count('<a href="https://t.me/ai_ch/1">[AI_CH]</a>'), 2)
+
+
+class CoverageDedupStatsTests(unittest.TestCase):
+    """Tests for coverage dedup statistics logging."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._stubs = _setup_stubs()
+        cls._fake_config, cls._fake_history, cls._fake_tg = cls._stubs
+        for mod_name in list(sys.modules.keys()):
+            if mod_name in ("message_processor", "models"):
+                del sys.modules[mod_name]
+        cls.mp = importlib.import_module("message_processor")
+
+    def test_logs_coverage_dedup_stats(self):
+        """process_messages should log coverage dedup stats when some messages are covered."""
+        msgs = [
+            _make_message(text="AI text that is long enough for NLP check " * 5, channel="@ai", message_id=1),
+            _make_message(text="Another AI text that passes NLP check " * 5, channel="@ai", message_id=2),
+        ]
+
+        matching = SummaryInfo(
+            content="Existing summary",
+            date=datetime.now(timezone.utc),
+            message_count=1,
+            channels=["@ai"],
+            message_id=100,
+        )
+
+        self._fake_history.load_summaries_history.return_value = [matching]
+
+        with patch.object(self.mp, "is_nlp_related", new_callable=AsyncMock, return_value=(True, "да")), \
+             patch.object(self.mp, "_check_coverage_and_match", new_callable=AsyncMock, return_value=matching), \
+             patch.object(self.mp, "process_covered_message", new_callable=AsyncMock), \
+             patch.object(self.mp, "ENABLE_SUMMARIES_DEDUPLICATION", True), \
+             patch.object(self.mp, "summarize_text", new_callable=AsyncMock, return_value="new summary"), \
+             patch("telegram_client.send_message_to_target_channel_with_id", new_callable=AsyncMock, return_value=42), \
+             patch.object(self.mp, "_save_processing_results", new_callable=AsyncMock), \
+             patch.object(self.mp.logger, "info") as mock_log:
+            asyncio.run(self.mp.process_messages(
+                msgs, save_changes=False, send_message=True, is_group=False,
+            ))
+
+        dedup_logs = [call for call in mock_log.call_args_list
+                      if "Coverage dedup" in str(call)]
+        self.assertTrue(len(dedup_logs) > 0, "Expected coverage dedup stats log message")
 
 
 class ProcessMessagesDeadlineTests(unittest.TestCase):
@@ -1236,6 +1349,7 @@ class TelegramMessageLengthGuardTests(unittest.TestCase):
         fake_config.TARGET_CHANNEL = "@target"
         fake_config.SOURCE_GROUPS = set()
         fake_config.MAX_MESSAGES_PER_SOURCE = 100
+        fake_config.FETCH_EXAMINED_MULTIPLIER = 3
         fake_config.TELEGRAM_MAX_MESSAGE_LENGTH = 4096
         fake_history = types.ModuleType("history_manager")
         fake_history.load_group_summarization_history = lambda: set()
@@ -1312,6 +1426,7 @@ class TelegramMessageLengthGuardTests(unittest.TestCase):
         fake_config.TARGET_CHANNEL = "@target"
         fake_config.SOURCE_GROUPS = set()
         fake_config.MAX_MESSAGES_PER_SOURCE = 100
+        fake_config.FETCH_EXAMINED_MULTIPLIER = 3
         fake_config.TELEGRAM_MAX_MESSAGE_LENGTH = 4096
         fake_history = types.ModuleType("history_manager")
         fake_history.load_group_summarization_history = lambda: set()
@@ -1387,6 +1502,7 @@ class TelegramMessageLengthGuardTests(unittest.TestCase):
         fake_config.TARGET_CHANNEL = "@target"
         fake_config.SOURCE_GROUPS = set()
         fake_config.MAX_MESSAGES_PER_SOURCE = 100
+        fake_config.FETCH_EXAMINED_MULTIPLIER = 3
         fake_config.TELEGRAM_MAX_MESSAGE_LENGTH = 4096
         fake_history = types.ModuleType("history_manager")
         fake_history.load_group_summarization_history = lambda: set()
@@ -1475,6 +1591,7 @@ class FloodWaitErrorHandlingTests(unittest.TestCase):
         fake_config.TARGET_CHANNEL = "@target"
         fake_config.SOURCE_GROUPS = set()
         fake_config.MAX_MESSAGES_PER_SOURCE = 100
+        fake_config.FETCH_EXAMINED_MULTIPLIER = 3
         fake_config.TELEGRAM_MAX_MESSAGE_LENGTH = 4096
         fake_history = types.ModuleType("history_manager")
         fake_history.load_group_summarization_history = lambda: set()
@@ -1558,6 +1675,7 @@ class TelegramHTMLAwareLengthTests(unittest.TestCase):
         fake_config.TARGET_CHANNEL = "@target"
         fake_config.SOURCE_GROUPS = set()
         fake_config.MAX_MESSAGES_PER_SOURCE = 100
+        fake_config.FETCH_EXAMINED_MULTIPLIER = 3
         fake_config.TELEGRAM_MAX_MESSAGE_LENGTH = 4096
         fake_history = types.ModuleType("history_manager")
         fake_history.load_group_summarization_history = lambda: set()

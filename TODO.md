@@ -2,6 +2,28 @@
 
 Живой список задач для автоматических раундов.
 
+## Completed in 2026-06-16 round (Lambda hardening round 24, performance, config, observability)
+
+- **`_replace_source_with_links` optimization**: Pre-computed per-message data (links, telegram_link, channel_abbr) in [`_replace_source_with_links()`](message_processor.py) — previously, `extract_links()`, `get_telegram_link()`, and `create_channel_abbreviation()` were called inside the regex replacer for every `[N]` match. When a message was referenced multiple times (e.g., `[1] ... [1]`), these were called redundantly. Now a `msg_data` dict is built once before the regex pass, eliminating O(N*M) work → O(N+M) where N is messages and M is source references.
+- **Dedicated coverage check input truncation**: Added `COVERAGE_CHECK_MAX_INPUT_CHARS` config (default 2000) in [`config.py`](config.py). Applied in [`_check_coverage_and_match()`](message_processor.py) — previously used `NLP_CHECK_MAX_INPUT_CHARS` (same value) but semantically these are different operations: NLP check is a yes/no relevance classification, coverage check is a topic-match classification. Separate constants allow independent tuning without unintended side effects.
+- **Configurable fetch examined multiplier**: Added `FETCH_EXAMINED_MULTIPLIER` config (default 3) in [`config.py`](config.py). Applied in [`_fetch_from_sources()`](telegram_client.py) — previously hardcoded `MAX_MESSAGES_PER_SOURCE * 3` as the total examined limit. Now configurable, allowing tuning for channels with high non-text message ratios.
+- **Coverage dedup stats logging**: Added structured logging in [`process_messages()`](message_processor.py) after the coverage dedup phase — logs `"Coverage dedup (channels): N covered, M new (of K deduped)"` when covered messages exist. Complements the existing NLP filter stats, enabling CloudWatch-based monitoring of coverage dedup effectiveness.
+- **`.env.example` synced**: Added `COVERAGE_CHECK_MAX_INPUT_CHARS=2000` and `FETCH_EXAMINED_MULTIPLIER=3` in [`.env.example`](.env.example).
+- **SAM template updated**: Added `CoverageCheckMaxInputChars` and `FetchExaminedMultiplier` parameters and env vars in [`template.yaml`](template.yaml).
+- **Tests added**: 10 new tests (total 229, up from 219):
+  - `test_config_coverage_check_max_input_chars_default`: verifies default is 2000
+  - `test_config_reads_coverage_check_max_input_chars_from_env`: verifies env var parsing
+  - `test_config_coverage_check_max_input_chars_rejects_zero`: validates `_get_int_env` rejects zero
+  - `test_config_fetch_examined_multiplier_default`: verifies default is 3
+  - `test_config_reads_fetch_examined_multiplier_from_env`: verifies env var parsing
+  - `test_config_fetch_examined_multiplier_rejects_zero`: validates `_get_int_env` rejects zero
+  - `test_coverage_match_uses_coverage_check_max_input_chars`: verifies `_check_coverage_and_match` uses `COVERAGE_CHECK_MAX_INPUT_CHARS` not `NLP_CHECK_MAX_INPUT_CHARS`
+  - `test_replaces_source_numbers_with_links`: verifies `_replace_source_with_links` replaces [1] with HTML link
+  - `test_handles_multiple_references_to_same_source`: verifies [1] appearing multiple times is replaced each time
+  - `test_logs_coverage_dedup_stats`: verifies coverage dedup stats log message
+- Updated test stubs in [`tests/test_process_messages_integration.py`](tests/test_process_messages_integration.py) — added `COVERAGE_CHECK_MAX_INPUT_CHARS` and `FETCH_EXAMINED_MULTIPLIER` to fake config stubs.
+- All 229 tests pass without errors.
+
 ## Completed in 2026-06-15 round 2 (Lambda hardening round 23, caching, update cap, observability, cost monitoring)
 
 - **Channel abbreviation caching**: Added `_abbreviations_cache` in-memory cache and `_invalidate_abbreviations_cache()` in [`channel_manager.py`](channel_manager.py). [`load_channel_abbreviations()`](channel_manager.py) now caches the result after first load, avoiding repeated `channel_abbreviations.json` disk reads. Cache is invalidated on [`save_channel_abbreviation()`](channel_manager.py). Previously, each call to [`create_channel_abbreviation()`](channel_manager.py) — invoked once per message in [`_replace_source_with_links()`](message_processor.py) — triggered a full file read. With 10–30 messages per invocation, this eliminated 10–30 redundant disk reads.

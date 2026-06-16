@@ -1001,5 +1001,85 @@ class MaxCoveredMessageUpdatesConfigTests(unittest.TestCase):
                     importlib.import_module("config")
 
 
+class CoverageCheckMaxInputCharsConfigTests(unittest.TestCase):
+    """Tests for COVERAGE_CHECK_MAX_INPUT_CHARS config."""
+
+    def test_config_coverage_check_max_input_chars_default(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+                sys.modules.pop("config", None)
+                config = importlib.import_module("config")
+                self.assertEqual(config.COVERAGE_CHECK_MAX_INPUT_CHARS, 2000)
+
+    def test_config_reads_coverage_check_max_input_chars_from_env(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, {
+                **REQUIRED_ENV,
+                "COVERAGE_CHECK_MAX_INPUT_CHARS": "3000",
+            }, clear=True):
+                sys.modules.pop("config", None)
+                config = importlib.import_module("config")
+                self.assertEqual(config.COVERAGE_CHECK_MAX_INPUT_CHARS, 3000)
+
+    def test_config_coverage_check_max_input_chars_rejects_zero(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, {
+                **REQUIRED_ENV,
+                "COVERAGE_CHECK_MAX_INPUT_CHARS": "0",
+            }, clear=True):
+                sys.modules.pop("config", None)
+                with self.assertRaises(ValueError):
+                    importlib.import_module("config")
+
+
+class FetchExaminedMultiplierConfigTests(unittest.TestCase):
+    """Tests for FETCH_EXAMINED_MULTIPLIER config."""
+
+    def test_config_fetch_examined_multiplier_default(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+                sys.modules.pop("config", None)
+                config = importlib.import_module("config")
+                self.assertEqual(config.FETCH_EXAMINED_MULTIPLIER, 3)
+
+    def test_config_reads_fetch_examined_multiplier_from_env(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, {
+                **REQUIRED_ENV,
+                "FETCH_EXAMINED_MULTIPLIER": "5",
+            }, clear=True):
+                sys.modules.pop("config", None)
+                config = importlib.import_module("config")
+                self.assertEqual(config.FETCH_EXAMINED_MULTIPLIER, 5)
+
+    def test_config_fetch_examined_multiplier_rejects_zero(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, {
+                **REQUIRED_ENV,
+                "FETCH_EXAMINED_MULTIPLIER": "0",
+            }, clear=True):
+                sys.modules.pop("config", None)
+                with self.assertRaises(ValueError):
+                    importlib.import_module("config")
+
+
 if __name__ == "__main__":
     unittest.main()
