@@ -150,11 +150,11 @@ def _remove_intra_batch_duplicates(messages: List[MessageInfo]) -> List[MessageI
     return unique_msgs
 
 
-def _replace_source_with_links(messages: List[MessageInfo], result: str) -> str:
+def _replace_source_with_links(messages: List[MessageInfo], result: str, msg_links: dict[int, list[str]] | None = None) -> str:
     """Replace source numbers [1], [2,3], etc. with HTML links in LLM output."""
     msg_data: dict[int, tuple[list[str], str, str]] = {}
     for i, msg in enumerate(messages, 1):
-        links = extract_links(msg.text)
+        links = msg_links[i] if msg_links and i in msg_links else extract_links(msg.text)
         telegram_link = msg.get_telegram_link()
         channel_abbr = create_channel_abbreviation(msg.channel)
         msg_data[i] = (links, telegram_link, channel_abbr)
@@ -183,24 +183,30 @@ def _replace_source_with_links(messages: List[MessageInfo], result: str) -> str:
     return re.sub(r"\[(\d+(?:,\s*\d+)*)\]", _replacer, result)
 
 
-def _prepare_messages_text(messages: List[MessageInfo]) -> tuple[str, int]:
-    """Prepare messages text with source numbering and return (text, total_length)."""
+def _prepare_messages_text(messages: List[MessageInfo]) -> tuple[str, int, dict[int, list[str]]]:
+    """Prepare messages text with source numbering and return (text, total_length, msg_links).
+
+    msg_links maps message index (1-based) to its extracted links, so
+    _replace_source_with_links can reuse them without a second regex pass.
+    """
     messages_with_sources = []
     total_original_length = 0
+    msg_links: dict[int, list[str]] = {}
     for i, msg in enumerate(messages, 1):
         links = extract_links(msg.text)
+        msg_links[i] = links
         truncated_text = msg.text[:SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE]
         source_info = f"[{i}] {truncated_text}"
         if links:
             source_info += f" (Ссылки: {', '.join(links)})"
         messages_with_sources.append(source_info)
         total_original_length += count_characters(truncated_text)
-    return "\n\n".join(messages_with_sources), total_original_length
+    return "\n\n".join(messages_with_sources), total_original_length, msg_links
 
 
 async def summarize_text(messages: List[MessageInfo]) -> str:
     """Call LLM to summarize the given messages with links."""
-    messages_text, total_original_length = _prepare_messages_text(messages)
+    messages_text, total_original_length, msg_links = _prepare_messages_text(messages)
     max_summary_length = _calculate_channel_summary_limit(total_original_length)
 
     system_prompt = prompts.CHANNEL_SUMMARY_PROMPT.format(max_summary_length=max_summary_length)
@@ -217,7 +223,7 @@ async def summarize_text(messages: List[MessageInfo]) -> str:
 
     logger.debug("Source length: %d chars, summary: %d chars", total_original_length, count_characters(result))
 
-    result = _replace_source_with_links(messages, result)
+    result = _replace_source_with_links(messages, result, msg_links)
     result = enforce_summary_length(result, max_summary_length)
     if DEBUG:
         logger.debug("Summary result:\n%s", result)
@@ -227,7 +233,7 @@ async def summarize_text(messages: List[MessageInfo]) -> str:
 
 async def summarize_group_text(messages: List[MessageInfo]) -> str:
     """Call LLM to summarize group messages with community review header."""
-    messages_text, total_original_length = _prepare_messages_text(messages)
+    messages_text, total_original_length, msg_links = _prepare_messages_text(messages)
     max_summary_length = _calculate_group_summary_limit(total_original_length)
 
     system_prompt = prompts.GROUP_SUMMARY_PROMPT.format(max_summary_length=max_summary_length)
@@ -244,7 +250,7 @@ async def summarize_group_text(messages: List[MessageInfo]) -> str:
 
     logger.debug("Group source length: %d chars, summary: %d chars", total_original_length, count_characters(result))
 
-    result = _replace_source_with_links(messages, result)
+    result = _replace_source_with_links(messages, result, msg_links)
 
     group_names = list(set(msg.channel.lstrip("@") for msg in messages))
     community_name = ", ".join(group_names)
@@ -299,6 +305,49 @@ async def _save_processing_results(
         else:
             save_summary_to_history(summary_info)
             logger.info("Channel summary saved to history (channels: %s)", summary_info.channels)
+
+
+async def _dedup_covered_messages(
+    messages: List[MessageInfo],
+    is_group: bool,
+    sem: asyncio.Semaphore,
+    _deadline: float,
+) -> List[MessageInfo]:
+    """Run coverage dedup: check each message against existing summaries.
+
+    Covered messages are updated in-place (is_covered_in_summaries flag)
+    and processed via process_covered_message. Returns messages not covered.
+    """
+    summaries = load_group_summaries_history() if is_group else load_summaries_history()
+    if not summaries:
+        return messages
+
+    async def _check_msg_coverage(msg: MessageInfo) -> Optional[SummaryInfo]:
+        async with sem:
+            return await _check_coverage_and_match(msg, summaries)
+
+    coverage_results = await asyncio.gather(
+        *[_check_msg_coverage(msg) for msg in messages]
+    )
+
+    updated_count = 0
+    for msg, matching_summary in zip(messages, coverage_results):
+        if matching_summary is not None:
+            if _deadline and time.monotonic() > _deadline:
+                logger.warning("Deadline exceeded during covered message processing — un-marking remaining covered messages")
+                msg.is_covered_in_summaries = False
+                continue
+            if updated_count >= MAX_COVERED_MESSAGE_UPDATES:
+                logger.info("Reached MAX_COVERED_MESSAGE_UPDATES (%d) — un-marking remaining covered messages", MAX_COVERED_MESSAGE_UPDATES)
+                msg.is_covered_in_summaries = False
+                continue
+            msg.is_covered_in_summaries = True
+            await process_covered_message(msg, matching_summary=matching_summary, is_group=is_group)
+            updated_count += 1
+        else:
+            msg.is_covered_in_summaries = False
+
+    return [msg for msg in messages if not getattr(msg, 'is_covered_in_summaries', False)]
 
 
 async def process_messages(
@@ -370,38 +419,7 @@ async def process_messages(
         if _deadline and time.monotonic() > _deadline:
             logger.warning("Deadline exceeded before coverage checks in %s — skipping dedup", stream_label)
         else:
-            summaries = load_group_summaries_history() if is_group else load_summaries_history()
-
-            if summaries:
-                async def _check_msg_coverage(msg: MessageInfo) -> Optional[SummaryInfo]:
-                    async with sem:
-                        return await _check_coverage_and_match(msg, summaries)
-
-                coverage_results = await asyncio.gather(
-                    *[_check_msg_coverage(msg) for msg in unique_messages]
-                )
-
-                updated_count = 0
-                for msg, matching_summary in zip(unique_messages, coverage_results):
-                    if matching_summary is not None:
-                        if _deadline and time.monotonic() > _deadline:
-                            logger.warning("Deadline exceeded during covered message processing — un-marking remaining covered messages")
-                            msg.is_covered_in_summaries = False
-                            continue
-                        if updated_count >= MAX_COVERED_MESSAGE_UPDATES:
-                            logger.info("Reached MAX_COVERED_MESSAGE_UPDATES (%d) — un-marking remaining covered messages", MAX_COVERED_MESSAGE_UPDATES)
-                            msg.is_covered_in_summaries = False
-                            continue
-                        msg.is_covered_in_summaries = True
-                        await process_covered_message(msg, matching_summary=matching_summary, is_group=is_group)
-                        updated_count += 1
-                    else:
-                        msg.is_covered_in_summaries = False
-
-    unique_messages = [
-        msg for msg in unique_messages
-        if not getattr(msg, 'is_covered_in_summaries', False)
-    ]
+            unique_messages = await _dedup_covered_messages(unique_messages, is_group, sem, _deadline)
 
     covered_count = sum(1 for msg in nlp_related_messages if getattr(msg, 'is_covered_in_summaries', False))
     if ENABLE_SUMMARIES_DEDUPLICATION and covered_count > 0:

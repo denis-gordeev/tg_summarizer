@@ -115,8 +115,11 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
     elapsed = time.monotonic() - start_time
     logger.info(
-        "Lambda completed in %.1fs (download=%.1fs, summarizer=%.1fs, upload=%.1fs)",
+        "Lambda completed in %.1fs (download=%.1fs, summarizer=%.1fs, upload=%.1fs) "
+        "[send=%s, save=%s, today_groups=%s, today_msgs=%s]",
         elapsed, t_download, t_summarizer, t_upload,
+        send_message, save_changes, include_today_processed_groups,
+        include_today_processed_messages,
     )
 
     return {

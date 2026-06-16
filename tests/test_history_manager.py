@@ -2060,5 +2060,78 @@ class SaveUpdatedSummaryNoRedundantEnforceTests(unittest.TestCase):
                 self.assertEqual(call_args[0][1], "updated content")
 
 
+class AtomicJsonWriteTests(unittest.TestCase):
+    """Tests for atomic JSON file writes in save_json_file."""
+
+    def _import_utils(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_openai = types.ModuleType("openai")
+        fake_openai.AsyncOpenAI = type("AsyncOpenAI", (), {"__init__": lambda *a, **kw: None})
+        fake_openai.APIError = type("APIError", (Exception,), {"status_code": None})
+        fake_openai.RateLimitError = type("RateLimitError", (Exception,), {"status_code": None})
+        fake_openai.APIConnectionError = type("APIConnectionError", (Exception,), {})
+        fake_config = types.ModuleType("config")
+        fake_config.OPENAI_API_KEY = "test"
+        fake_config.OPENAI_DEFAULT_MAX_TOKENS = 300
+        fake_config.OPENAI_MODEL = "gpt-4o-mini"
+        fake_config.OPENAI_REQUEST_TIMEOUT = 30
+
+        with patch.dict(sys.modules, {
+            "dotenv": fake_dotenv,
+            "openai": fake_openai,
+            "config": fake_config,
+        }):
+            sys.modules.pop("utils", None)
+            return importlib.import_module("utils")
+
+    def test_save_json_file_writes_atomic(self):
+        """save_json_file should write atomically (temp + rename)."""
+        import json
+        import os
+        import tempfile
+
+        utils = self._import_utils()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            filepath = os.path.join(tmpdir, "test_atomic.json")
+            result = utils.save_json_file(filepath, {"key": "value"}, "test error")
+            self.assertTrue(result)
+            with open(filepath, 'r') as f:
+                data = json.load(f)
+            self.assertEqual(data, {"key": "value"})
+
+    def test_save_json_file_cleans_up_temp_on_failure(self):
+        """If json.dump fails, save_json_file should return False and clean up."""
+        import os
+        import tempfile
+
+        utils = self._import_utils()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            filepath = os.path.join(tmpdir, "test_cleanup.json")
+            with patch("json.dump", side_effect=OSError("write error")):
+                result = utils.save_json_file(filepath, {"key": "value"}, "test error")
+            self.assertFalse(result)
+            self.assertFalse(os.path.exists(filepath))
+
+    def test_save_json_file_preserves_existing_on_failure(self):
+        """If write fails, existing file should remain unchanged."""
+        import json
+        import os
+        import tempfile
+
+        utils = self._import_utils()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            filepath = os.path.join(tmpdir, "test_preserve.json")
+            utils.save_json_file(filepath, {"original": True}, "init error")
+            with patch("json.dump", side_effect=OSError("write error")):
+                result = utils.save_json_file(filepath, {"new": True}, "update error")
+            self.assertFalse(result)
+            data = utils.load_json_file(filepath)
+            self.assertEqual(data, {"original": True})
+
+
 if __name__ == '__main__':
     unittest.main()

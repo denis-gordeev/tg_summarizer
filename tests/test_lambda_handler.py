@@ -311,5 +311,27 @@ class HandlerTests(unittest.TestCase):
         self.assertEqual(result["error_type"], "config")
 
 
+    def test_handler_logs_event_flags_in_completion_log(self):
+        """Handler should include event flags in the completion log."""
+        event = {"send_message": "false", "save_changes": "true"}
+
+        async_mock = AsyncMock()
+
+        def _run_and_close(coro):
+            coro.close()
+
+        with patch.object(self.lambda_handler.os, "chdir"), \
+             patch.object(self.lambda_handler, "download_from_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.object(self.lambda_handler, "run_summarizer", async_mock), \
+             patch.object(self.lambda_handler.asyncio, "run", side_effect=_run_and_close), \
+             patch.object(self.lambda_handler.logger, "info") as mock_log:
+            self.lambda_handler.handler(event, context=None)
+
+        flag_logs = [call for call in mock_log.call_args_list
+                     if "send=" in str(call) and "save=" in str(call)]
+        self.assertTrue(len(flag_logs) > 0, "Expected event flags in completion log")
+
+
 if __name__ == "__main__":
     unittest.main()

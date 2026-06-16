@@ -2,6 +2,33 @@
 
 Живой список задач для автоматических раундов.
 
+## Completed in 2026-06-16 round 2 (Lambda hardening round 25, atomic writes, HTML correctness, cost metric, code quality)
+
+- **Atomic JSON file writes**: Changed [`save_json_file()`](utils.py) to use atomic write pattern (write to temp file via `tempfile.mkstemp`, then `os.replace`). Previously, a Lambda timeout mid-`json.dump` could leave a partially-written file, causing parse errors on subsequent invocations. The atomic pattern ensures either the old or new file content is present, never a corrupt intermediate state. On write failure, the temp file is cleaned up. Added `import tempfile` to [`utils.py`](utils.py).
+- **Void HTML element handling**: Added `VOID_HTML_ELEMENTS` frozenset in [`utils.py`](utils.py) (br, hr, img, input, meta, link, area, base, col, embed, source, track, wbr). Applied in [`_truncate_html_preserving_tags()`](utils.py) — previously, void elements like `<br>` and `<img>` without a self-closing `/` were incorrectly added to the `open_tags` stack, causing `</br>` and `</img>` closing tags to be appended on truncation. Telegram renders these as-is, producing visible malformed HTML. Now void elements are never pushed to `open_tags`, consistent with HTML spec.
+- **OpenAI estimated cost EMF metric**: Added `_COST_PER_MILLION` lookup and `_estimate_cost_usd()` in [`utils.py`](utils.py). Extended [`_emit_openai_latency()`](utils.py) to include `EstimatedCostUSD` as an EMF metric (based on gpt-4o-mini pricing: $0.15/1M input, $0.60/1M output). Enables CloudWatch-based cost monitoring per invocation without manual token-to-cost conversion.
+- **Lambda completion log includes event flags**: Extended Lambda completion log in [`lambda_handler.handler()`](lambda_handler.py) to include `[send=X, save=X, today_groups=X, today_msgs=X]`. Previously only logged phase timing without the event flags, making it harder to correlate Lambda behavior with specific trigger configurations in CloudWatch.
+- **Pre-computed message links**: Changed [`_prepare_messages_text()`](message_processor.py) to return a 3-tuple `(text, total_length, msg_links)` where `msg_links` maps message index (1-based) to its extracted links. Updated [`_replace_source_with_links()`](message_processor.py) to accept optional `msg_links` parameter and reuse pre-computed links instead of calling `extract_links()` again. Eliminates redundant regex pass per message (previously `extract_links` was called once in `_prepare_messages_text` and again in `_replace_source_with_links`).
+- **Extracted `_dedup_covered_messages()`**: Extracted coverage dedup logic from [`process_messages()`](message_processor.py) into dedicated [`_dedup_covered_messages()`](message_processor.py) function. Handles parallel coverage checks, deadline propagation, `MAX_COVERED_MESSAGE_UPDATES` capping, and covered-message filtering. Returns the list of uncovered messages directly. Reduces `process_messages()` complexity and makes the dedup phase independently testable.
+- **Tests added**: 15 new tests (total 244, up from 229):
+  - `test_save_json_file_writes_atomic`: verifies atomic write produces correct file content
+  - `test_save_json_file_cleans_up_temp_on_failure`: verifies temp file cleanup on json.dump failure
+  - `test_save_json_file_preserves_existing_on_failure`: verifies existing file unchanged on write failure
+  - `test_br_tag_not_added_to_open_stack`: verifies `<br>` not closed with `</br>`
+  - `test_img_tag_not_added_to_open_stack`: verifies `<img>` not closed with `</img>`
+  - `test_br_does_not_cause_extra_closing_tags`: verifies truncation after `<br>` has no `</br>`
+  - `test_b_tag_still_gets_closed`: verifies non-void `<b>` still gets closed on truncation
+  - `test_emf_includes_estimated_cost_usd`: verifies `EstimatedCostUSD` in EMF output
+  - `test_cost_estimate_for_gpt4o_mini`: verifies cost calculation formula
+  - `test_handler_logs_event_flags_in_completion_log`: verifies event flags in Lambda completion log
+  - `test_prepare_messages_text_returns_msg_links`: verifies `msg_links` dict returned with links
+  - `test_prepare_messages_text_msg_links_empty_for_no_links`: verifies empty list for no-link messages
+  - `test_dedup_covered_messages_returns_uncovered`: verifies uncovered messages returned
+  - `test_dedup_covered_messages_filters_covered`: verifies covered messages filtered out
+  - `test_dedup_covered_messages_returns_all_when_no_summaries`: verifies pass-through when no summaries
+- Updated test stubs in [`tests/test_digest_post_processing.py`](tests/test_digest_post_processing.py) — changed `_prepare_messages_text` unpacking from 2-tuple to 3-tuple.
+- All 244 tests pass without errors.
+
 ## Completed in 2026-06-16 round (Lambda hardening round 24, performance, config, observability)
 
 - **`_replace_source_with_links` optimization**: Pre-computed per-message data (links, telegram_link, channel_abbr) in [`_replace_source_with_links()`](message_processor.py) — previously, `extract_links()`, `get_telegram_link()`, and `create_channel_abbreviation()` were called inside the regex replacer for every `[N]` match. When a message was referenced multiple times (e.g., `[1] ... [1]`), these were called redundantly. Now a `msg_data` dict is built once before the regex pass, eliminating O(N*M) work → O(N+M) where N is messages and M is source references.

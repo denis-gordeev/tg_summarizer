@@ -392,7 +392,7 @@ class SummaryInputTruncationTests(unittest.TestCase):
         mp = _import_message_processor(stub_modules)
         long_text = "A" * 5000
         msgs = _make_messages(channels=["@a"], texts=[long_text])
-        text_output, total_length = mp._prepare_messages_text(msgs)
+        text_output, total_length, msg_links = mp._prepare_messages_text(msgs)
         self.assertNotIn("A" * 5000, text_output)
 
     def test_short_message_is_not_truncated(self):
@@ -400,7 +400,7 @@ class SummaryInputTruncationTests(unittest.TestCase):
         mp = _import_message_processor(stub_modules)
         short_text = "Short message about AI"
         msgs = _make_messages(channels=["@a"], texts=[short_text])
-        text_output, total_length = mp._prepare_messages_text(msgs)
+        text_output, total_length, msg_links = mp._prepare_messages_text(msgs)
         self.assertIn(short_text, text_output)
 
 
@@ -446,6 +446,82 @@ class ExtractLinksTrailingPunctuationTests(unittest.TestCase):
         raw = LINK_REGEX.findall("See https://example.com).")
         result = [TRAILING.sub("", url) for url in raw]
         self.assertEqual(result, ["https://example.com"])
+
+
+class VoidHtmlElementTests(unittest.TestCase):
+    """Tests for void HTML elements in _truncate_html_preserving_tags."""
+
+    def _import_utils(self):
+        import importlib
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_openai = types.ModuleType("openai")
+        fake_openai.AsyncOpenAI = type("AsyncOpenAI", (), {"__init__": lambda *a, **kw: None})
+        fake_openai.APIError = type("APIError", (Exception,), {"status_code": None})
+        fake_openai.RateLimitError = type("RateLimitError", (Exception,), {"status_code": None})
+        fake_openai.APIConnectionError = type("APIConnectionError", (Exception,), {})
+        fake_config = types.ModuleType("config")
+        fake_config.OPENAI_API_KEY = "test"
+        fake_config.OPENAI_DEFAULT_MAX_TOKENS = 300
+        fake_config.OPENAI_MODEL = "gpt-4o-mini"
+        fake_config.OPENAI_REQUEST_TIMEOUT = 30
+
+        with patch.dict(sys.modules, {
+            "dotenv": fake_dotenv,
+            "openai": fake_openai,
+            "config": fake_config,
+        }):
+            sys.modules.pop("utils", None)
+            return importlib.import_module("utils")
+
+    def test_br_tag_not_added_to_open_stack(self):
+        """<br> is a void element and should not be closed."""
+        utils = self._import_utils()
+        result = utils._truncate_html_preserving_tags("hello<br>world", 20)
+        self.assertIn("<br>", result)
+        self.assertNotIn("</br>", result)
+
+    def test_img_tag_not_added_to_open_stack(self):
+        """<img> is a void element and should not be closed."""
+        utils = self._import_utils()
+        result = utils._truncate_html_preserving_tags('hello<img src="x">world', 20)
+        self.assertIn("<img", result)
+        self.assertNotIn("</img>", result)
+
+    def test_br_does_not_cause_extra_closing_tags(self):
+        """Truncation after <br> should not append </br>."""
+        utils = self._import_utils()
+        result = utils._truncate_html_preserving_tags("hello<br>wor", 8)
+        self.assertNotIn("</br>", result)
+
+    def test_b_tag_still_gets_closed(self):
+        """Non-void elements like <b> should still be closed on truncation."""
+        utils = self._import_utils()
+        result = utils._truncate_html_preserving_tags("<b>hello world</b>", 5)
+        self.assertIn("</b>", result)
+
+
+class PrepareMessagesTextLinksTests(unittest.TestCase):
+    """Tests for _prepare_messages_text returning msg_links."""
+
+    def test_prepare_messages_text_returns_msg_links(self):
+        stub_modules = _stub_dependencies()
+        mp = _import_message_processor(stub_modules)
+        msgs = _make_messages(
+            channels=["@a"],
+            texts=["Check https://example.com for details"],
+        )
+        text_output, total_length, msg_links = mp._prepare_messages_text(msgs)
+        self.assertIsInstance(msg_links, dict)
+        self.assertIn(1, msg_links)
+        self.assertEqual(msg_links[1], ["https://example.com"])
+
+    def test_prepare_messages_text_msg_links_empty_for_no_links(self):
+        stub_modules = _stub_dependencies()
+        mp = _import_message_processor(stub_modules)
+        msgs = _make_messages(channels=["@a"], texts=["No links here"])
+        text_output, total_length, msg_links = mp._prepare_messages_text(msgs)
+        self.assertEqual(msg_links[1], [])
 
 
 if __name__ == "__main__":

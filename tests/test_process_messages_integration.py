@@ -1913,3 +1913,137 @@ class MaxCoveredMessageUpdatesTests(unittest.TestCase):
             ))
 
         self.assertEqual(mock_process.call_count, 2, "Only 2 covered messages should be updated (MAX_COVERED_MESSAGE_UPDATES=2)")
+
+
+class DedupCoveredMessagesExtractionTests(unittest.TestCase):
+    """Tests for _dedup_covered_messages extracted function."""
+
+    def _import_mp(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_config = types.ModuleType("config")
+        fake_config.SIMILARITY_LLM_UPPER = 0.95
+        fake_config.ENABLE_SUMMARIES_DEDUPLICATION = True
+        fake_config.OPENAI_CHANNEL_SUMMARY_MAX_TOKENS = 1500
+        fake_config.OPENAI_GROUP_SUMMARY_MAX_TOKENS = 4000
+        fake_config.OPENAI_SUMMARY_TEMPERATURE = 0.3
+        fake_config.SOURCE_CHANNELS = set()
+        fake_config.DEBUG = False
+        fake_config.SUMMARY_MIN_RATIO = 3
+        fake_config.SUMMARY_MIN_LENGTH = 800
+        fake_config.SUMMARY_MAX_LENGTH = 4000
+        fake_config.GROUP_SUMMARY_MIN_LENGTH = 2000
+        fake_config.GROUP_SUMMARY_MAX_LENGTH = 12000
+        fake_config.NLP_CHECK_MAX_INPUT_CHARS = 2000
+        fake_config.COVERAGE_CHECK_MAX_INPUT_CHARS = 2000
+        fake_config.NLP_MIN_TEXT_LENGTH = 100
+        fake_config.SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE = 3000
+        fake_config.NLP_CONCURRENT_CHECKS = 5
+        fake_config.NLP_AD_KEYWORDS = ["курс"]
+        fake_config.UPDATE_MATCH_MAX_SUMMARIES = 5
+        fake_config.UPDATE_MATCH_MAX_CHARS_PER_SUMMARY = 500
+        fake_config.ENABLE_SUMMARY_UPDATES = True
+        fake_config.MAX_COVERED_MESSAGE_UPDATES = 5
+
+        fake_channel_manager = types.ModuleType("channel_manager")
+        fake_channel_manager.create_channel_abbreviation = lambda ch: "AB"
+        fake_channel_manager.save_discovered_channel = MagicMock()
+
+        fake_models = types.ModuleType("models")
+        fake_models.MessageInfo = type("FakeMI", (), {
+            "__init__": lambda self, **kw: None,
+            "to_dict": lambda self: {},
+        })
+        fake_models.SummaryInfo = type("FakeSI", (), {
+            "__init__": lambda self, **kw: None,
+            "to_dict": lambda self: {},
+        })
+
+        fake_prompts = types.ModuleType("prompts")
+        fake_prompts.prompts = types.SimpleNamespace(
+            CHANNEL_SUMMARY_PROMPT="prompt",
+            GROUP_SUMMARY_PROMPT="prompt",
+            NLP_RELEVANCE_PROMPT="prompt",
+            COVERAGE_AND_MATCH_PROMPT="prompt",
+        )
+
+        fake_history = types.ModuleType("history_manager")
+        fake_history.load_summaries_history = MagicMock(return_value=[])
+        fake_history.load_group_summaries_history = MagicMock(return_value=[])
+        fake_history.save_summarization_history = MagicMock()
+        fake_history.save_group_summarization_history = MagicMock()
+        fake_history.save_summary_to_history = MagicMock()
+        fake_history.save_group_summary_to_history = MagicMock()
+        fake_history.update_group_last_run = MagicMock()
+        fake_history.update_existing_summary = AsyncMock()
+        fake_history.save_updated_summary = AsyncMock()
+
+        fake_utils = types.ModuleType("utils")
+        fake_utils.call_openai = AsyncMock(return_value="ok")
+        fake_utils.extract_links = lambda text: []
+        fake_utils.count_characters = len
+        fake_utils.enforce_summary_length = lambda text, max_chars: text
+        fake_utils.text_hash = lambda text: "hash"
+
+        fake_telegram_client = types.ModuleType("telegram_client")
+        fake_telegram_client.send_message_to_target_channel_with_id = AsyncMock(return_value=42)
+
+        with patch.dict(sys.modules, {
+            "dotenv": fake_dotenv,
+            "config": fake_config,
+            "channel_manager": fake_channel_manager,
+            "models": fake_models,
+            "prompts": fake_prompts,
+            "history_manager": fake_history,
+            "utils": fake_utils,
+            "telegram_client": fake_telegram_client,
+        }):
+            sys.modules.pop("message_processor", None)
+            mp = importlib.import_module("message_processor")
+        return mp
+
+    def test_dedup_covered_messages_returns_uncovered(self):
+        """_dedup_covered_messages should return only non-covered messages."""
+        mp = self._import_mp()
+        msg = MagicMock()
+        msg.is_covered_in_summaries = None
+        msg.text = "test message about NLP"
+        msgs = [msg]
+
+        with patch.object(mp, "_check_coverage_and_match", new_callable=AsyncMock, return_value=None), \
+             patch.object(mp, "load_summaries_history", return_value=[MagicMock()]):
+            sem = asyncio.Semaphore(5)
+            result = asyncio.run(mp._dedup_covered_messages(msgs, False, sem, 0.0))
+
+        self.assertEqual(len(result), 1)
+        self.assertIs(result[0].is_covered_in_summaries, False)
+
+    def test_dedup_covered_messages_filters_covered(self):
+        """_dedup_covered_messages should filter out covered messages."""
+        mp = self._import_mp()
+        msg = MagicMock()
+        msg.is_covered_in_summaries = None
+        msg.text = "test message"
+        msgs = [msg]
+        matching = MagicMock()
+
+        with patch.object(mp, "_check_coverage_and_match", new_callable=AsyncMock, return_value=matching), \
+             patch.object(mp, "process_covered_message", new_callable=AsyncMock), \
+             patch.object(mp, "load_summaries_history", return_value=[matching]):
+            sem = asyncio.Semaphore(5)
+            result = asyncio.run(mp._dedup_covered_messages(msgs, False, sem, 0.0))
+
+        self.assertEqual(len(result), 0)
+        self.assertIs(msg.is_covered_in_summaries, True)
+
+    def test_dedup_covered_messages_returns_all_when_no_summaries(self):
+        """_dedup_covered_messages should return all messages when no summaries exist."""
+        mp = self._import_mp()
+        msg = MagicMock()
+        msgs = [msg]
+
+        with patch.object(mp, "load_summaries_history", return_value=[]):
+            sem = asyncio.Semaphore(5)
+            result = asyncio.run(mp._dedup_covered_messages(msgs, False, sem, 0.0))
+
+        self.assertEqual(len(result), 1)

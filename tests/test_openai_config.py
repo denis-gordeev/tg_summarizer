@@ -1081,5 +1081,80 @@ class FetchExaminedMultiplierConfigTests(unittest.TestCase):
                     importlib.import_module("config")
 
 
+class EmfCostMetricTests(unittest.TestCase):
+    """Tests for EMF estimated cost metric in call_openai output."""
+
+    async def _run_call_openai_with_fake(self, env_extra=None):
+        import importlib
+        import sys
+        import types
+        import io
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_openai = types.ModuleType("openai")
+
+        fake_usage = MagicMock()
+        fake_usage.prompt_tokens = 100
+        fake_usage.completion_tokens = 50
+        fake_usage.total_tokens = 150
+
+        class FakeAsyncOpenAI:
+            def __init__(self, api_key, **kwargs):
+                self.api_key = api_key
+                self.chat = types.SimpleNamespace(
+                    completions=types.SimpleNamespace(
+                        create=AsyncMock(return_value=type(
+                            "Response", (),
+                            {
+                                "choices": [type("Choice", (), {"message": type("Message", (), {"content": "ok"})()})()],
+                                "usage": fake_usage,
+                            },
+                        )())
+                    )
+                )
+
+        class FakeOpenAIError(Exception):
+            pass
+
+        fake_openai.AsyncOpenAI = FakeAsyncOpenAI
+        fake_openai.OpenAI = FakeAsyncOpenAI
+        fake_openai.APIError = FakeOpenAIError
+        fake_openai.RateLimitError = type("RateLimitError", (FakeOpenAIError,), {"status_code": None})
+        fake_openai.APIConnectionError = type("APIConnectionError", (FakeOpenAIError,), {})
+
+        env = {**REQUIRED_ENV}
+        if env_extra:
+            env.update(env_extra)
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv, "openai": fake_openai}):
+            with patch.dict(os.environ, env, clear=True):
+                sys.modules.pop("config", None)
+                sys.modules.pop("utils", None)
+                config = importlib.import_module("config")
+                utils = importlib.import_module("utils")
+
+        captured = io.StringIO()
+        with patch("sys.stdout", captured):
+            await utils.call_openai("system", "user")
+
+        return captured.getvalue()
+
+    def test_emf_includes_estimated_cost_usd(self):
+        import asyncio
+        output = asyncio.run(self._run_call_openai_with_fake())
+        self.assertIn("EstimatedCostUSD", output)
+        compact = output.replace(" ", "")
+        self.assertIn('"EstimatedCostUSD":', compact)
+
+    def test_cost_estimate_for_gpt4o_mini(self):
+        cost = 1000 * 0.15 / 1_000_000 + 500 * 0.60 / 1_000_000
+        self.assertAlmostEqual(cost, cost, places=10)
+        input_per_m, output_per_m = 0.15, 0.60
+        expected = 1000 * input_per_m / 1_000_000 + 500 * output_per_m / 1_000_000
+        self.assertAlmostEqual(cost, expected, places=10)
+
+
 if __name__ == "__main__":
     unittest.main()

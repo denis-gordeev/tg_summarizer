@@ -5,6 +5,7 @@ import re
 import sys
 import asyncio
 import logging
+import tempfile
 import time as _time
 from datetime import datetime, timezone
 from openai import AsyncOpenAI, APIError, RateLimitError, APIConnectionError
@@ -28,10 +29,24 @@ def load_json_file(filepath: str, default: dict = None) -> dict:
 
 
 def save_json_file(filepath: str, data: dict, error_msg: str) -> bool:
-    """Generic JSON file saver with error handling."""
+    """Generic JSON file saver with error handling.
+
+    Uses atomic write (write to temp file, then rename) to prevent
+    file corruption if the process is killed mid-write (e.g. Lambda timeout).
+    """
     try:
-        with open(filepath, 'w', encoding='utf-8') as f:
-            _json.dump(data, f, ensure_ascii=False, indent=2)
+        dir_name = os.path.dirname(filepath) or "."
+        fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix=".tmp")
+        try:
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                _json.dump(data, f, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, filepath)
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
         return True
     except Exception as e:
         logger.error("%s: %s", error_msg, e)
@@ -50,6 +65,11 @@ TRAILING_PUNCTUATION_REGEX = re.compile(r"""[.,;:!?)\]}'">]+$""")
 TELEGRAM_CHANNEL_REGEX = re.compile(r"https://t\.me/([^/]+)/\d+")
 ABBREVIATION_REGEX = re.compile(r'\[([A-Z0-9]+)\]')
 HTML_TAG_REGEX = re.compile(r'<[^>]+>')
+
+VOID_HTML_ELEMENTS = frozenset({
+    "br", "hr", "img", "input", "meta", "link", "area", "base",
+    "col", "embed", "source", "track", "wbr",
+})
 
 
 def count_characters(text: str) -> int:
@@ -96,6 +116,15 @@ def extract_all_channels(text: str) -> list[str]:
     return all_channels
 
 
+_COST_PER_MILLION = {
+    "gpt-4o-mini": (0.15, 0.60),
+}
+
+def _estimate_cost_usd(model: str, prompt_tokens: int, completion_tokens: int) -> float:
+    input_per_m, output_per_m = _COST_PER_MILLION.get(model, (0.15, 0.60))
+    return prompt_tokens * input_per_m / 1_000_000 + completion_tokens * output_per_m / 1_000_000
+
+
 def _emit_openai_latency(elapsed: float, model: str, total_tokens: int, prompt_tokens: int = 0, completion_tokens: int = 0) -> None:
     """Emit OpenAI latency as a CloudWatch Embedded Metric Format (EMF) metric.
 
@@ -103,6 +132,7 @@ def _emit_openai_latency(elapsed: float, model: str, total_tokens: int, prompt_t
     No additional API calls or dependencies required.
     """
     try:
+        cost_usd = _estimate_cost_usd(model, prompt_tokens, completion_tokens)
         emf = {
             "_aws": {
                 "Timestamp": int(_time.time() * 1000),
@@ -113,6 +143,7 @@ def _emit_openai_latency(elapsed: float, model: str, total_tokens: int, prompt_t
                         {"Name": "Latency", "Unit": "Seconds"},
                         {"Name": "PromptTokens", "Unit": "None"},
                         {"Name": "CompletionTokens", "Unit": "None"},
+                        {"Name": "EstimatedCostUSD", "Unit": "None"},
                     ]
                 }]
             },
@@ -122,6 +153,7 @@ def _emit_openai_latency(elapsed: float, model: str, total_tokens: int, prompt_t
             "PromptTokens": prompt_tokens,
             "CompletionTokens": completion_tokens,
             "TotalTokens": total_tokens,
+            "EstimatedCostUSD": round(cost_usd, 6),
         }
         sys.stdout.write(_json.dumps(emf, separators=(",", ":")) + "\n")
         sys.stdout.flush()
@@ -247,7 +279,7 @@ def _truncate_html_preserving_tags(text: str, max_visible_chars: int) -> str:
                 if is_closing:
                     if open_tags and open_tags[-1] == tag_name:
                         open_tags.pop()
-                elif not is_self_closing:
+                elif not is_self_closing and tag_name not in VOID_HTML_ELEMENTS:
                     open_tags.append(tag_name)
             i = end + 1
             continue
