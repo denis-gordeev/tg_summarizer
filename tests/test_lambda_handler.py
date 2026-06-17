@@ -4,7 +4,7 @@ import sys
 import time
 import types
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
 def _load_lambda_handler():
@@ -331,6 +331,39 @@ class HandlerTests(unittest.TestCase):
         flag_logs = [call for call in mock_log.call_args_list
                      if "send=" in str(call) and "save=" in str(call)]
         self.assertTrue(len(flag_logs) > 0, "Expected event flags in completion log")
+
+
+class SummarizerGroupDeadlineTests(unittest.TestCase):
+    """Tests for deadline check after group fetch in summarizer.py."""
+
+    def test_check_deadline_between_group_fetch_and_process(self):
+        """summarizer.py should have check_deadline between fetch_group_messages and
+        process_messages for groups (verified by AST inspection)."""
+        import ast
+
+        with open("summarizer.py") as f:
+            source = f.read()
+        tree = ast.parse(source)
+
+        source_lines = source.splitlines()
+        fetch_line = None
+        deadline_after_fetch = None
+        process_line = None
+        for i, line in enumerate(source_lines):
+            if "fetch_group_messages" in line and fetch_line is None:
+                fetch_line = i + 1
+            if "check_deadline" in line and fetch_line is not None and deadline_after_fetch is None:
+                deadline_after_fetch = i + 1
+            if "process_messages" in line and "is_group" in line and fetch_line is not None:
+                process_line = i + 1
+                break
+        self.assertIsNotNone(fetch_line, "fetch_group_messages call not found")
+        self.assertIsNotNone(deadline_after_fetch, "check_deadline after fetch_group_messages not found")
+        self.assertIsNotNone(process_line, "process_messages for groups not found")
+        self.assertLess(fetch_line, deadline_after_fetch,
+                        "check_deadline should come after fetch_group_messages")
+        self.assertLess(deadline_after_fetch, process_line,
+                        "check_deadline should come before process_messages for groups")
 
 
 if __name__ == "__main__":

@@ -2133,5 +2133,174 @@ class AtomicJsonWriteTests(unittest.TestCase):
             self.assertEqual(data, {"original": True})
 
 
+class FallbackDedupLinksTests(unittest.TestCase):
+    """Tests for 'Другие ссылки' dedup in update_existing_summary fallback."""
+
+    def _make_stubs(self):
+        import types
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_channel_manager = types.ModuleType("channel_manager")
+        fake_channel_manager.create_channel_abbreviation = lambda ch: "AB"
+        fake_channel_manager.load_channel_abbreviations = lambda: {}
+
+        class FakeSummaryInfo:
+            def __init__(self, content="", date=None, message_count=0, channels=None, message_id=None):
+                self.content = content
+                self.date = date or datetime.now(timezone.utc)
+                self.message_count = message_count
+                self.channels = channels or []
+                self.message_id = message_id
+
+        class FakeMessageInfo:
+            def __init__(self, text="", channel="", message_id=0, date=None, link=""):
+                self.text = text
+                self.channel = channel
+                self.message_id = message_id
+                self.date = date or datetime.now(timezone.utc)
+                self.link = link
+
+            def get_telegram_link(self):
+                return f"https://t.me/{self.channel.lstrip('@')}/{self.message_id}"
+
+        fake_models = types.ModuleType("models")
+        fake_models.SummaryInfo = FakeSummaryInfo
+        fake_models.MessageInfo = FakeMessageInfo
+        fake_prompts = types.ModuleType("prompts")
+        fake_prompts.prompts = types.SimpleNamespace()
+        fake_utils = types.ModuleType("utils")
+        fake_utils.call_openai = AsyncMock(side_effect=Exception("LLM error"))
+        fake_utils.extract_links = lambda text: []
+        fake_utils.load_json_file = lambda *a, **kw: {"summaries": [], "last_updated": ""}
+        fake_utils.save_json_file = MagicMock(return_value=True)
+        fake_utils.now_iso = lambda: "2026-01-01T00:00:00"
+        fake_utils.text_hash = lambda text: __import__('hashlib').sha256(text.encode()).hexdigest()[:16]
+        fake_utils.count_characters = lambda text: len(text)
+        fake_utils.enforce_summary_length = lambda text, max_chars: text[:max_chars]
+
+        stubs = {
+            "dotenv": fake_dotenv,
+            "channel_manager": fake_channel_manager,
+            "models": fake_models,
+            "prompts": fake_prompts,
+            "utils": fake_utils,
+        }
+        return stubs, FakeSummaryInfo, FakeMessageInfo
+
+    def test_no_duplicate_Другие_ссылки_on_repeated_fallback(self):
+        """When fallback is triggered on a summary that already has 'Другие ссылки:',
+        the new link should be appended to the existing section, not create a new one."""
+        stubs, FakeSI, FakeMI = self._make_stubs()
+
+        with patch.dict(sys.modules, stubs):
+            with patch.dict(os.environ, {}, clear=True):
+                sys.modules.pop("history_manager", None)
+                sys.modules.pop("config", None)
+                hm = importlib.import_module("history_manager")
+
+                summary = FakeSI(content="Some summary\n\nДругие ссылки: <a href=\"https://t.me/ch/1\">[CH]</a>", message_id=1)
+                msg = FakeMI(text="New info", channel="@test", message_id=42)
+
+                async def _test():
+                    return await hm.update_existing_summary(summary, msg)
+
+                updated = asyncio.run(_test())
+                self.assertEqual(updated.content.count("Другие ссылки:"), 1,
+                                 "Should not create duplicate 'Другие ссылки:' sections")
+
+    def test_creates_Другие_ссылки_when_absent(self):
+        """When summary has no 'Другие ссылки:', fallback should create the section."""
+        stubs, FakeSI, FakeMI = self._make_stubs()
+
+        with patch.dict(sys.modules, stubs):
+            with patch.dict(os.environ, {}, clear=True):
+                sys.modules.pop("history_manager", None)
+                sys.modules.pop("config", None)
+                hm = importlib.import_module("history_manager")
+
+                summary = FakeSI(content="Some summary without links section", message_id=1)
+                msg = FakeMI(text="New info", channel="@test", message_id=42)
+
+                async def _test():
+                    return await hm.update_existing_summary(summary, msg)
+
+                updated = asyncio.run(_test())
+                self.assertIn("Другие ссылки:", updated.content)
+
+
+class SaveUpdatedSummaryWithSummariesParamTests(unittest.TestCase):
+    """Tests for save_updated_summary accepting optional summaries parameter."""
+
+    def test_save_updated_summary_uses_provided_summaries(self):
+        """When summaries are passed, save_updated_summary should use them instead of loading from file."""
+        import types
+        import importlib
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        fake_channel_manager = types.ModuleType("channel_manager")
+        fake_channel_manager.create_channel_abbreviation = lambda ch: "AB"
+        fake_channel_manager.load_channel_abbreviations = lambda: {}
+
+        class FakeSummaryInfo:
+            def __init__(self, content="", date=None, message_count=0, channels=None, message_id=None):
+                self.content = content
+                self.date = date or datetime.now(timezone.utc)
+                self.message_count = message_count
+                self.channels = channels or []
+                self.message_id = message_id
+
+            def to_dict(self):
+                return {"content": self.content, "date": self.date.isoformat() if self.date else "",
+                        "message_count": self.message_count, "channels": self.channels,
+                        "message_id": self.message_id}
+
+        fake_models = types.ModuleType("models")
+        fake_models.SummaryInfo = FakeSummaryInfo
+        fake_models.MessageInfo = type("MessageInfo", (), {})
+        fake_prompts = types.ModuleType("prompts")
+        fake_prompts.prompts = types.SimpleNamespace()
+        fake_utils = types.ModuleType("utils")
+        fake_utils.call_openai = MagicMock()
+        fake_utils.extract_links = lambda text: []
+        fake_utils.load_json_file = lambda *a, **kw: {"summaries": [], "last_updated": ""}
+        fake_utils.save_json_file = MagicMock(return_value=True)
+        fake_utils.now_iso = lambda: "2026-01-01T00:00:00"
+        fake_utils.text_hash = lambda text: __import__('hashlib').sha256(text.encode()).hexdigest()[:16]
+        fake_utils.count_characters = lambda text: len(text)
+        fake_utils.enforce_summary_length = lambda text, max_chars: text
+        fake_telegram_client = types.ModuleType("telegram_client")
+        fake_telegram_client.user_client = None
+        fake_telegram_client.clients_loop = None
+        fake_telegram_client.edit_message_in_target_channel = AsyncMock()
+
+        stubs = {
+            "dotenv": fake_dotenv,
+            "channel_manager": fake_channel_manager,
+            "models": fake_models,
+            "prompts": fake_prompts,
+            "utils": fake_utils,
+            "telegram_client": fake_telegram_client,
+        }
+
+        with patch.dict(sys.modules, stubs):
+            with patch.dict(os.environ, {}, clear=True):
+                sys.modules.pop("history_manager", None)
+                sys.modules.pop("config", None)
+                hm = importlib.import_module("history_manager")
+
+                original = FakeSummaryInfo(content="original", message_id=42)
+                updated = FakeSummaryInfo(content="updated content", message_id=42)
+                summaries = [original]
+
+                with patch.object(hm, "load_summaries_history") as mock_load:
+                    async def _test():
+                        await hm.save_updated_summary(original, updated, summaries=summaries)
+
+                    asyncio.run(_test())
+                    mock_load.assert_not_called()
+
+
 if __name__ == '__main__':
     unittest.main()

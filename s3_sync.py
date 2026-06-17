@@ -1,4 +1,5 @@
 import os
+import json
 import logging
 from pathlib import Path
 from typing import Iterable
@@ -57,6 +58,24 @@ def _build_s3_key(prefix: str, relative_name: str) -> str:
     return relative_name
 
 
+def _is_json_state_file(relative_name: str) -> bool:
+    return relative_name.endswith(".json")
+
+
+def _validate_json_file(path: Path) -> bool:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            json.load(f)
+        return True
+    except (json.JSONDecodeError, ValueError, UnicodeDecodeError) as e:
+        logger.warning("Downloaded file %s is not valid JSON (%s) — removing", path, e)
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        return False
+
+
 def download_from_s3() -> None:
     bucket = os.getenv("STATE_S3_BUCKET", "").strip()
     if not bucket:
@@ -75,6 +94,9 @@ def download_from_s3() -> None:
         local_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             client.download_file(bucket, key, str(local_path))
+            if _is_json_state_file(relative_name) and not _validate_json_file(local_path):
+                skipped += 1
+                continue
             logger.debug("Downloaded s3://%s/%s -> %s", bucket, key, local_path)
             downloaded += 1
         except Exception as exc:

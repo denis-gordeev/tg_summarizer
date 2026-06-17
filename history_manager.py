@@ -371,10 +371,16 @@ async def update_existing_summary(
         updated_content = await call_openai(update_prompt, user_content, max_tokens=UPDATE_SUMMARY_MAX_TOKENS, temperature=0)
         if not updated_content or count_characters(updated_content) < count_characters(summary.content) * 0.8:
             logger.warning("LLM update response too short (%d < %d*0.8); falling back to append", count_characters(updated_content or ""), count_characters(summary.content))
-            updated_content = summary.content + f"\n\nДругие ссылки: {new_link}"
+            if "Другие ссылки:" in summary.content:
+                updated_content = summary.content + f"\n{new_link}"
+            else:
+                updated_content = summary.content + f"\n\nДругие ссылки: {new_link}"
     except Exception as e:
         logger.error("Error updating summary via LLM: %s; falling back to append", e)
-        updated_content = summary.content + f"\n\nДругие ссылки: {new_link}"
+        if "Другие ссылки:" in summary.content:
+            updated_content = summary.content + f"\n{new_link}"
+        else:
+            updated_content = summary.content + f"\n\nДругие ссылки: {new_link}"
 
     updated_channels = (
         summary.channels + [new_message.channel]
@@ -396,13 +402,15 @@ async def update_existing_summary(
 
 
 async def save_updated_summary(
-    original_summary: SummaryInfo, updated_summary: SummaryInfo, is_group: bool = False
+    original_summary: SummaryInfo, updated_summary: SummaryInfo, is_group: bool = False,
+    summaries: List[SummaryInfo] | None = None,
 ) -> None:
     """Save updated summary, replacing the original in history and editing the channel message."""
     from telegram_client import edit_message_in_target_channel
 
     history_file = GROUP_SUMMARIES_HISTORY_FILE if is_group else SUMMARIES_HISTORY_FILE
-    summaries = load_group_summaries_history() if is_group else load_summaries_history()
+    if summaries is None:
+        summaries = load_group_summaries_history() if is_group else load_summaries_history()
 
     found = False
     for i, summary in enumerate(summaries):

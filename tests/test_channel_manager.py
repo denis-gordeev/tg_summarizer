@@ -166,5 +166,36 @@ class ChannelAbbreviationCachingTests(unittest.TestCase):
             sys.modules.pop("channel_manager", None)
 
 
+class GetAllSourceChannelsSortedTests(unittest.TestCase):
+    """Tests for get_all_source_channels returning sorted (deterministic) order."""
+
+    def test_channels_returned_in_sorted_order(self):
+        import importlib
+        import types
+        import sys
+
+        fake_utils = types.ModuleType("utils")
+        fake_utils.load_json_file = lambda filepath, default=None: {}
+        fake_utils.save_json_file = lambda *a, **kw: True
+        fake_utils.now_iso = lambda: "2026-01-01T00:00:00"
+
+        fake_config = types.ModuleType("config")
+        fake_config.ABBREVIATIONS_FILE = "abbrev.json"
+        fake_config.DISCOVERED_CHANNELS_FILE = "discovered.json"
+        fake_config.SOURCE_CHANNELS = {"@z_channel", "@a_channel", "@m_channel"}
+
+        sys.modules["utils"] = fake_utils
+        sys.modules["config"] = fake_config
+        sys.modules.pop("channel_manager", None)
+
+        cm = importlib.import_module("channel_manager")
+
+        try:
+            result = cm.get_all_source_channels()
+            self.assertEqual(result, ["@a_channel", "@m_channel", "@z_channel"])
+        finally:
+            sys.modules.pop("channel_manager", None)
+
+
 if __name__ == '__main__':
     unittest.main()

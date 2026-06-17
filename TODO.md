@@ -788,6 +788,27 @@
 - Updated test stubs in [`tests/test_process_messages_integration.py`](tests/test_process_messages_integration.py) — added `NLP_MIN_TEXT_LENGTH`, `ENABLE_SUMMARY_UPDATES`, fixed `NLP_MIN_TEXT_LENGTH` patching to use `patch.object` on module attribute.
 - All 196 tests pass without errors.
 
+## Completed in 2026-06-17 round 2 (Lambda hardening round 27, prompt quality, redundant I/O, deadline, determinism, S3 validation)
+
+- **Prompt quality**: Tightened [`CHANNEL_SUMMARY_PROMPT`](prompts.py) and [`GROUP_SUMMARY_PROMPT`](prompts.py) — added "Без мета-комментариев" rule (targets LLM verbosity pattern like "в этом дайджесте…", "итого"), moved "Конкретные результаты и факты" rule into both prompts (was only in channel prompt). Shortened opening lines by ~30% while preserving all rules. Directly addresses AUTOWORK_INSTRUCTIONS goal of improving quality and conciseness.
+- **Redundant summary loads eliminated**: Changed [`_dedup_covered_messages()`](message_processor.py) to return 2-tuple `(uncovered_messages, summaries)`, passing already-loaded summaries through to [`process_covered_message()`](message_processor.py) and [`save_updated_summary()`](history_manager.py). Both functions now accept optional `summaries` parameter — when provided, skip the redundant `load_summaries_history()` / `load_group_summaries_history()` call. Previously, the covered-message flow loaded summaries from file 3 times per covered message: once in `_dedup_covered_messages`, once in `process_covered_message` (for refresh), and once in `save_updated_summary` (for find-and-replace). Now loads once and passes through, eliminating 2 redundant file reads per covered message.
+- **Deadline check after group fetch**: Added `check_deadline(_deadline)` call between `fetch_group_messages()` and `process_messages()` for groups in [`run_summarizer()`](summarizer.py). Previously, if group message fetching was slow, the summarizer would proceed to `process_messages` without checking the deadline, risking Lambda timeout during group processing. Now consistent with the channel path which already has a deadline check after `fetch_messages()`.
+- **Deterministic channel ordering**: Replaced `random.shuffle(all_channels)` with `sorted(all_channels_set)` in [`get_all_source_channels()`](channel_manager.py). Removed `import random`. `random.shuffle` made channel fetch order nondeterministic, complicating debugging and CloudWatch log analysis. Sorted order is reproducible and has no functional impact (all channels are fetched regardless of order).
+- **S3 download JSON validation**: Added [`_is_json_state_file()`](s3_sync.py) and [`_validate_json_file()`](s3_sync.py) in [`s3_sync.py`](s3_sync.py). After downloading a `.json` file from S3, validates it parses as valid JSON. Invalid files are removed and counted as skipped (not downloaded). This prevents corrupt S3 state (e.g., truncated uploads) from replacing valid local state. Non-JSON files (e.g., `.session`) are not validated. Added `import json` to module.
+- **Fallback "Другие ссылки" dedup**: Fixed [`update_existing_summary()`](history_manager.py) — when the fallback append is triggered on a summary that already contains "Другие ссылки:", the new link is now appended to the existing section (e.g., `\n{new_link}`) instead of creating a duplicate "Другие ссылки:" section. Previously, repeated fallback appends on the same summary would create multiple "Другие ссылки:" blocks, wasting characters and looking messy.
+- **Tests added**: 8 new tests (total 263, up from 255):
+  - `test_download_rejects_invalid_json`: verifies corrupt JSON files are removed and skipped
+  - `test_download_accepts_valid_json`: verifies valid JSON files are kept
+  - `test_download_skips_json_validation_for_non_json`: verifies `.session` files bypass validation
+  - `test_channels_returned_in_sorted_order`: verifies `get_all_source_channels` returns sorted list
+  - `test_no_duplicate_Другие_ссылки_on_repeated_fallback`: verifies no duplicate "Другие ссылки:" sections
+  - `test_creates_Другие_ссылки_when_absent`: verifies section created when not present
+  - `test_save_updated_summary_uses_provided_summaries`: verifies `save_updated_summary` skips file load when summaries passed
+  - `test_check_deadline_between_group_fetch_and_process`: verifies deadline check exists between fetch and process for groups (AST)
+- Updated test stubs in [`tests/test_s3_sync.py`](tests/test_s3_sync.py) — `FakeS3Client.download_file` now writes valid JSON (`"{}"`) instead of plain text (`"downloaded"`), since S3 JSON validation would reject non-JSON content for `.json` files.
+- Updated `_dedup_covered_messages` direct-call tests in [`tests/test_process_messages_integration.py`](tests/test_process_messages_integration.py) — unpack 2-tuple return `(messages, summaries)` instead of single list.
+- All 263 tests pass without errors.
+
 ## Next actions
 
 - **CI/CD**: Настроить GitHub Actions CI/CD для автоматического деплоя Lambda при мердже в main.

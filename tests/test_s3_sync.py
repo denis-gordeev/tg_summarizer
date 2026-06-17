@@ -31,7 +31,7 @@ class FakeS3Client:
 
     def download_file(self, bucket, key, destination):
         self.download_calls.append((bucket, key, destination))
-        Path(destination).write_text("downloaded", encoding="utf-8")
+        Path(destination).write_text("{}", encoding="utf-8")
 
     def upload_file(self, source, bucket, key):
         self.upload_calls.append((source, bucket, key))
@@ -199,6 +199,100 @@ class S3ClientCachingTests(unittest.TestCase):
             self.assertIs(client1, client2, "S3 client should be cached and reused")
             fake_boto3.client.assert_called_once_with("s3")
         s3_sync._s3_client = None
+
+
+class S3DownloadJSONValidationTests(unittest.TestCase):
+    def test_download_rejects_invalid_json(self):
+        """Downloaded .json files that aren't valid JSON should be removed and skipped."""
+        class CorruptS3Client:
+            def download_file(self, bucket, key, destination):
+                Path(destination).write_text("not json {{{", encoding="utf-8")
+
+        client = CorruptS3Client()
+
+        with tempfile.TemporaryDirectory() as tmpdir, \
+             patch.dict(
+                 os.environ,
+                 {
+                     "STATE_S3_BUCKET": "bucket",
+                     "STATE_S3_PREFIX": "prefix",
+                     "STATE_SYNC_FILES": "state/corrupt.json",
+                 },
+                 clear=False,
+             ), \
+             patch.object(s3_sync, "_get_s3_client", return_value=client), \
+             patch.object(s3_sync.logger, "info") as mock_log:
+            previous_cwd = os.getcwd()
+            os.chdir(tmpdir)
+            try:
+                s3_sync.download_from_s3()
+                self.assertFalse(Path("state/corrupt.json").exists())
+                summary_logs = [call for call in mock_log.call_args_list
+                                if "S3 download" in str(call)]
+                self.assertTrue(len(summary_logs) > 0)
+                self.assertEqual(summary_logs[0][0][1], 0)
+                self.assertEqual(summary_logs[0][0][2], 1)
+            finally:
+                os.chdir(previous_cwd)
+
+    def test_download_accepts_valid_json(self):
+        """Downloaded .json files with valid JSON should be kept."""
+        class ValidS3Client:
+            def download_file(self, bucket, key, destination):
+                Path(destination).write_text('{"key": "value"}', encoding="utf-8")
+
+        client = ValidS3Client()
+
+        with tempfile.TemporaryDirectory() as tmpdir, \
+             patch.dict(
+                 os.environ,
+                 {
+                     "STATE_S3_BUCKET": "bucket",
+                     "STATE_S3_PREFIX": "prefix",
+                     "STATE_SYNC_FILES": "state/valid.json",
+                 },
+                 clear=False,
+             ), \
+             patch.object(s3_sync, "_get_s3_client", return_value=client):
+            previous_cwd = os.getcwd()
+            os.chdir(tmpdir)
+            try:
+                s3_sync.download_from_s3()
+                self.assertTrue(Path("state/valid.json").exists())
+            finally:
+                os.chdir(previous_cwd)
+
+    def test_download_skips_json_validation_for_non_json(self):
+        """Non-JSON files (e.g. .session) should not be validated as JSON."""
+        class SessionS3Client:
+            def download_file(self, bucket, key, destination):
+                Path(destination).write_text("binary session data", encoding="utf-8")
+
+        client = SessionS3Client()
+
+        with tempfile.TemporaryDirectory() as tmpdir, \
+             patch.dict(
+                 os.environ,
+                 {
+                     "STATE_S3_BUCKET": "bucket",
+                     "STATE_S3_PREFIX": "prefix",
+                     "STATE_SYNC_FILES": "state/tg.session",
+                 },
+                 clear=False,
+             ), \
+             patch.object(s3_sync, "_get_s3_client", return_value=client), \
+             patch.object(s3_sync.logger, "info") as mock_log:
+            previous_cwd = os.getcwd()
+            os.chdir(tmpdir)
+            try:
+                s3_sync.download_from_s3()
+                self.assertTrue(Path("state/tg.session").exists())
+                summary_logs = [call for call in mock_log.call_args_list
+                                if "S3 download" in str(call)]
+                self.assertTrue(len(summary_logs) > 0)
+                self.assertEqual(summary_logs[0][0][1], 1)
+            finally:
+                os.chdir(previous_cwd)
 
 
 if __name__ == "__main__":

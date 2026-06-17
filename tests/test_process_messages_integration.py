@@ -2014,7 +2014,7 @@ class DedupCoveredMessagesExtractionTests(unittest.TestCase):
         with patch.object(mp, "_check_coverage_and_match", new_callable=AsyncMock, return_value=None), \
              patch.object(mp, "load_summaries_history", return_value=[MagicMock()]):
             sem = asyncio.Semaphore(5)
-            result = asyncio.run(mp._dedup_covered_messages(msgs, False, sem, 0.0))
+            result, _summaries = asyncio.run(mp._dedup_covered_messages(msgs, False, sem, 0.0))
 
         self.assertEqual(len(result), 1)
         self.assertIs(result[0].is_covered_in_summaries, False)
@@ -2032,7 +2032,7 @@ class DedupCoveredMessagesExtractionTests(unittest.TestCase):
              patch.object(mp, "process_covered_message", new_callable=AsyncMock), \
              patch.object(mp, "load_summaries_history", return_value=[matching]):
             sem = asyncio.Semaphore(5)
-            result = asyncio.run(mp._dedup_covered_messages(msgs, False, sem, 0.0))
+            result, _summaries = asyncio.run(mp._dedup_covered_messages(msgs, False, sem, 0.0))
 
         self.assertEqual(len(result), 0)
         self.assertIs(msg.is_covered_in_summaries, True)
@@ -2045,6 +2045,6 @@ class DedupCoveredMessagesExtractionTests(unittest.TestCase):
 
         with patch.object(mp, "load_summaries_history", return_value=[]):
             sem = asyncio.Semaphore(5)
-            result = asyncio.run(mp._dedup_covered_messages(msgs, False, sem, 0.0))
+            result, _summaries = asyncio.run(mp._dedup_covered_messages(msgs, False, sem, 0.0))
 
         self.assertEqual(len(result), 1)

@@ -1,6 +1,5 @@
 import json
 import re
-import random
 import logging
 from config import ABBREVIATIONS_FILE, DISCOVERED_CHANNELS_FILE
 from utils import load_json_file, save_json_file, now_iso
@@ -132,8 +131,7 @@ def get_all_source_channels() -> list[str]:
     all_channels_set = SOURCE_CHANNELS | discovered_channels | similar_channels
     all_channels_set = all_channels_set - banned_channels
 
-    all_channels = list(all_channels_set)
-    random.shuffle(all_channels)
+    all_channels = sorted(all_channels_set)
     logger.info(
         "Using %d env channels, %d discovered, %d similar "
         "(%d banned excluded)",

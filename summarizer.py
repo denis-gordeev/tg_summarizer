@@ -39,6 +39,7 @@ async def run_summarizer(
             check_deadline(_deadline)
             logger.info("=== Processing Groups ===")
             group_messages = await fetch_group_messages(include_today_processed_messages, _deadline=_deadline)
+            check_deadline(_deadline)
             await process_messages(group_messages, save_changes, send_message, is_group=True, _deadline=_deadline)
         else:
             logger.info("Group summarization skipped.")

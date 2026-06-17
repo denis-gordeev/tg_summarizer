@@ -327,7 +327,7 @@ async def _dedup_covered_messages(
     """
     summaries = load_group_summaries_history() if is_group else load_summaries_history()
     if not summaries:
-        return messages
+        return messages, summaries
 
     async def _check_msg_coverage(msg: MessageInfo) -> Optional[SummaryInfo]:
         async with sem:
@@ -349,12 +349,12 @@ async def _dedup_covered_messages(
                 msg.is_covered_in_summaries = False
                 continue
             msg.is_covered_in_summaries = True
-            await process_covered_message(msg, matching_summary=matching_summary, is_group=is_group)
+            await process_covered_message(msg, matching_summary=matching_summary, is_group=is_group, summaries=summaries)
             updated_count += 1
         else:
             msg.is_covered_in_summaries = False
 
-    return [msg for msg in messages if not getattr(msg, 'is_covered_in_summaries', False)]
+    return [msg for msg in messages if not getattr(msg, 'is_covered_in_summaries', False)], summaries
 
 
 async def process_messages(
@@ -426,7 +426,7 @@ async def process_messages(
         if _deadline and time.monotonic() > _deadline:
             logger.warning("Deadline exceeded before coverage checks in %s — skipping dedup", stream_label)
         else:
-            unique_messages = await _dedup_covered_messages(unique_messages, is_group, sem, _deadline)
+            unique_messages, _summaries = await _dedup_covered_messages(unique_messages, is_group, sem, _deadline)
 
     covered_count = sum(1 for msg in nlp_related_messages if getattr(msg, 'is_covered_in_summaries', False))
     if ENABLE_SUMMARIES_DEDUPLICATION and covered_count > 0:
@@ -454,7 +454,7 @@ async def process_messages(
         )
 
 
-async def process_covered_message(msg: MessageInfo, matching_summary: SummaryInfo = None, is_group: bool = False):
+async def process_covered_message(msg: MessageInfo, matching_summary: SummaryInfo = None, is_group: bool = False, summaries: List[SummaryInfo] | None = None):
     """Process a message that is already covered in previous summaries."""
     if not ENABLE_SUMMARY_UPDATES:
         logger.debug("Skipping already covered message: %s...", msg.text[:50])
@@ -465,7 +465,8 @@ async def process_covered_message(msg: MessageInfo, matching_summary: SummaryInf
         return
 
     if matching_summary.message_id is not None:
-        summaries = load_group_summaries_history() if is_group else load_summaries_history()
+        if summaries is None:
+            summaries = load_group_summaries_history() if is_group else load_summaries_history()
         refreshed = None
         for s in summaries:
             if s.message_id == matching_summary.message_id:
@@ -479,7 +480,7 @@ async def process_covered_message(msg: MessageInfo, matching_summary: SummaryInf
     logger.debug("Checking summary update for: %s...", msg.text[:50])
     updated_summary = await update_existing_summary(matching_summary, msg, is_group)
     if updated_summary:
-        await save_updated_summary(matching_summary, updated_summary, is_group)
+        await save_updated_summary(matching_summary, updated_summary, is_group, summaries=summaries)
         logger.info("Summary updated with new message")
     else:
         logger.warning("Failed to update summary")
