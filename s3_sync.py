@@ -104,8 +104,13 @@ def upload_to_s3() -> None:
     prefix = os.getenv("STATE_S3_PREFIX", "")
     uploaded = 0
     failed = 0
+    skipped_empty = 0
     for relative_name, local_path in _iter_local_files():
         if not local_path.exists():
+            continue
+        if local_path.stat().st_size == 0:
+            logger.warning("Skipping upload of empty file %s — would overwrite valid S3 state", relative_name)
+            skipped_empty += 1
             continue
         key = _build_s3_key(prefix, relative_name)
         try:
@@ -116,4 +121,4 @@ def upload_to_s3() -> None:
             logger.error("Failed to upload %s to s3://%s/%s: %s", local_path, bucket, key, exc)
             failed += 1
 
-    logger.info("S3 upload: %d files uploaded, %d failed", uploaded, failed)
+    logger.info("S3 upload: %d files uploaded, %d failed, %d skipped (empty)", uploaded, failed, skipped_empty)

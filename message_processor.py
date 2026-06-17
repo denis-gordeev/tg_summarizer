@@ -128,11 +128,17 @@ def _remove_intra_batch_duplicates(messages: List[MessageInfo]) -> List[MessageI
     """
     unique_msgs: List[MessageInfo] = []
     seen_links = set()
+    seen_hashes = set()
 
     for msg in messages:
         links = extract_links(msg.text)
         if links and any(link in seen_links for link in links):
             logger.debug("Skipping intra-batch link duplicate: %s", links[0])
+            continue
+
+        msg_hash = text_hash(msg.text)
+        if msg_hash in seen_hashes:
+            logger.debug("Skipping intra-batch exact text duplicate (hash=%s)", msg_hash)
             continue
 
         duplicate = False
@@ -146,6 +152,7 @@ def _remove_intra_batch_duplicates(messages: List[MessageInfo]) -> List[MessageI
         if not duplicate:
             unique_msgs.append(msg)
             seen_links.update(links)
+            seen_hashes.add(msg_hash)
 
     return unique_msgs
 

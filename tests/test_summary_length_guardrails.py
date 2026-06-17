@@ -1,8 +1,10 @@
+import importlib
 import os
 import re
 import sys
 import types
 import unittest
+import html as _html
 from unittest.mock import MagicMock, patch
 
 
@@ -16,7 +18,7 @@ REQUIRED_ENV = {
 
 
 def _stub_count_characters(text):
-    return len(re.sub(r'<[^>]+>', '', text))
+    return len(_html.unescape(re.sub(r'<[^>]+>', '', text)))
 
 
 def _stub_enforce_summary_length(text, max_chars):
@@ -86,7 +88,7 @@ def _stub_dependencies():
     fake_utils.extract_links = lambda text: []
     fake_utils.count_characters = _stub_count_characters
     fake_utils.enforce_summary_length = _stub_enforce_summary_length
-    fake_utils.text_hash = lambda text: "abc123"
+    fake_utils.text_hash = lambda text: __import__('hashlib').sha256(text.encode()).hexdigest()[:16]
 
     return {
         "dotenv": fake_dotenv,
@@ -133,6 +135,97 @@ class SummaryLengthGuardrailTests(unittest.TestCase):
         limited = self.message_processor.enforce_summary_length(summary, 12)
         self.assertTrue(limited.endswith("</b>"))
         self.assertLessEqual(self.message_processor.count_characters(limited), 15)
+
+
+class CountCharactersHtmlEntityTests(unittest.TestCase):
+    """Tests for count_characters handling HTML entities."""
+
+    def _import_utils(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_openai = types.ModuleType("openai")
+        fake_openai.AsyncOpenAI = type("AsyncOpenAI", (), {"__init__": lambda *a, **kw: None})
+        fake_openai.APIError = type("APIError", (Exception,), {"status_code": None})
+        fake_openai.RateLimitError = type("RateLimitError", (Exception,), {"status_code": None})
+        fake_openai.APIConnectionError = type("APIConnectionError", (Exception,), {})
+        fake_config = types.ModuleType("config")
+        fake_config.OPENAI_API_KEY = "test"
+        fake_config.OPENAI_DEFAULT_MAX_TOKENS = 300
+        fake_config.OPENAI_MODEL = "gpt-4o-mini"
+        fake_config.OPENAI_REQUEST_TIMEOUT = 30
+
+        with patch.dict(sys.modules, {
+            "dotenv": fake_dotenv,
+            "openai": fake_openai,
+            "config": fake_config,
+        }):
+            sys.modules.pop("utils", None)
+            return importlib.import_module("utils")
+
+    def test_amp_entity_counts_as_one_char(self):
+        """&amp; should count as 1 visible character, not 5."""
+        utils = self._import_utils()
+        self.assertEqual(utils.count_characters("a &amp; b"), 5)
+
+    def test_lt_entity_counts_as_one_char(self):
+        """&lt; should count as 1 visible character, not 3."""
+        utils = self._import_utils()
+        self.assertEqual(utils.count_characters("a &lt; b"), 5)
+
+    def test_gt_entity_counts_as_one_char(self):
+        """&gt; should count as 1 visible character, not 3."""
+        utils = self._import_utils()
+        self.assertEqual(utils.count_characters("a &gt; b"), 5)
+
+    def test_numeric_entity_counts_as_one_char(self):
+        """&#39; should count as 1 visible character."""
+        utils = self._import_utils()
+        self.assertEqual(utils.count_characters("a&#39;b"), 3)
+
+    def test_plain_text_unchanged(self):
+        """Plain text without entities should count the same as before."""
+        utils = self._import_utils()
+        self.assertEqual(utils.count_characters("hello world"), 11)
+
+
+class SaveJsonFileFsyncTests(unittest.TestCase):
+    """Tests for save_json_file using fsync before atomic replace."""
+
+    def test_save_json_file_writes_with_fsync(self):
+        """save_json_file should flush and fsync before atomic replace."""
+        import importlib
+        import json
+        import tempfile
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_openai = types.ModuleType("openai")
+        fake_openai.AsyncOpenAI = type("AsyncOpenAI", (), {"__init__": lambda *a, **kw: None})
+        fake_openai.APIError = type("APIError", (Exception,), {"status_code": None})
+        fake_openai.RateLimitError = type("RateLimitError", (Exception,), {"status_code": None})
+        fake_openai.APIConnectionError = type("APIConnectionError", (Exception,), {})
+        fake_config = types.ModuleType("config")
+        fake_config.OPENAI_API_KEY = "test"
+        fake_config.OPENAI_DEFAULT_MAX_TOKENS = 300
+        fake_config.OPENAI_MODEL = "gpt-4o-mini"
+        fake_config.OPENAI_REQUEST_TIMEOUT = 30
+
+        with patch.dict(sys.modules, {
+            "dotenv": fake_dotenv,
+            "openai": fake_openai,
+            "config": fake_config,
+        }):
+            sys.modules.pop("utils", None)
+            utils = importlib.import_module("utils")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            filepath = os.path.join(tmpdir, "test.json")
+            data = {"key": "value"}
+            result = utils.save_json_file(filepath, data, "test error")
+            self.assertTrue(result)
+            with open(filepath) as f:
+                saved = json.load(f)
+            self.assertEqual(saved, data)
 
 
 if __name__ == "__main__":

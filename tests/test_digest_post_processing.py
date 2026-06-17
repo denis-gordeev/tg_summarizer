@@ -4,6 +4,8 @@ import sys
 import types
 import unittest
 import asyncio
+import hashlib
+import html as _html
 from datetime import datetime, timezone
 from unittest.mock import patch, AsyncMock
 
@@ -20,7 +22,7 @@ REQUIRED_ENV = {
 
 
 def _stub_count_characters(text):
-    return len(re.sub(r'<[^>]+>', '', text))
+    return len(_html.unescape(re.sub(r'<[^>]+>', '', text)))
 
 
 def _stub_enforce_summary_length(text, max_chars):
@@ -91,7 +93,7 @@ def _stub_dependencies(fake_openai_response: str = "[1] New AI breakthrough"):
         return fake_openai_response
 
     fake_utils.call_openai = fake_call_openai
-    fake_utils.text_hash = lambda text: "abc123"
+    fake_utils.text_hash = lambda text: hashlib.sha256(text.encode()).hexdigest()[:16]
 
     return {
         "dotenv": fake_dotenv,
@@ -522,6 +524,34 @@ class PrepareMessagesTextLinksTests(unittest.TestCase):
         msgs = _make_messages(channels=["@a"], texts=["No links here"])
         text_output, total_length, msg_links = mp._prepare_messages_text(msgs)
         self.assertEqual(msg_links[1], [])
+
+
+class ExactHashDedupTests(unittest.TestCase):
+    """Tests for text-hash pre-filter in _remove_intra_batch_duplicates."""
+
+    def test_removes_exact_text_duplicate_different_channel(self):
+        """Exact same text from a different channel should be caught by hash pre-filter."""
+        stub_modules = _stub_dependencies()
+        mp = _import_message_processor(stub_modules)
+        msgs = _make_messages(
+            channels=["@a", "@b"],
+            texts=["Identical text about GPT-5 release date announced today", "Identical text about GPT-5 release date announced today"],
+        )
+        result = mp._remove_intra_batch_duplicates(msgs)
+        self.assertEqual(len(result), 1)
+
+    def test_hash_dedup_before_sequencematcher(self):
+        """Hash dedup should catch duplicates before SequenceMatcher is invoked,
+        avoiding O(N²) comparison for exact matches."""
+        stub_modules = _stub_dependencies()
+        mp = _import_message_processor(stub_modules)
+        base_text = "Exact duplicate message for hash check"
+        msgs = _make_messages(
+            channels=["@a", "@b", "@c"],
+            texts=[base_text, base_text, "Completely different content here"],
+        )
+        result = mp._remove_intra_batch_duplicates(msgs)
+        self.assertEqual(len(result), 2)
 
 
 if __name__ == "__main__":

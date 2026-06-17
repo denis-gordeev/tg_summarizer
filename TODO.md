@@ -2,6 +2,29 @@
 
 Живой список задач для автоматических раундов.
 
+## Completed in 2026-06-17 round (Lambda hardening round 26, HTML entities, fsync, cost guard, hash dedup, S3 empty-file guard)
+
+- **HTML entity handling in `count_characters`**: Added `html.unescape()` after HTML tag stripping in [`count_characters()`](utils.py). Previously, `&amp;` (5 chars), `&lt;` (4 chars), `&gt;` (4 chars), `&#39;` (5 chars) etc. were counted as multi-character strings instead of their single rendered character. Telegram's 4096-character limit applies to visible characters, so HTML entities were over-counted, causing premature truncation of messages containing entities (e.g., summaries with `&amp;` in source names or `&lt;`/`&gt;` in code snippets). Added `import html as _html` to [`utils.py`](utils.py).
+- **`save_json_file` fsync for durability**: Added `f.flush(); os.fsync(f.fileno())` before `os.replace()` in [`save_json_file()`](utils.py). Without fsync, the kernel may buffer the write and a Lambda crash before the buffer flushes could lose data, undermining the atomic write guarantee added in round 25. fsync ensures data is on persistent storage before the atomic rename.
+- **Model cost guard in `call_openai`**: Added warning log when `OPENAI_MODEL` is not in `_COST_PER_MILLION` lookup in [`call_openai()`](utils.py). Per AUTOWORK_INSTRUCTIONS: "Выбранные решения не должны быть дороже gpt-4o-mini". The warning (`"OPENAI_MODEL=%s not in cost table — may exceed gpt-4o-mini pricing"`) enables early detection of cost overrun without blocking operation.
+- **Text-hash pre-filter in `_remove_intra_batch_duplicates`**: Added `seen_hashes` set and `text_hash()` check before the O(N²) SequenceMatcher pass in [`_remove_intra_batch_duplicates()`](message_processor.py). Exact text duplicates from different channels (common cross-posting pattern) are now caught in O(1) by hash lookup instead of O(N) SequenceMatcher comparison. Reduces intra-batch dedup time from O(N²) to O(N) for the common case of identical cross-posts.
+- **S3 upload skip-empty guard**: Added 0-byte file check in [`upload_to_s3()`](s3_sync.py) — empty local state files are now skipped with a warning log instead of being uploaded to S3 where they would overwrite valid state. This prevents data loss when a local file is empty due to a corrupt write or failed download. Upload summary log now includes `"skipped (empty)"` count.
+- **Tests added**: 11 new tests (total 255, up from 244):
+  - `test_amp_entity_counts_as_one_char`: verifies `&amp;` counts as 1 visible char
+  - `test_lt_entity_counts_as_one_char`: verifies `&lt;` counts as 1 visible char
+  - `test_gt_entity_counts_as_one_char`: verifies `&gt;` counts as 1 visible char
+  - `test_numeric_entity_counts_as_one_char`: verifies `&#39;` counts as 1 visible char
+  - `test_plain_text_unchanged`: verifies plain text counts the same as before
+  - `test_save_json_file_writes_with_fsync`: verifies fsync'd write produces correct file
+  - `test_warns_on_unknown_model`: verifies cost guard warning on non-gpt-4o-mini model
+  - `test_no_warning_for_known_model`: verifies no warning on gpt-4o-mini
+  - `test_removes_exact_text_duplicate_different_channel`: verifies hash dedup catches identical cross-posts
+  - `test_hash_dedup_before_sequencematcher`: verifies hash dedup before O(N²) SequenceMatcher
+  - `test_upload_skips_empty_files`: verifies S3 upload skips 0-byte files
+- Updated test stubs in [`tests/test_digest_post_processing.py`](tests/test_digest_post_processing.py), [`tests/test_summary_length_guardrails.py`](tests/test_summary_length_guardrails.py), [`tests/test_process_messages_integration.py`](tests/test_process_messages_integration.py), [`tests/test_history_manager.py`](tests/test_history_manager.py) — changed `text_hash` stubs from constant `"abc123"` to deterministic `hashlib.sha256(text.encode()).hexdigest()[:16]` to correctly support hash-based dedup, and updated `count_characters` stubs to include `html.unescape()`.
+- Updated upload summary log assertion in [`tests/test_s3_sync.py`](tests/test_s3_sync.py) — now checks 3 values (uploaded, failed, skipped_empty) instead of 2.
+- All 255 tests pass without errors.
+
 ## Completed in 2026-06-16 round 2 (Lambda hardening round 25, atomic writes, HTML correctness, cost metric, code quality)
 
 - **Atomic JSON file writes**: Changed [`save_json_file()`](utils.py) to use atomic write pattern (write to temp file via `tempfile.mkstemp`, then `os.replace`). Previously, a Lambda timeout mid-`json.dump` could leave a partially-written file, causing parse errors on subsequent invocations. The atomic pattern ensures either the old or new file content is present, never a corrupt intermediate state. On write failure, the temp file is cleaned up. Added `import tempfile` to [`utils.py`](utils.py).

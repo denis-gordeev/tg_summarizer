@@ -148,6 +148,36 @@ class S3SyncOperationTests(unittest.TestCase):
                 self.assertTrue(len(summary_logs) > 0, "Expected S3 upload summary log")
                 self.assertEqual(summary_logs[0][0][1], 1)
                 self.assertEqual(summary_logs[0][0][2], 0)
+                self.assertEqual(summary_logs[0][0][3], 0)
+            finally:
+                os.chdir(previous_cwd)
+
+    def test_upload_skips_empty_files(self):
+        client = FakeS3Client()
+
+        with tempfile.TemporaryDirectory() as tmpdir, \
+             patch.dict(
+                 os.environ,
+                 {
+                     "STATE_S3_BUCKET": "bucket",
+                     "STATE_S3_PREFIX": "prefix",
+                     "STATE_SYNC_FILES": "state/empty.json,state/nonempty.json",
+                 },
+                 clear=False,
+             ), \
+             patch.object(s3_sync, "_get_s3_client", return_value=client), \
+             patch.object(s3_sync.logger, "warning") as mock_warn:
+            previous_cwd = os.getcwd()
+            os.chdir(tmpdir)
+            try:
+                Path("state").mkdir()
+                Path("state/empty.json").write_text("", encoding="utf-8")
+                Path("state/nonempty.json").write_text("{}", encoding="utf-8")
+                s3_sync.upload_to_s3()
+                self.assertEqual(len(client.upload_calls), 1)
+                self.assertIn("nonempty.json", client.upload_calls[0][0])
+                warn_msgs = [str(c) for c in mock_warn.call_args_list]
+                self.assertTrue(any("empty file" in w for w in warn_msgs))
             finally:
                 os.chdir(previous_cwd)
 

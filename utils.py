@@ -1,4 +1,5 @@
 import hashlib
+import html as _html
 import json as _json
 import os
 import re
@@ -40,6 +41,8 @@ def save_json_file(filepath: str, data: dict, error_msg: str) -> bool:
         try:
             with os.fdopen(fd, 'w', encoding='utf-8') as f:
                 _json.dump(data, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
             os.replace(tmp_path, filepath)
         except BaseException:
             try:
@@ -73,8 +76,9 @@ VOID_HTML_ELEMENTS = frozenset({
 
 
 def count_characters(text: str) -> int:
-    """Подсчитывает количество символов в тексте, исключая HTML-теги."""
+    """Подсчитывает количество видимых символов в тексте, исключая HTML-теги и раскрывая сущности."""
     clean_text = HTML_TAG_REGEX.sub('', text)
+    clean_text = _html.unescape(clean_text)
     return len(clean_text)
 
 
@@ -175,6 +179,8 @@ async def call_openai(
         if not OPENAI_API_KEY:
             logger.error("OPENAI_API_KEY is not set — cannot create OpenAI client")
             return ""
+        if OPENAI_MODEL not in _COST_PER_MILLION:
+            logger.warning("OPENAI_MODEL=%s not in cost table — may exceed gpt-4o-mini pricing", OPENAI_MODEL)
         openai_client = AsyncOpenAI(
             api_key=OPENAI_API_KEY,
             timeout=float(OPENAI_REQUEST_TIMEOUT),

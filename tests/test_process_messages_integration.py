@@ -1,5 +1,6 @@
 import asyncio
 import importlib
+import hashlib
 import re
 import sys
 import time
@@ -62,7 +63,7 @@ def _setup_stubs():
     fake_utils.call_openai = fake_call_openai
     fake_utils.extract_links = lambda text: []
     fake_utils.count_characters = lambda text: len(text)
-    fake_utils.text_hash = lambda text: "abc123"
+    fake_utils.text_hash = lambda text: hashlib.sha256(text.encode()).hexdigest()[:16]
     fake_utils.enforce_summary_length = lambda text, max_chars: text[:max_chars]
     sys.modules["utils"] = fake_utils
 
@@ -1983,7 +1984,7 @@ class DedupCoveredMessagesExtractionTests(unittest.TestCase):
         fake_utils.extract_links = lambda text: []
         fake_utils.count_characters = len
         fake_utils.enforce_summary_length = lambda text, max_chars: text
-        fake_utils.text_hash = lambda text: "hash"
+        fake_utils.text_hash = lambda text: hashlib.sha256(text.encode()).hexdigest()[:16]
 
         fake_telegram_client = types.ModuleType("telegram_client")
         fake_telegram_client.send_message_to_target_channel_with_id = AsyncMock(return_value=42)
