@@ -1,6 +1,19 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import List, Optional
+import logging
+
+_logger = logging.getLogger(__name__)
+
+
+def _parse_iso_date(value: str | None) -> datetime:
+    if not value:
+        return datetime.now(timezone.utc)
+    try:
+        return datetime.fromisoformat(value)
+    except (ValueError, TypeError) as e:
+        _logger.warning("Invalid date string %r, using now: %s", value, e)
+        return datetime.now(timezone.utc)
 
 
 @dataclass
@@ -41,7 +54,7 @@ class MessageInfo:
             text=data.get('text') or '',
             channel=data.get('channel') or '',
             message_id=data.get('message_id', 0),
-            date=datetime.fromisoformat(data['date']) if data.get('date') else datetime.now(timezone.utc),
+            date=_parse_iso_date(data.get('date')),
             link=data.get('link') or '',
             is_nlp_related=data.get('is_nlp_related'),
             is_nlp_related_reason=data.get('is_nlp_related_reason'),
@@ -73,7 +86,7 @@ class SummaryInfo:
         date_str = data.get('date')
         return cls(
             content=data.get('content') or '',
-            date=datetime.fromisoformat(date_str) if date_str else datetime.now(timezone.utc),
+            date=_parse_iso_date(date_str),
             message_count=data.get('message_count', 0),
             channels=data.get('channels') or [],
             message_id=data.get('message_id'),

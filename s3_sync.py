@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Iterable
 
@@ -76,6 +77,10 @@ def _validate_json_file(path: Path) -> bool:
         return False
 
 
+_S3_UPLOAD_RETRIES = 1
+_S3_RETRY_DELAY_SEC = 1.0
+
+
 def download_from_s3() -> None:
     bucket = os.getenv("STATE_S3_BUCKET", "").strip()
     if not bucket:
@@ -135,12 +140,22 @@ def upload_to_s3() -> None:
             skipped_empty += 1
             continue
         key = _build_s3_key(prefix, relative_name)
-        try:
-            client.upload_file(str(local_path), bucket, key)
-            logger.debug("Uploaded %s -> s3://%s/%s", local_path, bucket, key)
+        uploaded_ok = False
+        for attempt in range(_S3_UPLOAD_RETRIES + 1):
+            try:
+                client.upload_file(str(local_path), bucket, key)
+                logger.debug("Uploaded %s -> s3://%s/%s", local_path, bucket, key)
+                uploaded_ok = True
+                break
+            except Exception as exc:
+                if attempt < _S3_UPLOAD_RETRIES:
+                    logger.warning("Upload attempt %d failed for %s, retrying: %s", attempt + 1, relative_name, exc)
+                    time.sleep(_S3_RETRY_DELAY_SEC)
+                else:
+                    logger.error("Failed to upload %s to s3://%s/%s after %d attempts: %s", local_path, bucket, key, attempt + 1, exc)
+        if uploaded_ok:
             uploaded += 1
-        except Exception as exc:
-            logger.error("Failed to upload %s to s3://%s/%s: %s", local_path, bucket, key, exc)
+        else:
             failed += 1
 
     logger.info("S3 upload: %d files uploaded, %d failed, %d skipped (empty)", uploaded, failed, skipped_empty)

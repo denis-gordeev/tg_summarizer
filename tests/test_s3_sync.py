@@ -2,7 +2,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import s3_sync
 
@@ -199,6 +199,77 @@ class S3ClientCachingTests(unittest.TestCase):
             self.assertIs(client1, client2, "S3 client should be cached and reused")
             fake_boto3.client.assert_called_once_with("s3")
         s3_sync._s3_client = None
+
+
+class S3UploadRetryTests(unittest.TestCase):
+    def test_upload_retries_on_transient_error(self):
+        """S3 upload should retry once on transient error."""
+        upload_attempts = [0]
+
+        class FlakyS3Client:
+            def upload_file(self, source, bucket, key):
+                upload_attempts[0] += 1
+                if upload_attempts[0] == 1:
+                    raise Exception("transient network error")
+
+        client = FlakyS3Client()
+
+        with tempfile.TemporaryDirectory() as tmpdir, \
+             patch.dict(
+                 os.environ,
+                 {
+                     "STATE_S3_BUCKET": "bucket",
+                     "STATE_S3_PREFIX": "prefix",
+                     "STATE_SYNC_FILES": "state/data.json",
+                 },
+                 clear=False,
+             ), \
+             patch.object(s3_sync, "_get_s3_client", return_value=client), \
+             patch.object(s3_sync, "time") as mock_time:
+            mock_time.sleep = MagicMock()
+            previous_cwd = os.getcwd()
+            os.chdir(tmpdir)
+            try:
+                Path("state").mkdir()
+                Path("state/data.json").write_text("{}", encoding="utf-8")
+                s3_sync.upload_to_s3()
+                self.assertEqual(upload_attempts[0], 2)
+                mock_time.sleep.assert_called_once()
+            finally:
+                os.chdir(previous_cwd)
+
+    def test_upload_reports_failed_after_retry_exhausted(self):
+        """S3 upload should report failure after retry is exhausted."""
+        class AlwaysFailS3Client:
+            def upload_file(self, source, bucket, key):
+                raise Exception("persistent error")
+
+        client = AlwaysFailS3Client()
+
+        with tempfile.TemporaryDirectory() as tmpdir, \
+             patch.dict(
+                 os.environ,
+                 {
+                     "STATE_S3_BUCKET": "bucket",
+                     "STATE_S3_PREFIX": "prefix",
+                     "STATE_SYNC_FILES": "state/data.json",
+                 },
+                 clear=False,
+             ), \
+             patch.object(s3_sync, "_get_s3_client", return_value=client), \
+             patch.object(s3_sync.logger, "error") as mock_error, \
+             patch.object(s3_sync, "time") as mock_time:
+            mock_time.sleep = MagicMock()
+            previous_cwd = os.getcwd()
+            os.chdir(tmpdir)
+            try:
+                Path("state").mkdir()
+                Path("state/data.json").write_text("{}", encoding="utf-8")
+                s3_sync.upload_to_s3()
+                error_msgs = [str(c) for c in mock_error.call_args_list]
+                self.assertTrue(any("Failed to upload" in w for w in error_msgs))
+            finally:
+                os.chdir(previous_cwd)
 
 
 class S3DownloadJSONValidationTests(unittest.TestCase):

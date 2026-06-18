@@ -211,6 +211,29 @@ class SummaryInfoTests(unittest.TestCase):
         summary = SummaryInfo.from_dict(d)
         self.assertIsNotNone(summary.date)
 
+    def test_from_dict_handles_invalid_date(self):
+        """Should handle invalid date string gracefully (not crash)."""
+        d = {
+            "content": "Test",
+            "message_count": 1,
+            "channels": ["@test"],
+            "date": "not-a-valid-date",
+        }
+        summary = SummaryInfo.from_dict(d)
+        self.assertIsNotNone(summary.date)
+
+    def test_from_dict_message_handles_invalid_date(self):
+        """Should handle invalid date string in MessageInfo gracefully."""
+        d = {
+            "text": "Test",
+            "message_id": 1,
+            "channel": "@test",
+            "date": "garbage-date",
+            "link": "",
+        }
+        msg = MessageInfo.from_dict(d)
+        self.assertIsNotNone(msg.date)
+
     def test_from_dict_handles_missing_message_count(self):
         """Should handle missing message_count field gracefully."""
         d = {

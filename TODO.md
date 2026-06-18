@@ -2,6 +2,35 @@
 
 Живой список задач для автоматических раундов.
 
+## Completed in 2026-06-18 round (Lambda hardening round 27, circuit breaker, date hardening, S3 retry, observability)
+
+- **OpenAI circuit breaker**: Added `_CIRCUIT_BREAKER_FAILURES` counter and `_CIRCUIT_BREAKER_THRESHOLD` (3) in [`utils.py`](utils.py). When 3 consecutive `call_openai()` calls fail (return empty string), the circuit breaker opens and subsequent calls return `""` immediately without making API requests. This prevents cascade timeouts when OpenAI is degraded — previously, each of 30+ NLP checks would individually retry 3 times with exponential backoff (up to 4s each), potentially consuming the entire Lambda timeout waiting for a service that's down. The counter resets to 0 on any successful API call. All error paths in `call_openai` now increment the counter; the success path resets it.
+- **Date deserialization hardening in `models.py`**: Extracted `_parse_iso_date()` helper that wraps `datetime.fromisoformat()` in try/except. Applied in both [`MessageInfo.from_dict()`](models.py) and [`SummaryInfo.from_dict()`](models.py). Previously, a corrupt JSON history file with an invalid date string (e.g., `"not-a-date"`) would crash `from_dict()` with `ValueError`, propagating up through history loading and crashing the entire Lambda invocation. Now invalid dates fall back to `datetime.now(timezone.utc)` with a warning log, allowing the rest of the data to be processed normally.
+- **S3 upload retry**: Added `_S3_UPLOAD_RETRIES` (1) and `_S3_RETRY_DELAY_SEC` (1.0) in [`s3_sync.py`](s3_sync.py). Transient S3 upload errors (common in Lambda cold starts) are now retried once after a 1-second delay. Previously, a single transient error would permanently fail the upload, potentially losing state. Added `import time` to [`s3_sync.py`](s3_sync.py).
+- **Per-source fetch timing**: Added `source_start` timer and elapsed time logging per source in [`_fetch_from_sources()`](telegram_client.py). Previously, only the total message count per source was logged. Now each source log includes the time spent fetching (e.g., `"Found 5 new messages from channel @ai_news (2.3s)"`), enabling CloudWatch-based identification of slow source channels.
+- **Lambda event flags logging at start**: Added structured log at the start of Lambda handler in [`lambda_handler.handler()`](lambda_handler.py) — logs `"Lambda event flags: send=X, save=X, today_groups=X, today_msgs=X"` immediately after parsing event flags. Previously, event flags were only logged in the completion message, which is not emitted on timeout or early failure. The early log ensures event configuration is always available in CloudWatch for debugging.
+- **Update prompt HTML preservation**: Added explicit `"Сохрани всё HTML-форматирование: <b>, <a href>, теги и сущности."` instruction in the summary update prompt in [`update_existing_summary()`](history_manager.py). Previously, the prompt told the LLM to copy the summary and add a link, but didn't explicitly instruct it to preserve HTML formatting. LLMs sometimes strip or simplify HTML tags when re-generating text, causing formatting loss (e.g., `<b>` headers removed, `<a href>` links simplified).
+- **Tests added**: 10 new tests (total 273, up from 263):
+  - `test_circuit_breaker_opens_after_consecutive_failures`: verifies circuit breaker skips API calls after threshold failures
+  - `test_circuit_breaker_increments_on_api_error`: verifies failure counter increments on API errors
+  - `test_circuit_breaker_resets_on_success`: verifies counter resets to 0 on successful call
+  - `test_from_dict_handles_invalid_date`: verifies `SummaryInfo.from_dict` handles invalid date strings
+  - `test_from_dict_message_handles_invalid_date`: verifies `MessageInfo.from_dict` handles invalid date strings
+  - `test_upload_retries_on_transient_error`: verifies S3 upload retries once on transient error
+  - `test_upload_reports_failed_after_retry_exhausted`: verifies failure logged after retry exhausted
+  - `test_handler_logs_event_flags_at_start`: verifies Lambda handler logs event flags at start
+  - `test_fetch_logs_per_source_timing`: verifies `_fetch_from_sources` tracks per-source timing (AST check)
+  - `test_update_prompt_mentions_html`: verifies update prompt mentions HTML preservation
+- All 273 tests pass without errors.
+
+## Next actions
+
+- Consider adding `_CIRCUIT_BREAKER_THRESHOLD` to `config.py` for runtime configurability
+- Consider adding SSM parameter support for OpenAI API key rotation without redeployment
+- Consider adding Lambda warmer to avoid cold-start Telegram reconnection overhead
+- Consider adding structured error response body for S3 upload failures (separate from Lambda status)
+- Consider prompt quality: experiment with lower `OPENAI_SUMMARY_TEMPERATURE` (e.g., 0.1) for more concise summaries
+
 ## Completed in 2026-06-17 round (Lambda hardening round 26, HTML entities, fsync, cost guard, hash dedup, S3 empty-file guard)
 
 - **HTML entity handling in `count_characters`**: Added `html.unescape()` after HTML tag stripping in [`count_characters()`](utils.py). Previously, `&amp;` (5 chars), `&lt;` (4 chars), `&gt;` (4 chars), `&#39;` (5 chars) etc. were counted as multi-character strings instead of their single rendered character. Telegram's 4096-character limit applies to visible characters, so HTML entities were over-counted, causing premature truncation of messages containing entities (e.g., summaries with `&amp;` in source names or `&lt;`/`&gt;` in code snippets). Added `import html as _html` to [`utils.py`](utils.py).

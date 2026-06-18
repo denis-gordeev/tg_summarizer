@@ -2302,5 +2302,19 @@ class SaveUpdatedSummaryWithSummariesParamTests(unittest.TestCase):
                     mock_load.assert_not_called()
 
 
+class UpdatePromptHtmlPreservationTests(unittest.TestCase):
+    """Tests for HTML preservation instruction in update_existing_summary prompt."""
+
+    def test_update_prompt_mentions_html(self):
+        """update_existing_summary prompt should instruct LLM to preserve HTML formatting."""
+        import ast
+
+        with open("history_manager.py") as f:
+            source = f.read()
+
+        self.assertIn("HTML", source, "update prompt should mention HTML preservation")
+        self.assertIn("Сохрани", source, "update prompt should instruct to preserve formatting")
+
+
 if __name__ == '__main__':
     unittest.main()

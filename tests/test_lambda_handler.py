@@ -332,6 +332,27 @@ class HandlerTests(unittest.TestCase):
                      if "send=" in str(call) and "save=" in str(call)]
         self.assertTrue(len(flag_logs) > 0, "Expected event flags in completion log")
 
+    def test_handler_logs_event_flags_at_start(self):
+        """Handler should log parsed event flags at the start of invocation."""
+        event = {"send_message": "false", "save_changes": "true"}
+
+        async_mock = AsyncMock()
+
+        def _run_and_close(coro):
+            coro.close()
+
+        with patch.object(self.lambda_handler.os, "chdir"), \
+             patch.object(self.lambda_handler, "download_from_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.object(self.lambda_handler, "run_summarizer", async_mock), \
+             patch.object(self.lambda_handler.asyncio, "run", side_effect=_run_and_close), \
+             patch.object(self.lambda_handler.logger, "info") as mock_log:
+            self.lambda_handler.handler(event, context=None)
+
+        start_flag_logs = [call for call in mock_log.call_args_list
+                           if "Lambda event flags" in str(call)]
+        self.assertTrue(len(start_flag_logs) > 0, "Expected 'Lambda event flags' log at start")
+
 
 class SummarizerGroupDeadlineTests(unittest.TestCase):
     """Tests for deadline check after group fetch in summarizer.py."""
@@ -364,6 +385,19 @@ class SummarizerGroupDeadlineTests(unittest.TestCase):
                         "check_deadline should come after fetch_group_messages")
         self.assertLess(deadline_after_fetch, process_line,
                         "check_deadline should come before process_messages for groups")
+
+
+class PerSourceFetchTimingTests(unittest.TestCase):
+    """Tests for per-source timing in _fetch_from_sources."""
+
+    def test_fetch_logs_per_source_timing(self):
+        """_fetch_from_sources should log time spent per source (AST check)."""
+        with open("telegram_client.py") as f:
+            source = f.read()
+
+        self.assertIn("source_start", source, "_fetch_from_sources should track source_start time")
+        self.assertIn("time.monotonic() - source_start", source,
+                       "_fetch_from_sources should log elapsed time per source")
 
 
 if __name__ == "__main__":

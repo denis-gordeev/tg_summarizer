@@ -1272,5 +1272,158 @@ class ModelCostGuardTests(unittest.IsolatedAsyncioTestCase):
                              "Should not warn for gpt-4o-mini")
 
 
+class CircuitBreakerTests(unittest.IsolatedAsyncioTestCase):
+    """Tests for OpenAI circuit breaker in call_openai."""
+
+    async def test_circuit_breaker_opens_after_consecutive_failures(self):
+        """After _CIRCUIT_BREAKER_THRESHOLD failures, call_openai should skip the API call."""
+        import importlib
+        import sys
+        import types
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_openai = types.ModuleType("openai")
+
+        fake_usage = MagicMock()
+        fake_usage.prompt_tokens = 10
+        fake_usage.completion_tokens = 5
+        fake_usage.total_tokens = 15
+
+        class FakeAsyncOpenAI:
+            def __init__(self, api_key, **kwargs):
+                self.api_key = api_key
+                self.chat = types.SimpleNamespace(
+                    completions=types.SimpleNamespace(
+                        create=AsyncMock(return_value=type(
+                            "Response", (),
+                            {
+                                "choices": [type("Choice", (), {"message": type("Message", (), {"content": "ok"})()})()],
+                                "usage": fake_usage,
+                            },
+                        )())
+                    )
+                )
+
+        class FakeOpenAIError(Exception):
+            pass
+
+        fake_openai.AsyncOpenAI = FakeAsyncOpenAI
+        fake_openai.OpenAI = FakeAsyncOpenAI
+        fake_openai.APIError = FakeOpenAIError
+        fake_openai.RateLimitError = type("RateLimitError", (FakeOpenAIError,), {"status_code": None})
+        fake_openai.APIConnectionError = type("APIConnectionError", (FakeOpenAIError,), {})
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv, "openai": fake_openai}):
+            with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+                sys.modules.pop("config", None)
+                sys.modules.pop("utils", None)
+                config = importlib.import_module("config")
+                utils = importlib.import_module("utils")
+
+        utils._CIRCUIT_BREAKER_FAILURES = utils._CIRCUIT_BREAKER_THRESHOLD
+
+        with patch.object(utils.logger, "warning") as mock_warn:
+            result = await utils.call_openai("system", "user")
+            self.assertEqual(result, "")
+            warn_msgs = [str(c) for c in mock_warn.call_args_list]
+            self.assertTrue(any("circuit breaker" in w.lower() for w in warn_msgs),
+                            "Expected circuit breaker warning")
+
+    async def test_circuit_breaker_increments_on_api_error(self):
+        """Circuit breaker failure counter should increment on API errors."""
+        import importlib
+        import sys
+        import types
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_openai = types.ModuleType("openai")
+
+        class FakeAsyncOpenAI:
+            def __init__(self, api_key, **kwargs):
+                self.api_key = api_key
+                self.chat = types.SimpleNamespace(
+                    completions=types.SimpleNamespace(
+                        create=AsyncMock(side_effect=Exception("API error"))
+                    )
+                )
+
+        class FakeOpenAIError(Exception):
+            pass
+
+        fake_openai.AsyncOpenAI = FakeAsyncOpenAI
+        fake_openai.OpenAI = FakeAsyncOpenAI
+        fake_openai.APIError = FakeOpenAIError
+        fake_openai.RateLimitError = type("RateLimitError", (FakeOpenAIError,), {"status_code": None})
+        fake_openai.APIConnectionError = type("APIConnectionError", (FakeOpenAIError,), {})
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv, "openai": fake_openai}):
+            with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+                sys.modules.pop("config", None)
+                sys.modules.pop("utils", None)
+                config = importlib.import_module("config")
+                utils = importlib.import_module("utils")
+
+        utils._CIRCUIT_BREAKER_FAILURES = 0
+        result = await utils.call_openai("system", "user")
+        self.assertEqual(result, "")
+        self.assertGreater(utils._CIRCUIT_BREAKER_FAILURES, 0)
+
+    async def test_circuit_breaker_resets_on_success(self):
+        """Circuit breaker counter should reset to 0 on a successful call."""
+        import importlib
+        import sys
+        import types
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_openai = types.ModuleType("openai")
+
+        fake_usage = MagicMock()
+        fake_usage.prompt_tokens = 10
+        fake_usage.completion_tokens = 5
+        fake_usage.total_tokens = 15
+
+        class FakeAsyncOpenAI:
+            def __init__(self, api_key, **kwargs):
+                self.api_key = api_key
+                self.chat = types.SimpleNamespace(
+                    completions=types.SimpleNamespace(
+                        create=AsyncMock(return_value=type(
+                            "Response", (),
+                            {
+                                "choices": [type("Choice", (), {"message": type("Message", (), {"content": "ok"})()})()],
+                                "usage": fake_usage,
+                            },
+                        )())
+                    )
+                )
+
+        class FakeOpenAIError(Exception):
+            pass
+
+        fake_openai.AsyncOpenAI = FakeAsyncOpenAI
+        fake_openai.OpenAI = FakeAsyncOpenAI
+        fake_openai.APIError = FakeOpenAIError
+        fake_openai.RateLimitError = type("RateLimitError", (FakeOpenAIError,), {"status_code": None})
+        fake_openai.APIConnectionError = type("APIConnectionError", (FakeOpenAIError,), {})
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv, "openai": fake_openai}):
+            with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+                sys.modules.pop("config", None)
+                sys.modules.pop("utils", None)
+                config = importlib.import_module("config")
+                utils = importlib.import_module("utils")
+
+        utils._CIRCUIT_BREAKER_FAILURES = 2
+        result = await utils.call_openai("system", "user")
+        self.assertEqual(result, "ok")
+        self.assertEqual(utils._CIRCUIT_BREAKER_FAILURES, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

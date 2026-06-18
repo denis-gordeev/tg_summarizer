@@ -63,6 +63,9 @@ def now_iso() -> str:
 
 openai_client = None
 
+_CIRCUIT_BREAKER_FAILURES = 0
+_CIRCUIT_BREAKER_THRESHOLD = 3
+
 LINK_REGEX = re.compile(r"https?://\S+")
 TRAILING_PUNCTUATION_REGEX = re.compile(r"""[.,;:!?)\]}'">]+$""")
 TELEGRAM_CHANNEL_REGEX = re.compile(r"https://t\.me/([^/]+)/\d+")
@@ -174,7 +177,12 @@ async def call_openai(
     temperature: float | None = None,
 ) -> str:
     """Универсальная функция для вызова OpenAI API с retry и exponential backoff."""
-    global openai_client
+    global openai_client, _CIRCUIT_BREAKER_FAILURES
+
+    if _CIRCUIT_BREAKER_FAILURES >= _CIRCUIT_BREAKER_THRESHOLD:
+        logger.warning("OpenAI circuit breaker open (%d consecutive failures) — skipping call", _CIRCUIT_BREAKER_FAILURES)
+        return ""
+
     if openai_client is None:
         if not OPENAI_API_KEY:
             logger.error("OPENAI_API_KEY is not set — cannot create OpenAI client")
@@ -204,7 +212,9 @@ async def call_openai(
             elapsed = _time.monotonic() - t0
             result = response.choices[0].message.content
             if result is None:
+                _CIRCUIT_BREAKER_FAILURES += 1
                 return ""
+            _CIRCUIT_BREAKER_FAILURES = 0
             total_tokens = response.usage.total_tokens if hasattr(response, 'usage') and response.usage else 0
             prompt_tokens = response.usage.prompt_tokens if hasattr(response, 'usage') and response.usage else 0
             completion_tokens = response.usage.completion_tokens if hasattr(response, 'usage') and response.usage else 0
@@ -228,6 +238,7 @@ async def call_openai(
                 await asyncio.sleep(delay)
             else:
                 logger.error("OpenAI API error after %d retries: %s", max_retries, e)
+                _CIRCUIT_BREAKER_FAILURES += 1
                 return ""
         except APIError as e:
             if e.status_code and e.status_code >= 500 and attempt < max_retries:
@@ -237,13 +248,17 @@ async def call_openai(
             elif e.status_code and e.status_code in (401, 403):
                 logger.error("OpenAI auth error (status %d): check OPENAI_API_KEY — %s", e.status_code, e)
                 openai_client = None
+                _CIRCUIT_BREAKER_FAILURES += 1
                 return ""
             else:
                 logger.error("OpenAI API error (status %s): %s", getattr(e, 'status_code', '?'), e)
+                _CIRCUIT_BREAKER_FAILURES += 1
                 return ""
         except Exception as e:
             logger.error("OpenAI API error: %s", e)
+            _CIRCUIT_BREAKER_FAILURES += 1
             return ""
+    _CIRCUIT_BREAKER_FAILURES += 1
     return ""
 
 

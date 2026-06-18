@@ -103,6 +103,7 @@ async def _fetch_from_sources(
         logger.info("Fetching messages from %s %s", source_label, source)
         source_count = 0
         total_examined = 0
+        source_start = time.monotonic()
         try:
             async for msg in user_client.iter_messages(
                 source, offset_date=None, min_id=0, reverse=False
@@ -139,7 +140,7 @@ async def _fetch_from_sources(
                     else:
                         logger.debug("Skipping already processed message %s from %s", msg.id, source)
 
-            logger.info("Found %d new messages from %s %s", source_count, source_label, source)
+            logger.info("Found %d new messages from %s %s (%.1fs)", source_count, source_label, source, time.monotonic() - source_start)
         except FloodWaitError as e:
             wait_seconds = e.seconds
             logger.warning("FloodWaitError from %s %s: must wait %ds — skipping source", source_label, source, wait_seconds)

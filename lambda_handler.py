@@ -70,6 +70,12 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         event.get('include_today_processed_messages'), False
     )
 
+    logger.info(
+        "Lambda event flags: send=%s, save=%s, today_groups=%s, today_msgs=%s",
+        send_message, save_changes, include_today_processed_groups,
+        include_today_processed_messages,
+    )
+
     # Compute a hard deadline so we never exceed Lambda timeout
     if context is not None and hasattr(context, 'get_remaining_time_in_millis'):
         deadline = time.monotonic() + context.get_remaining_time_in_millis() / 1000.0 - SAFETY_MARGIN_SECONDS
