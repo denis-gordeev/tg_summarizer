@@ -2,34 +2,35 @@
 
 Живой список задач для автоматических раундов.
 
-## Completed in 2026-06-18 round (Lambda hardening round 27, circuit breaker, date hardening, S3 retry, observability)
+## Completed in 2026-06-18 round 2 (Lambda hardening round 28, circuit breaker configurability, half-open recovery, prompt conciseness)
 
-- **OpenAI circuit breaker**: Added `_CIRCUIT_BREAKER_FAILURES` counter and `_CIRCUIT_BREAKER_THRESHOLD` (3) in [`utils.py`](utils.py). When 3 consecutive `call_openai()` calls fail (return empty string), the circuit breaker opens and subsequent calls return `""` immediately without making API requests. This prevents cascade timeouts when OpenAI is degraded — previously, each of 30+ NLP checks would individually retry 3 times with exponential backoff (up to 4s each), potentially consuming the entire Lambda timeout waiting for a service that's down. The counter resets to 0 on any successful API call. All error paths in `call_openai` now increment the counter; the success path resets it.
-- **Date deserialization hardening in `models.py`**: Extracted `_parse_iso_date()` helper that wraps `datetime.fromisoformat()` in try/except. Applied in both [`MessageInfo.from_dict()`](models.py) and [`SummaryInfo.from_dict()`](models.py). Previously, a corrupt JSON history file with an invalid date string (e.g., `"not-a-date"`) would crash `from_dict()` with `ValueError`, propagating up through history loading and crashing the entire Lambda invocation. Now invalid dates fall back to `datetime.now(timezone.utc)` with a warning log, allowing the rest of the data to be processed normally.
-- **S3 upload retry**: Added `_S3_UPLOAD_RETRIES` (1) and `_S3_RETRY_DELAY_SEC` (1.0) in [`s3_sync.py`](s3_sync.py). Transient S3 upload errors (common in Lambda cold starts) are now retried once after a 1-second delay. Previously, a single transient error would permanently fail the upload, potentially losing state. Added `import time` to [`s3_sync.py`](s3_sync.py).
-- **Per-source fetch timing**: Added `source_start` timer and elapsed time logging per source in [`_fetch_from_sources()`](telegram_client.py). Previously, only the total message count per source was logged. Now each source log includes the time spent fetching (e.g., `"Found 5 new messages from channel @ai_news (2.3s)"`), enabling CloudWatch-based identification of slow source channels.
-- **Lambda event flags logging at start**: Added structured log at the start of Lambda handler in [`lambda_handler.handler()`](lambda_handler.py) — logs `"Lambda event flags: send=X, save=X, today_groups=X, today_msgs=X"` immediately after parsing event flags. Previously, event flags were only logged in the completion message, which is not emitted on timeout or early failure. The early log ensures event configuration is always available in CloudWatch for debugging.
-- **Update prompt HTML preservation**: Added explicit `"Сохрани всё HTML-форматирование: <b>, <a href>, теги и сущности."` instruction in the summary update prompt in [`update_existing_summary()`](history_manager.py). Previously, the prompt told the LLM to copy the summary and add a link, but didn't explicitly instruct it to preserve HTML formatting. LLMs sometimes strip or simplify HTML tags when re-generating text, causing formatting loss (e.g., `<b>` headers removed, `<a href>` links simplified).
-- **Tests added**: 10 new tests (total 273, up from 263):
-  - `test_circuit_breaker_opens_after_consecutive_failures`: verifies circuit breaker skips API calls after threshold failures
-  - `test_circuit_breaker_increments_on_api_error`: verifies failure counter increments on API errors
-  - `test_circuit_breaker_resets_on_success`: verifies counter resets to 0 on successful call
-  - `test_from_dict_handles_invalid_date`: verifies `SummaryInfo.from_dict` handles invalid date strings
-  - `test_from_dict_message_handles_invalid_date`: verifies `MessageInfo.from_dict` handles invalid date strings
-  - `test_upload_retries_on_transient_error`: verifies S3 upload retries once on transient error
-  - `test_upload_reports_failed_after_retry_exhausted`: verifies failure logged after retry exhausted
-  - `test_handler_logs_event_flags_at_start`: verifies Lambda handler logs event flags at start
-  - `test_fetch_logs_per_source_timing`: verifies `_fetch_from_sources` tracks per-source timing (AST check)
-  - `test_update_prompt_mentions_html`: verifies update prompt mentions HTML preservation
-- All 273 tests pass without errors.
+- **Circuit breaker threshold configurable**: Moved `_CIRCUIT_BREAKER_THRESHOLD` from hardcoded constant in [`utils.py`](utils.py) to [`CIRCUIT_BREAKER_THRESHOLD`](config.py) in `config.py` (default 3, env `CIRCUIT_BREAKER_THRESHOLD`). Allows runtime tuning of the failure threshold without code changes — useful when OpenAI has intermittent issues and a higher threshold avoids premature circuit opening.
+- **Circuit breaker half-open auto-recovery**: Added [`CIRCUIT_BREAKER_RESET_SEC`](config.py) config (default 60, env `CIRCUIT_BREAKER_RESET_SEC`) and `_CIRCUIT_BREAKER_OPEN_SINCE` timestamp in [`utils.py`](utils.py). When the circuit breaker has been open for longer than `CIRCUIT_BREAKER_RESET_SEC`, one probe call is allowed through (half-open state). If the probe succeeds, the circuit closes and normal operation resumes. If it fails, the breaker stays open and the reset timer restarts. Previously, once the circuit breaker opened (3 consecutive failures), ALL subsequent OpenAI calls in the Lambda invocation returned `""` — even if OpenAI recovered mid-invocation. For a Lambda with 180s timeout and 30+ NLP checks, a transient 30s OpenAI outage at the start would waste the remaining 150s. With half-open recovery, the breaker probes every 60s and self-heals when the service recovers.
+- **Extracted `_cb_record_failure()` / `_cb_record_success()`**: Refactored circuit breaker state management into dedicated helper functions in [`utils.py`](utils.py). `_cb_record_failure()` increments the counter and records `_CIRCUIT_BREAKER_OPEN_SINCE` when the threshold is first reached. `_cb_record_success()` resets both the counter and timestamp. Eliminates scattered `global` mutations and ensures consistent state across all error paths.
+- **Lowered default `OPENAI_SUMMARY_TEMPERATURE`** from 0.3 to 0.1 in [`config.py`](config.py). Per AUTOWORK_INSTRUCTIONS goal of improving quality and conciseness. Lower temperature produces more deterministic, focused summaries with less verbose filler. The value remains configurable via `OPENAI_SUMMARY_TEMPERATURE` env var.
+- **Synced `.env.example` and `template.yaml`**: Added `CIRCUIT_BREAKER_THRESHOLD`, `CIRCUIT_BREAKER_RESET_SEC` parameters. Updated `OPENAI_SUMMARY_TEMPERATURE` default to 0.1 in `.env.example`.
+- **Tests added**: 11 new tests (total 284, up from 273):
+  - `test_config_circuit_breaker_threshold_default`: verifies default is 3
+  - `test_config_reads_circuit_breaker_threshold_from_env`: verifies env var parsing
+  - `test_config_circuit_breaker_threshold_rejects_zero`: validates `_get_int_env` rejects zero
+  - `test_config_circuit_breaker_reset_sec_default`: verifies default is 60
+  - `test_config_reads_circuit_breaker_reset_sec_from_env`: verifies env var parsing
+  - `test_config_circuit_breaker_reset_sec_rejects_zero`: validates `_get_int_env` rejects zero
+  - `test_circuit_breaker_skips_call_before_reset_timeout`: verifies breaker skips calls before reset timeout
+  - `test_circuit_breaker_allows_probe_after_reset_timeout`: verifies half-open probe after timeout
+  - `test_circuit_breaker_resets_on_successful_probe`: verifies breaker fully closes on probe success
+  - `test_cb_record_failure_sets_open_since_on_threshold`: verifies `_CIRCUIT_BREAKER_OPEN_SINCE` recorded when threshold reached
+  - `test_cb_record_success_resets_open_since`: verifies `_cb_record_success` resets both counter and timestamp
+- Updated existing test `test_circuit_breaker_opens_after_consecutive_failures` to set `_CIRCUIT_BREAKER_OPEN_SINCE` for half-open logic compatibility.
+- Updated test stubs in [`tests/test_digest_post_processing.py`](tests/test_digest_post_processing.py), [`tests/test_summary_length_guardrails.py`](tests/test_summary_length_guardrails.py), [`tests/test_history_manager.py`](tests/test_history_manager.py) — added `CIRCUIT_BREAKER_THRESHOLD` and `CIRCUIT_BREAKER_RESET_SEC` to `fake_config` stubs.
+- All 284 tests pass without errors.
 
 ## Next actions
 
-- Consider adding `_CIRCUIT_BREAKER_THRESHOLD` to `config.py` for runtime configurability
-- Consider adding SSM parameter support for OpenAI API key rotation without redeployment
 - Consider adding Lambda warmer to avoid cold-start Telegram reconnection overhead
 - Consider adding structured error response body for S3 upload failures (separate from Lambda status)
-- Consider prompt quality: experiment with lower `OPENAI_SUMMARY_TEMPERATURE` (e.g., 0.1) for more concise summaries
+- Consider adding CloudWatch dashboard for circuit breaker state (open/closed/half-open transitions)
+- Consider adding `_CIRCUIT_BREAKER_*` state to Lambda response for observability
 
 ## Completed in 2026-06-17 round (Lambda hardening round 26, HTML entities, fsync, cost guard, hash dedup, S3 empty-file guard)
 

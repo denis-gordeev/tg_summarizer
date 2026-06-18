@@ -29,6 +29,8 @@ Globals:
         ENABLE_SUMMARY_UPDATES: !Ref EnableSummaryUpdates
         SIMILARITY_LLM_UPPER: !Ref SimilarityLlmUpper
         MAX_COVERED_MESSAGE_UPDATES: !Ref MaxCoveredMessageUpdates
+        CIRCUIT_BREAKER_THRESHOLD: !Ref CircuitBreakerThreshold
+        CIRCUIT_BREAKER_RESET_SEC: !Ref CircuitBreakerResetSec
         RESTORE_TIMEOUT_SEC: !Ref RestoreTimeoutSec
         TARGET_CHANNEL: !Ref TargetChannel
         SOURCE_CHANNELS: !Ref SourceChannels
@@ -193,6 +195,16 @@ Parameters:
     Description: Max number of covered-message summary updates per invocation
     Default: "5"
    
+  CircuitBreakerThreshold:
+    Type: String
+    Description: Number of consecutive OpenAI failures before circuit breaker opens
+    Default: "3"
+   
+  CircuitBreakerResetSec:
+    Type: String
+    Description: Seconds before circuit breaker allows a probe call (half-open)
+    Default: "60"
+  
   RestoreTimeoutSec:
     Type: String
     Description: Timeout in seconds for channel restore from Telegram

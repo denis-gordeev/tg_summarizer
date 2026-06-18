@@ -467,6 +467,8 @@ class VoidHtmlElementTests(unittest.TestCase):
         fake_config.OPENAI_DEFAULT_MAX_TOKENS = 300
         fake_config.OPENAI_MODEL = "gpt-4o-mini"
         fake_config.OPENAI_REQUEST_TIMEOUT = 30
+        fake_config.CIRCUIT_BREAKER_THRESHOLD = 3
+        fake_config.CIRCUIT_BREAKER_RESET_SEC = 60
 
         with patch.dict(sys.modules, {
             "dotenv": fake_dotenv,

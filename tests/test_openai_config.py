@@ -1,6 +1,7 @@
 import importlib
 import os
 import sys
+import time as _time
 import types
 import unittest
 from unittest.mock import Mock, MagicMock, patch
@@ -139,7 +140,7 @@ class ConfigTests(unittest.TestCase):
     def test_config_summary_temperature_default(self):
         with patch.dict(os.environ, REQUIRED_ENV, clear=True):
             config = _reload_module("config")
-        self.assertAlmostEqual(config.OPENAI_SUMMARY_TEMPERATURE, 0.3)
+        self.assertAlmostEqual(config.OPENAI_SUMMARY_TEMPERATURE, 0.1)
 
     def test_config_summary_temperature_rejects_invalid(self):
         env = {
@@ -1322,14 +1323,15 @@ class CircuitBreakerTests(unittest.IsolatedAsyncioTestCase):
                 config = importlib.import_module("config")
                 utils = importlib.import_module("utils")
 
-        utils._CIRCUIT_BREAKER_FAILURES = utils._CIRCUIT_BREAKER_THRESHOLD
+        utils._CIRCUIT_BREAKER_FAILURES = config.CIRCUIT_BREAKER_THRESHOLD
+        utils._CIRCUIT_BREAKER_OPEN_SINCE = _time.monotonic()
 
         with patch.object(utils.logger, "warning") as mock_warn:
             result = await utils.call_openai("system", "user")
             self.assertEqual(result, "")
             warn_msgs = [str(c) for c in mock_warn.call_args_list]
-            self.assertTrue(any("circuit breaker" in w.lower() for w in warn_msgs),
-                            "Expected circuit breaker warning")
+            self.assertTrue(any("circuit breaker open" in w.lower() for w in warn_msgs),
+                            "Expected circuit breaker open warning")
 
     async def test_circuit_breaker_increments_on_api_error(self):
         """Circuit breaker failure counter should increment on API errors."""
@@ -1423,6 +1425,201 @@ class CircuitBreakerTests(unittest.IsolatedAsyncioTestCase):
         result = await utils.call_openai("system", "user")
         self.assertEqual(result, "ok")
         self.assertEqual(utils._CIRCUIT_BREAKER_FAILURES, 0)
+
+
+class CircuitBreakerConfigTests(unittest.TestCase):
+    """Tests for CIRCUIT_BREAKER_THRESHOLD and CIRCUIT_BREAKER_RESET_SEC config."""
+
+    def test_config_circuit_breaker_threshold_default(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+                sys.modules.pop("config", None)
+                config = importlib.import_module("config")
+                self.assertEqual(config.CIRCUIT_BREAKER_THRESHOLD, 3)
+
+    def test_config_reads_circuit_breaker_threshold_from_env(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, {
+                **REQUIRED_ENV,
+                "CIRCUIT_BREAKER_THRESHOLD": "5",
+            }, clear=True):
+                sys.modules.pop("config", None)
+                config = importlib.import_module("config")
+                self.assertEqual(config.CIRCUIT_BREAKER_THRESHOLD, 5)
+
+    def test_config_circuit_breaker_threshold_rejects_zero(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, {
+                **REQUIRED_ENV,
+                "CIRCUIT_BREAKER_THRESHOLD": "0",
+            }, clear=True):
+                sys.modules.pop("config", None)
+                with self.assertRaises(ValueError):
+                    importlib.import_module("config")
+
+    def test_config_circuit_breaker_reset_sec_default(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+                sys.modules.pop("config", None)
+                config = importlib.import_module("config")
+                self.assertEqual(config.CIRCUIT_BREAKER_RESET_SEC, 60)
+
+    def test_config_reads_circuit_breaker_reset_sec_from_env(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, {
+                **REQUIRED_ENV,
+                "CIRCUIT_BREAKER_RESET_SEC": "120",
+            }, clear=True):
+                sys.modules.pop("config", None)
+                config = importlib.import_module("config")
+                self.assertEqual(config.CIRCUIT_BREAKER_RESET_SEC, 120)
+
+    def test_config_circuit_breaker_reset_sec_rejects_zero(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, {
+                **REQUIRED_ENV,
+                "CIRCUIT_BREAKER_RESET_SEC": "0",
+            }, clear=True):
+                sys.modules.pop("config", None)
+                with self.assertRaises(ValueError):
+                    importlib.import_module("config")
+
+
+class CircuitBreakerHalfOpenTests(unittest.IsolatedAsyncioTestCase):
+    """Tests for circuit breaker half-open (auto-reset) behavior."""
+
+    async def _setup_utils(self, env_extra=None):
+        import importlib
+        import sys
+        import types
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_openai = types.ModuleType("openai")
+
+        fake_usage = MagicMock()
+        fake_usage.prompt_tokens = 10
+        fake_usage.completion_tokens = 5
+        fake_usage.total_tokens = 15
+
+        class FakeAsyncOpenAI:
+            def __init__(self, api_key, **kwargs):
+                self.api_key = api_key
+                self.chat = types.SimpleNamespace(
+                    completions=types.SimpleNamespace(
+                        create=AsyncMock(return_value=type(
+                            "Response", (),
+                            {
+                                "choices": [type("Choice", (), {"message": type("Message", (), {"content": "ok"})()})()],
+                                "usage": fake_usage,
+                            },
+                        )())
+                    )
+                )
+
+        class FakeOpenAIError(Exception):
+            pass
+
+        fake_openai.AsyncOpenAI = FakeAsyncOpenAI
+        fake_openai.OpenAI = FakeAsyncOpenAI
+        fake_openai.APIError = FakeOpenAIError
+        fake_openai.RateLimitError = type("RateLimitError", (FakeOpenAIError,), {"status_code": None})
+        fake_openai.APIConnectionError = type("APIConnectionError", (FakeOpenAIError,), {})
+
+        env = {**REQUIRED_ENV}
+        if env_extra:
+            env.update(env_extra)
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv, "openai": fake_openai}):
+            with patch.dict(os.environ, env, clear=True):
+                sys.modules.pop("config", None)
+                sys.modules.pop("utils", None)
+                config = importlib.import_module("config")
+                utils = importlib.import_module("utils")
+
+        return config, utils
+
+    async def test_circuit_breaker_skips_call_before_reset_timeout(self):
+        """When circuit breaker is open and reset timeout hasn't elapsed, call should be skipped."""
+        config, utils = await self._setup_utils()
+
+        utils._CIRCUIT_BREAKER_FAILURES = config.CIRCUIT_BREAKER_THRESHOLD
+        utils._CIRCUIT_BREAKER_OPEN_SINCE = _time.monotonic()
+
+        with patch.object(utils.logger, "warning") as mock_warn:
+            result = await utils.call_openai("system", "user")
+            self.assertEqual(result, "")
+            warn_msgs = [str(c) for c in mock_warn.call_args_list]
+            self.assertTrue(any("circuit breaker open" in w.lower() for w in warn_msgs))
+
+    async def test_circuit_breaker_allows_probe_after_reset_timeout(self):
+        """When circuit breaker is open but reset timeout has elapsed, a probe call should be allowed."""
+        config, utils = await self._setup_utils()
+
+        utils._CIRCUIT_BREAKER_FAILURES = config.CIRCUIT_BREAKER_THRESHOLD
+        utils._CIRCUIT_BREAKER_OPEN_SINCE = _time.monotonic() - config.CIRCUIT_BREAKER_RESET_SEC - 1
+
+        with patch.object(utils.logger, "info") as mock_info:
+            result = await utils.call_openai("system", "user")
+            self.assertEqual(result, "ok")
+            info_msgs = [str(c) for c in mock_info.call_args_list]
+            self.assertTrue(any("half-open" in w.lower() for w in info_msgs))
+
+    async def test_circuit_breaker_resets_on_successful_probe(self):
+        """A successful probe call should fully reset the circuit breaker."""
+        config, utils = await self._setup_utils()
+
+        utils._CIRCUIT_BREAKER_FAILURES = config.CIRCUIT_BREAKER_THRESHOLD
+        utils._CIRCUIT_BREAKER_OPEN_SINCE = _time.monotonic() - config.CIRCUIT_BREAKER_RESET_SEC - 1
+
+        result = await utils.call_openai("system", "user")
+        self.assertEqual(result, "ok")
+        self.assertEqual(utils._CIRCUIT_BREAKER_FAILURES, 0)
+        self.assertEqual(utils._CIRCUIT_BREAKER_OPEN_SINCE, 0.0)
+
+    async def test_cb_record_failure_sets_open_since_on_threshold(self):
+        """_cb_record_failure should set _CIRCUIT_BREAKER_OPEN_SINCE when threshold is first reached."""
+        config, utils = await self._setup_utils()
+
+        self.assertEqual(utils._CIRCUIT_BREAKER_OPEN_SINCE, 0.0)
+
+        for i in range(config.CIRCUIT_BREAKER_THRESHOLD - 1):
+            utils._cb_record_failure()
+            self.assertEqual(utils._CIRCUIT_BREAKER_OPEN_SINCE, 0.0)
+
+        utils._cb_record_failure()
+        self.assertGreater(utils._CIRCUIT_BREAKER_OPEN_SINCE, 0.0)
+
+    async def test_cb_record_success_resets_open_since(self):
+        """_cb_record_success should reset _CIRCUIT_BREAKER_OPEN_SINCE to 0."""
+        config, utils = await self._setup_utils()
+
+        for _ in range(config.CIRCUIT_BREAKER_THRESHOLD):
+            utils._cb_record_failure()
+        self.assertGreater(utils._CIRCUIT_BREAKER_OPEN_SINCE, 0.0)
+
+        utils._cb_record_success()
+        self.assertEqual(utils._CIRCUIT_BREAKER_FAILURES, 0)
+        self.assertEqual(utils._CIRCUIT_BREAKER_OPEN_SINCE, 0.0)
 
 
 if __name__ == "__main__":

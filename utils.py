@@ -10,7 +10,7 @@ import tempfile
 import time as _time
 from datetime import datetime, timezone
 from openai import AsyncOpenAI, APIError, RateLimitError, APIConnectionError
-from config import OPENAI_API_KEY, OPENAI_DEFAULT_MAX_TOKENS, OPENAI_MODEL, OPENAI_REQUEST_TIMEOUT
+from config import OPENAI_API_KEY, OPENAI_DEFAULT_MAX_TOKENS, OPENAI_MODEL, OPENAI_REQUEST_TIMEOUT, CIRCUIT_BREAKER_THRESHOLD, CIRCUIT_BREAKER_RESET_SEC
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +64,7 @@ def now_iso() -> str:
 openai_client = None
 
 _CIRCUIT_BREAKER_FAILURES = 0
-_CIRCUIT_BREAKER_THRESHOLD = 3
+_CIRCUIT_BREAKER_OPEN_SINCE: float = 0.0
 
 LINK_REGEX = re.compile(r"https?://\S+")
 TRAILING_PUNCTUATION_REGEX = re.compile(r"""[.,;:!?)\]}'">]+$""")
@@ -168,6 +168,19 @@ def _emit_openai_latency(elapsed: float, model: str, total_tokens: int, prompt_t
         pass
 
 
+def _cb_record_failure():
+    global _CIRCUIT_BREAKER_FAILURES, _CIRCUIT_BREAKER_OPEN_SINCE
+    _CIRCUIT_BREAKER_FAILURES += 1
+    if _CIRCUIT_BREAKER_FAILURES == CIRCUIT_BREAKER_THRESHOLD:
+        _CIRCUIT_BREAKER_OPEN_SINCE = _time.monotonic()
+
+
+def _cb_record_success():
+    global _CIRCUIT_BREAKER_FAILURES, _CIRCUIT_BREAKER_OPEN_SINCE
+    _CIRCUIT_BREAKER_FAILURES = 0
+    _CIRCUIT_BREAKER_OPEN_SINCE = 0.0
+
+
 async def call_openai(
     system_prompt: str,
     user_content: str,
@@ -177,11 +190,21 @@ async def call_openai(
     temperature: float | None = None,
 ) -> str:
     """Универсальная функция для вызова OpenAI API с retry и exponential backoff."""
-    global openai_client, _CIRCUIT_BREAKER_FAILURES
+    global openai_client, _CIRCUIT_BREAKER_FAILURES, _CIRCUIT_BREAKER_OPEN_SINCE
 
-    if _CIRCUIT_BREAKER_FAILURES >= _CIRCUIT_BREAKER_THRESHOLD:
-        logger.warning("OpenAI circuit breaker open (%d consecutive failures) — skipping call", _CIRCUIT_BREAKER_FAILURES)
-        return ""
+    if _CIRCUIT_BREAKER_FAILURES >= CIRCUIT_BREAKER_THRESHOLD:
+        elapsed_since_open = _time.monotonic() - _CIRCUIT_BREAKER_OPEN_SINCE
+        if elapsed_since_open < CIRCUIT_BREAKER_RESET_SEC:
+            logger.warning(
+                "OpenAI circuit breaker open (%d consecutive failures, %.0fs until reset) — skipping call",
+                _CIRCUIT_BREAKER_FAILURES,
+                CIRCUIT_BREAKER_RESET_SEC - elapsed_since_open,
+            )
+            return ""
+        logger.info(
+            "OpenAI circuit breaker half-open (%d failures, %.0fs elapsed) — probing",
+            _CIRCUIT_BREAKER_FAILURES, elapsed_since_open,
+        )
 
     if openai_client is None:
         if not OPENAI_API_KEY:
@@ -212,9 +235,9 @@ async def call_openai(
             elapsed = _time.monotonic() - t0
             result = response.choices[0].message.content
             if result is None:
-                _CIRCUIT_BREAKER_FAILURES += 1
+                _cb_record_failure()
                 return ""
-            _CIRCUIT_BREAKER_FAILURES = 0
+            _cb_record_success()
             total_tokens = response.usage.total_tokens if hasattr(response, 'usage') and response.usage else 0
             prompt_tokens = response.usage.prompt_tokens if hasattr(response, 'usage') and response.usage else 0
             completion_tokens = response.usage.completion_tokens if hasattr(response, 'usage') and response.usage else 0
@@ -238,7 +261,7 @@ async def call_openai(
                 await asyncio.sleep(delay)
             else:
                 logger.error("OpenAI API error after %d retries: %s", max_retries, e)
-                _CIRCUIT_BREAKER_FAILURES += 1
+                _cb_record_failure()
                 return ""
         except APIError as e:
             if e.status_code and e.status_code >= 500 and attempt < max_retries:
@@ -248,17 +271,17 @@ async def call_openai(
             elif e.status_code and e.status_code in (401, 403):
                 logger.error("OpenAI auth error (status %d): check OPENAI_API_KEY — %s", e.status_code, e)
                 openai_client = None
-                _CIRCUIT_BREAKER_FAILURES += 1
+                _cb_record_failure()
                 return ""
             else:
                 logger.error("OpenAI API error (status %s): %s", getattr(e, 'status_code', '?'), e)
-                _CIRCUIT_BREAKER_FAILURES += 1
+                _cb_record_failure()
                 return ""
         except Exception as e:
             logger.error("OpenAI API error: %s", e)
-            _CIRCUIT_BREAKER_FAILURES += 1
+            _cb_record_failure()
             return ""
-    _CIRCUIT_BREAKER_FAILURES += 1
+    _cb_record_failure()
     return ""
 
 
