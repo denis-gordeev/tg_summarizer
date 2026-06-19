@@ -20,8 +20,11 @@ def _load_lambda_handler():
     fake_summarizer.DeadlineExceededError = DeadlineExceededError
     fake_config = types.ModuleType("config")
     fake_config.validate_config = lambda: None
+    fake_utils = types.ModuleType("utils")
+    fake_utils.get_circuit_breaker_state = lambda: {"state": "closed", "failures": 0}
     sys.modules["summarizer"] = fake_summarizer
     sys.modules["config"] = fake_config
+    sys.modules["utils"] = fake_utils
     sys.modules.pop("lambda_handler", None)
     return importlib.import_module("lambda_handler")
 
@@ -331,6 +334,65 @@ class HandlerTests(unittest.TestCase):
         flag_logs = [call for call in mock_log.call_args_list
                      if "send=" in str(call) and "save=" in str(call)]
         self.assertTrue(len(flag_logs) > 0, "Expected event flags in completion log")
+
+    def test_handler_includes_circuit_breaker_state_on_success(self):
+        """Handler should include circuit_breaker state dict in success response."""
+        event = {"send_message": True, "save_changes": True}
+
+        async_mock = AsyncMock()
+
+        def _run_and_close(coro):
+            coro.close()
+
+        with patch.object(self.lambda_handler.os, "chdir"), \
+             patch.object(self.lambda_handler, "download_from_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.object(self.lambda_handler, "run_summarizer", async_mock), \
+             patch.object(self.lambda_handler.asyncio, "run", side_effect=_run_and_close):
+            result = self.lambda_handler.handler(event, context=None)
+
+        self.assertIn("circuit_breaker", result)
+        self.assertIn("state", result["circuit_breaker"])
+        self.assertIn("failures", result["circuit_breaker"])
+
+    def test_handler_includes_circuit_breaker_state_on_error(self):
+        """Handler should include circuit_breaker state dict in error response."""
+        event = {"send_message": True, "save_changes": True}
+
+        async def _raise(**kwargs):
+            raise RuntimeError("test error")
+
+        with patch.object(self.lambda_handler.os, "chdir"), \
+             patch.object(self.lambda_handler, "download_from_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.object(self.lambda_handler, "run_summarizer", _raise):
+            result = self.lambda_handler.handler(event, context=None)
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("circuit_breaker", result)
+        self.assertIn("state", result["circuit_breaker"])
+
+    def test_handler_logs_circuit_breaker_state_in_completion_log(self):
+        """Handler completion log should include circuit breaker state."""
+        event = {"send_message": True, "save_changes": True}
+
+        async_mock = AsyncMock()
+
+        def _run_and_close(coro):
+            coro.close()
+
+        with patch.object(self.lambda_handler.os, "chdir"), \
+             patch.object(self.lambda_handler, "download_from_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.object(self.lambda_handler, "run_summarizer", async_mock), \
+             patch.object(self.lambda_handler.asyncio, "run", side_effect=_run_and_close), \
+             patch.object(self.lambda_handler.logger, "info") as mock_log:
+            self.lambda_handler.handler(event, context=None)
+
+        cb_logs = [call for call in mock_log.call_args_list
+                   if "cb=" in str(call)]
+        self.assertTrue(len(cb_logs) > 0, "Expected 'cb=' in completion log")
+
 
     def test_handler_logs_event_flags_at_start(self):
         """Handler should log parsed event flags at the start of invocation."""

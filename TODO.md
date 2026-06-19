@@ -2,7 +2,30 @@
 
 Живой список задач для автоматических раундов.
 
-## Completed in 2026-06-18 round 2 (Lambda hardening round 28, circuit breaker configurability, half-open recovery, prompt conciseness)
+## Completed in 2026-06-19 round (Lambda hardening round 29, prompt conciseness, circuit breaker observability, config sync)
+
+- **Bug fix — template.yaml temperature drift**: Fixed `OpenAISummaryTemperature` default in [`template.yaml`](template.yaml) from "0.3" to "0.1", syncing with the actual default in [`config.py`](config.py) (changed in round 28). The mismatch meant new SAM deployments would use 0.3 instead of the intended 0.1, producing more verbose summaries.
+- **Prompt quality — anti-verbosity rule**: Added "Каждый абзац — одна мысль. Без воды и пояснений очевидного" rule to both [`CHANNEL_SUMMARY_PROMPT`](prompts.py) and [`GROUP_SUMMARY_PROMPT`](prompts.py). Directly targets the AUTOWORK_INSTRUCTIONS goal of improving quality and conciseness by discouraging the LLM from padding summaries with filler explanations.
+- **Observability — circuit breaker state in Lambda response**: Added [`get_circuit_breaker_state()`](utils.py) that returns `{"state": "closed"|"open"|"half_open", "failures": N, ...}`. Both success and error Lambda responses now include a `circuit_breaker` field. The completion log includes `[cb=closed|open|half_open]`. Enables CloudWatch-based circuit breaker state monitoring without parsing logs.
+- **Cost table — gpt-4.1-mini pricing**: Added `"gpt-4.1-mini": (0.40, 1.60)` to [`_COST_PER_MILLION`](utils.py) cost lookup. The model is not cheaper than gpt-4o-mini but is a common alternative; including it in the cost table ensures `_estimate_cost_usd()` returns accurate costs and `call_openai()` does not emit a false "not in cost table" warning when gpt-4.1-mini is configured.
+- **Tests added**: 8 new tests (total 292, up from 284):
+  - `test_get_circuit_breaker_state_closed`: verifies state="closed" when failures < threshold
+  - `test_get_circuit_breaker_state_open`: verifies state="open" when failures >= threshold and reset not elapsed
+  - `test_get_circuit_breaker_state_half_open`: verifies state="half_open" when reset timeout has elapsed
+  - `test_cost_estimate_for_gpt41_mini`: verifies gpt-4.1-mini cost calculation ($0.40/1M input, $1.60/1M output)
+  - `test_no_warning_for_gpt41_mini`: verifies no cost-table warning for gpt-4.1-mini
+  - `test_handler_includes_circuit_breaker_state_on_success`: verifies `circuit_breaker` field in success response
+  - `test_handler_includes_circuit_breaker_state_on_error`: verifies `circuit_breaker` field in error response
+  - `test_handler_logs_circuit_breaker_state_in_completion_log`: verifies `[cb=...]` in completion log
+- Updated test stub in [`tests/test_lambda_handler.py`](tests/test_lambda_handler.py) — added fake `utils` module with `get_circuit_breaker_state` to support the new import.
+- All 292 tests pass without errors.
+
+## Next actions
+
+- Consider adding Lambda warmer to avoid cold-start Telegram reconnection overhead
+- Consider adding structured error response body for S3 upload failures (separate from Lambda status)
+- Consider adding CloudWatch dashboard for circuit breaker state (open/closed/half-open transitions)
+- Consider adding gpt-4.1-mini to template.yaml as an alternative model option
 
 - **Circuit breaker threshold configurable**: Moved `_CIRCUIT_BREAKER_THRESHOLD` from hardcoded constant in [`utils.py`](utils.py) to [`CIRCUIT_BREAKER_THRESHOLD`](config.py) in `config.py` (default 3, env `CIRCUIT_BREAKER_THRESHOLD`). Allows runtime tuning of the failure threshold without code changes — useful when OpenAI has intermittent issues and a higher threshold avoids premature circuit opening.
 - **Circuit breaker half-open auto-recovery**: Added [`CIRCUIT_BREAKER_RESET_SEC`](config.py) config (default 60, env `CIRCUIT_BREAKER_RESET_SEC`) and `_CIRCUIT_BREAKER_OPEN_SINCE` timestamp in [`utils.py`](utils.py). When the circuit breaker has been open for longer than `CIRCUIT_BREAKER_RESET_SEC`, one probe call is allowed through (half-open state). If the probe succeeds, the circuit closes and normal operation resumes. If it fails, the breaker stays open and the reset timer restarts. Previously, once the circuit breaker opened (3 consecutive failures), ALL subsequent OpenAI calls in the Lambda invocation returned `""` — even if OpenAI recovered mid-invocation. For a Lambda with 180s timeout and 30+ NLP checks, a transient 30s OpenAI outage at the start would waste the remaining 150s. With half-open recovery, the breaker probes every 60s and self-heals when the service recovers.

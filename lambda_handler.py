@@ -5,6 +5,7 @@ import time
 from typing import Any, Dict
 from s3_sync import download_from_s3, upload_to_s3
 from summarizer import run_summarizer, DeadlineExceededError
+from utils import get_circuit_breaker_state
 
 SAFETY_MARGIN_SECONDS = 10
 
@@ -103,6 +104,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         error_type = _classify_error(e)
         logger.error("Lambda execution failed after %.1fs [%s]: %s", elapsed, error_type, e, exc_info=True)
         upload_to_s3()
+        cb_state = get_circuit_breaker_state()
         return {
             'status': 'error',
             'error': str(e),
@@ -111,6 +113,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             'elapsed_seconds': round(elapsed, 1),
             'send_message': send_message,
             'save_changes': save_changes,
+            'circuit_breaker': cb_state,
         }
     t_summarizer = time.monotonic() - t0
 
@@ -120,12 +123,13 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     t_upload = time.monotonic() - t0
 
     elapsed = time.monotonic() - start_time
+    cb_state = get_circuit_breaker_state()
     logger.info(
         "Lambda completed in %.1fs (download=%.1fs, summarizer=%.1fs, upload=%.1fs) "
-        "[send=%s, save=%s, today_groups=%s, today_msgs=%s]",
+        "[send=%s, save=%s, today_groups=%s, today_msgs=%s] [cb=%s]",
         elapsed, t_download, t_summarizer, t_upload,
         send_message, save_changes, include_today_processed_groups,
-        include_today_processed_messages,
+        include_today_processed_messages, cb_state["state"],
     )
 
     return {
@@ -136,4 +140,5 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         'save_changes': save_changes,
         'include_today_processed_groups': include_today_processed_groups,
         'include_today_processed_messages': include_today_processed_messages,
+        'circuit_breaker': cb_state,
     }

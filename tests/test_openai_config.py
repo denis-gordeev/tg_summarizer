@@ -1621,6 +1621,54 @@ class CircuitBreakerHalfOpenTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(utils._CIRCUIT_BREAKER_FAILURES, 0)
         self.assertEqual(utils._CIRCUIT_BREAKER_OPEN_SINCE, 0.0)
 
+    async def test_get_circuit_breaker_state_closed(self):
+        """get_circuit_breaker_state returns 'closed' when failures < threshold."""
+        config, utils = await self._setup_utils()
+
+        utils._CIRCUIT_BREAKER_FAILURES = 0
+        state = utils.get_circuit_breaker_state()
+        self.assertEqual(state["state"], "closed")
+        self.assertEqual(state["failures"], 0)
+
+    async def test_get_circuit_breaker_state_open(self):
+        """get_circuit_breaker_state returns 'open' when failures >= threshold and reset not elapsed."""
+        config, utils = await self._setup_utils()
+
+        utils._CIRCUIT_BREAKER_FAILURES = config.CIRCUIT_BREAKER_THRESHOLD
+        utils._CIRCUIT_BREAKER_OPEN_SINCE = _time.monotonic()
+        state = utils.get_circuit_breaker_state()
+        self.assertEqual(state["state"], "open")
+        self.assertIn("open_since_elapsed", state)
+
+    async def test_get_circuit_breaker_state_half_open(self):
+        """get_circuit_breaker_state returns 'half_open' when reset timeout has elapsed."""
+        config, utils = await self._setup_utils()
+
+        utils._CIRCUIT_BREAKER_FAILURES = config.CIRCUIT_BREAKER_THRESHOLD
+        utils._CIRCUIT_BREAKER_OPEN_SINCE = _time.monotonic() - config.CIRCUIT_BREAKER_RESET_SEC - 1
+        state = utils.get_circuit_breaker_state()
+        self.assertEqual(state["state"], "half_open")
+        self.assertIn("open_since_elapsed", state)
+
+    async def test_cost_estimate_for_gpt41_mini(self):
+        """Cost estimate for gpt-4.1-mini uses its own pricing."""
+        config, utils = await self._setup_utils()
+
+        cost = utils._estimate_cost_usd("gpt-4.1-mini", 1_000_000, 1_000_000)
+        self.assertAlmostEqual(cost, 0.40 + 1.60, places=2)
+
+    async def test_no_warning_for_gpt41_mini(self):
+        """gpt-4.1-mini is in cost table — no warning should be emitted."""
+        config, utils = await self._setup_utils()
+
+        config.OPENAI_MODEL = "gpt-4.1-mini"
+        with patch.object(utils, "openai_client", None), \
+             patch.object(utils, "AsyncOpenAI", return_value=Mock()) as mock_openai, \
+             patch.object(utils.logger, "warning") as mock_warn:
+            await utils.call_openai("sys", "user")
+        cost_warnings = [c for c in mock_warn.call_args_list if "cost table" in str(c)]
+        self.assertEqual(len(cost_warnings), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

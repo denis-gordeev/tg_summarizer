@@ -125,6 +125,7 @@ def extract_all_channels(text: str) -> list[str]:
 
 _COST_PER_MILLION = {
     "gpt-4o-mini": (0.15, 0.60),
+    "gpt-4.1-mini": (0.40, 1.60),
 }
 
 def _estimate_cost_usd(model: str, prompt_tokens: int, completion_tokens: int) -> float:
@@ -179,6 +180,14 @@ def _cb_record_success():
     global _CIRCUIT_BREAKER_FAILURES, _CIRCUIT_BREAKER_OPEN_SINCE
     _CIRCUIT_BREAKER_FAILURES = 0
     _CIRCUIT_BREAKER_OPEN_SINCE = 0.0
+
+
+def get_circuit_breaker_state() -> dict:
+    if _CIRCUIT_BREAKER_FAILURES < CIRCUIT_BREAKER_THRESHOLD:
+        return {"state": "closed", "failures": _CIRCUIT_BREAKER_FAILURES}
+    if _CIRCUIT_BREAKER_OPEN_SINCE and (_time.monotonic() - _CIRCUIT_BREAKER_OPEN_SINCE) < CIRCUIT_BREAKER_RESET_SEC:
+        return {"state": "open", "failures": _CIRCUIT_BREAKER_FAILURES, "open_since_elapsed": round(_time.monotonic() - _CIRCUIT_BREAKER_OPEN_SINCE, 1)}
+    return {"state": "half_open", "failures": _CIRCUIT_BREAKER_FAILURES, "open_since_elapsed": round(_time.monotonic() - _CIRCUIT_BREAKER_OPEN_SINCE, 1)}
 
 
 async def call_openai(
