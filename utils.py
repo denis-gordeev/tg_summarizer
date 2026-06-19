@@ -66,6 +66,9 @@ openai_client = None
 _CIRCUIT_BREAKER_FAILURES = 0
 _CIRCUIT_BREAKER_OPEN_SINCE: float = 0.0
 
+_cumulative_prompt_tokens: int = 0
+_cumulative_completion_tokens: int = 0
+
 LINK_REGEX = re.compile(r"https?://\S+")
 TRAILING_PUNCTUATION_REGEX = re.compile(r"""[.,;:!?)\]}'">]+$""")
 TELEGRAM_CHANNEL_REGEX = re.compile(r"https://t\.me/([^/]+)/\d+")
@@ -190,6 +193,22 @@ def get_circuit_breaker_state() -> dict:
     return {"state": "half_open", "failures": _CIRCUIT_BREAKER_FAILURES, "open_since_elapsed": round(_time.monotonic() - _CIRCUIT_BREAKER_OPEN_SINCE, 1)}
 
 
+def reset_circuit_breaker() -> None:
+    global _CIRCUIT_BREAKER_FAILURES, _CIRCUIT_BREAKER_OPEN_SINCE
+    _CIRCUIT_BREAKER_FAILURES = 0
+    _CIRCUIT_BREAKER_OPEN_SINCE = 0.0
+
+
+def get_token_usage() -> dict:
+    return {"prompt_tokens": _cumulative_prompt_tokens, "completion_tokens": _cumulative_completion_tokens}
+
+
+def reset_token_usage() -> None:
+    global _cumulative_prompt_tokens, _cumulative_completion_tokens
+    _cumulative_prompt_tokens = 0
+    _cumulative_completion_tokens = 0
+
+
 async def call_openai(
     system_prompt: str,
     user_content: str,
@@ -199,7 +218,7 @@ async def call_openai(
     temperature: float | None = None,
 ) -> str:
     """Универсальная функция для вызова OpenAI API с retry и exponential backoff."""
-    global openai_client, _CIRCUIT_BREAKER_FAILURES, _CIRCUIT_BREAKER_OPEN_SINCE
+    global openai_client, _CIRCUIT_BREAKER_FAILURES, _CIRCUIT_BREAKER_OPEN_SINCE, _cumulative_prompt_tokens, _cumulative_completion_tokens
 
     if _CIRCUIT_BREAKER_FAILURES >= CIRCUIT_BREAKER_THRESHOLD:
         elapsed_since_open = _time.monotonic() - _CIRCUIT_BREAKER_OPEN_SINCE
@@ -242,6 +261,10 @@ async def call_openai(
             t0 = _time.monotonic()
             response = await openai_client.chat.completions.create(**kwargs)
             elapsed = _time.monotonic() - t0
+            if not response.choices:
+                logger.warning("OpenAI returned empty choices for model=%s", OPENAI_MODEL)
+                _cb_record_failure()
+                return ""
             result = response.choices[0].message.content
             if result is None:
                 _cb_record_failure()
@@ -250,6 +273,8 @@ async def call_openai(
             total_tokens = response.usage.total_tokens if hasattr(response, 'usage') and response.usage else 0
             prompt_tokens = response.usage.prompt_tokens if hasattr(response, 'usage') and response.usage else 0
             completion_tokens = response.usage.completion_tokens if hasattr(response, 'usage') and response.usage else 0
+            _cumulative_prompt_tokens += prompt_tokens
+            _cumulative_completion_tokens += completion_tokens
             if hasattr(response, 'usage') and response.usage:
                 logger.info(
                     "OpenAI usage: model=%s prompt=%d completion=%d total=%d latency=%.1fs",
@@ -353,6 +378,18 @@ def _truncate_html_preserving_tags(text: str, max_visible_chars: int) -> str:
         output += f"</{tag_name}>"
 
     return output.strip()
+
+
+_META_ARTIFACT_PATTERNS = [
+    re.compile(r"^[^<\n]*?(?:в этом дайджесте|итого|в заключение|подведя итог|в итоге|итак|в общем|вкратце|как видно)[^\n]*\n*", re.IGNORECASE),
+    re.compile(r"\n[^<\n]*?(?:в этом дайджесте|итого|в заключение|подведя итог|в итоге|итак|в общем|вкратце|как видно)[^\n]*$", re.IGNORECASE),
+]
+
+
+def strip_meta_artifacts(text: str) -> str:
+    for pattern in _META_ARTIFACT_PATTERNS:
+        text = pattern.sub("", text)
+    return text.strip()
 
 
 def enforce_summary_length(summary: str, max_visible_chars: int) -> str:

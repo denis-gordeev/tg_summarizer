@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from typing import List, Optional, Set
 from models import MessageInfo, SummaryInfo
-from utils import call_openai, extract_links, count_characters, enforce_summary_length, text_hash
+from utils import call_openai, extract_links, count_characters, enforce_summary_length, strip_meta_artifacts, text_hash
 from config import (
     SIMILARITY_LLM_UPPER,
     ENABLE_SUMMARIES_DEDUPLICATION,
@@ -143,6 +143,9 @@ def _remove_intra_batch_duplicates(messages: List[MessageInfo]) -> List[MessageI
 
         duplicate = False
         for u in unique_msgs:
+            len_a, len_b = len(msg.text), len(u.text)
+            if len_a and len_b and abs(len_a - len_b) / max(len_a, len_b) > 0.5:
+                continue
             ratio = SequenceMatcher(None, msg.text, u.text).ratio()
             if ratio > SIMILARITY_LLM_UPPER:
                 logger.debug("Skipping intra-batch text duplicate (ratio=%.2f)", ratio)
@@ -231,6 +234,7 @@ async def summarize_text(messages: List[MessageInfo]) -> str:
     logger.debug("Source length: %d chars, summary: %d chars", total_original_length, count_characters(result))
 
     result = _replace_source_with_links(messages, result, msg_links)
+    result = strip_meta_artifacts(result)
     result = enforce_summary_length(result, max_summary_length)
     if DEBUG:
         logger.debug("Summary result:\n%s", result)
@@ -263,7 +267,7 @@ async def summarize_group_text(messages: List[MessageInfo]) -> str:
     community_name = ", ".join(group_names)
     header = f"<b>👥 Обзор сообщества {community_name}</b>\n\n"
 
-    result = header + enforce_summary_length(result, max_summary_length - count_characters(header))
+    result = header + enforce_summary_length(strip_meta_artifacts(result), max_summary_length - count_characters(header))
     if DEBUG:
         logger.debug("Group summary result:\n%s", result)
     return result

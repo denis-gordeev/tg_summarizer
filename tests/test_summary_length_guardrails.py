@@ -88,6 +88,7 @@ def _stub_dependencies():
     fake_utils.extract_links = lambda text: []
     fake_utils.count_characters = _stub_count_characters
     fake_utils.enforce_summary_length = _stub_enforce_summary_length
+    fake_utils.strip_meta_artifacts = lambda text: text
     fake_utils.text_hash = lambda text: __import__('hashlib').sha256(text.encode()).hexdigest()[:16]
 
     return {

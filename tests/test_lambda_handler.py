@@ -22,6 +22,9 @@ def _load_lambda_handler():
     fake_config.validate_config = lambda: None
     fake_utils = types.ModuleType("utils")
     fake_utils.get_circuit_breaker_state = lambda: {"state": "closed", "failures": 0}
+    fake_utils.reset_circuit_breaker = lambda: None
+    fake_utils.get_token_usage = lambda: {"prompt_tokens": 0, "completion_tokens": 0}
+    fake_utils.reset_token_usage = lambda: None
     sys.modules["summarizer"] = fake_summarizer
     sys.modules["config"] = fake_config
     sys.modules["utils"] = fake_utils
@@ -414,6 +417,101 @@ class HandlerTests(unittest.TestCase):
         start_flag_logs = [call for call in mock_log.call_args_list
                            if "Lambda event flags" in str(call)]
         self.assertTrue(len(start_flag_logs) > 0, "Expected 'Lambda event flags' log at start")
+
+    def test_handler_includes_token_usage_in_success_response(self):
+        """Handler should include token_usage dict in success response."""
+        event = {"send_message": True, "save_changes": True}
+
+        async_mock = AsyncMock()
+
+        def _run_and_close(coro):
+            coro.close()
+
+        with patch.object(self.lambda_handler.os, "chdir"), \
+             patch.object(self.lambda_handler, "download_from_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.object(self.lambda_handler, "run_summarizer", async_mock), \
+             patch.object(self.lambda_handler.asyncio, "run", side_effect=_run_and_close):
+            result = self.lambda_handler.handler(event, context=None)
+
+        self.assertIn("token_usage", result)
+        self.assertIn("prompt_tokens", result["token_usage"])
+        self.assertIn("completion_tokens", result["token_usage"])
+
+    def test_handler_includes_token_usage_in_error_response(self):
+        """Handler should include token_usage dict in error response."""
+        event = {"send_message": True, "save_changes": True}
+
+        async def _raise(**kwargs):
+            raise RuntimeError("test error")
+
+        with patch.object(self.lambda_handler.os, "chdir"), \
+             patch.object(self.lambda_handler, "download_from_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.object(self.lambda_handler, "run_summarizer", _raise):
+            result = self.lambda_handler.handler(event, context=None)
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("token_usage", result)
+
+    def test_handler_resets_circuit_breaker_on_start(self):
+        """Handler should call reset_circuit_breaker at the start of each invocation."""
+        event = {"send_message": True, "save_changes": True}
+
+        async_mock = AsyncMock()
+
+        def _run_and_close(coro):
+            coro.close()
+
+        with patch.object(self.lambda_handler.os, "chdir"), \
+             patch.object(self.lambda_handler, "download_from_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.object(self.lambda_handler, "run_summarizer", async_mock), \
+             patch.object(self.lambda_handler.asyncio, "run", side_effect=_run_and_close), \
+             patch.object(self.lambda_handler, "reset_circuit_breaker") as mock_reset:
+            self.lambda_handler.handler(event, context=None)
+
+        mock_reset.assert_called_once()
+
+    def test_handler_resets_token_usage_on_start(self):
+        """Handler should call reset_token_usage at the start of each invocation."""
+        event = {"send_message": True, "save_changes": True}
+
+        async_mock = AsyncMock()
+
+        def _run_and_close(coro):
+            coro.close()
+
+        with patch.object(self.lambda_handler.os, "chdir"), \
+             patch.object(self.lambda_handler, "download_from_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.object(self.lambda_handler, "run_summarizer", async_mock), \
+             patch.object(self.lambda_handler.asyncio, "run", side_effect=_run_and_close), \
+             patch.object(self.lambda_handler, "reset_token_usage") as mock_reset:
+            self.lambda_handler.handler(event, context=None)
+
+        mock_reset.assert_called_once()
+
+    def test_handler_logs_token_usage_in_completion_log(self):
+        """Handler completion log should include token counts."""
+        event = {"send_message": True, "save_changes": True}
+
+        async_mock = AsyncMock()
+
+        def _run_and_close(coro):
+            coro.close()
+
+        with patch.object(self.lambda_handler.os, "chdir"), \
+             patch.object(self.lambda_handler, "download_from_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.object(self.lambda_handler, "run_summarizer", async_mock), \
+             patch.object(self.lambda_handler.asyncio, "run", side_effect=_run_and_close), \
+             patch.object(self.lambda_handler.logger, "info") as mock_log:
+            self.lambda_handler.handler(event, context=None)
+
+        token_logs = [call for call in mock_log.call_args_list
+                      if "tokens=" in str(call)]
+        self.assertTrue(len(token_logs) > 0, "Expected 'tokens=' in completion log")
 
 
 class SummarizerGroupDeadlineTests(unittest.TestCase):

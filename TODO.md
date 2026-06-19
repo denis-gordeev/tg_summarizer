@@ -2,7 +2,42 @@
 
 Живой список задач для автоматических раундов.
 
-## Completed in 2026-06-19 round (Lambda hardening round 29, prompt conciseness, circuit breaker observability, config sync)
+## Completed in 2026-06-19 round (Lambda hardening round 30, meta-artifact stripping, empty choices guard, circuit breaker reset, token usage tracking, dedup length pre-filter)
+
+- **Summary quality — strip LLM meta-artifacts**: Added [`strip_meta_artifacts()`](utils.py) with regex patterns that strip common LLM intro/outro phrases ("в этом дайджесте", "итого", "в заключение", "подведя итог", "в итоге", "итак", "в общем", "вкратце", "как видно") from summary text. Applied in both [`summarize_text()`](message_processor.py) and [`summarize_group_text()`](message_processor.py) before `enforce_summary_length()`. Directly targets the AUTOWORK_INSTRUCTIONS goal of improving quality and conciseness — despite prompt rules prohibiting these phrases, LLMs still occasionally produce them. The post-processor catches violations cheaply.
+- **Robustness — empty choices guard**: Added `response.choices` emptiness check in [`call_openai()`](utils.py). Previously, `response.choices[0].message.content` would raise `IndexError` if OpenAI returned an empty choices array (rare but documented edge case). Now logs a warning and records a circuit breaker failure, returning `""` instead of crashing.
+- **Correctness — circuit breaker reset on Lambda cold start**: Added [`reset_circuit_breaker()`](utils.py) called at the start of [`lambda_handler.handler()`](lambda_handler.py). Previously, the circuit breaker's `_CIRCUIT_BREAKER_FAILURES` and `_CIRCUIT_BREAKER_OPEN_SINCE` globals persisted across warm Lambda invocations, meaning a transient OpenAI outage in one invocation could unnecessarily block all OpenAI calls in subsequent invocations even after the service recovered. Now each Lambda invocation starts with a clean circuit breaker state.
+- **Observability — cumulative token usage tracking**: Added [`get_token_usage()`](utils.py) and [`reset_token_usage()`](utils.py) for cumulative prompt/completion token tracking. [`call_openai()`](utils.py) now accumulates `_cumulative_prompt_tokens` and `_cumulative_completion_tokens` across all calls within a single Lambda invocation. [`lambda_handler.handler()`](lambda_handler.py) resets counters at start and includes `token_usage` dict in both success and error responses. Completion log includes `[tokens=P+C]` for CloudWatch-based cost monitoring.
+- **Performance — length-based dedup pre-filter**: Added O(1) length check in [`_remove_intra_batch_duplicates()`](message_processor.py) — texts differing in length by more than 50% are skipped before the O(N) `SequenceMatcher` comparison. Two texts where one is >50% longer than the other cannot achieve a `SequenceMatcher` ratio > 0.95, making the comparison unnecessary. Reduces dedup time for batches with messages of varying lengths.
+- **Bug fix — enforce_summary_length stub in test**: Fixed pass-through `enforce_summary_length` stub in [`tests/test_history_manager.py`](tests/test_history_manager.py) oversized update test — the stub was `lambda text, max_chars: text` (never truncating), causing the assertion `len(updated.content) <= 4000` to fail. Changed to `lambda text, max_chars: text[:max_chars]` so the test correctly validates that `update_existing_summary` calls `enforce_summary_length`.
+- **Tests added**: 16 new tests (total 308, up from 292):
+  - `test_strips_intro_phrase`: verifies "В этом дайджесте" stripped from summary start
+  - `test_strips_outro_phrase`: verifies "Итого" stripped from summary end
+  - `test_preserves_clean_summary`: verifies clean summary passes through unchanged
+  - `test_strips_итак_intro`: verifies "Итак" stripped
+  - `test_strips_в_заключение`: verifies "В заключение" stripped
+  - `test_different_length_texts_not_compared_by_sequencematcher`: verifies length pre-filter skips SequenceMatcher for >50% length difference
+  - `test_similar_length_texts_still_deduplicated`: verifies similar-length texts still go through SequenceMatcher
+  - `test_call_openai_returns_empty_on_empty_choices`: verifies empty choices guard returns `""`
+  - `test_reset_circuit_breaker_clears_state`: verifies `reset_circuit_breaker()` clears failures and open_since
+  - `test_token_usage_accumulates_across_calls`: verifies cumulative token counting across multiple `call_openai` calls
+  - `test_reset_token_usage_clears_counters`: verifies `reset_token_usage()` resets both counters
+  - `test_handler_includes_token_usage_in_success_response`: verifies `token_usage` field in success response
+  - `test_handler_includes_token_usage_in_error_response`: verifies `token_usage` field in error response
+  - `test_handler_resets_circuit_breaker_on_start`: verifies `reset_circuit_breaker` called at invocation start
+  - `test_handler_resets_token_usage_on_start`: verifies `reset_token_usage` called at invocation start
+  - `test_handler_logs_token_usage_in_completion_log`: verifies `[tokens=P+C]` in completion log
+- Updated test stubs in [`tests/test_lambda_handler.py`](tests/test_lambda_handler.py) — added `reset_circuit_breaker`, `get_token_usage`, `reset_token_usage` to fake `utils` module.
+- Updated test stubs in [`tests/test_digest_post_processing.py`](tests/test_digest_post_processing.py), [`tests/test_summary_length_guardrails.py`](tests/test_summary_length_guardrails.py), [`tests/test_history_manager.py`](tests/test_history_manager.py), [`tests/test_process_messages_integration.py`](tests/test_process_messages_integration.py) — added `strip_meta_artifacts` to all `fake_utils` stubs.
+- All 308 tests pass without errors.
+
+## Next actions
+
+- Consider adding Lambda warmer to avoid cold-start Telegram reconnection overhead
+- Consider adding structured error response body for S3 upload failures (separate from Lambda status)
+- Consider adding CloudWatch dashboard for circuit breaker state (open/closed/half-open transitions)
+- Consider adding gpt-4.1-mini to template.yaml as an alternative model option
+- Consider adding CloudWatch metric filter on `token_usage` field for cost alerting
 
 - **Bug fix — template.yaml temperature drift**: Fixed `OpenAISummaryTemperature` default in [`template.yaml`](template.yaml) from "0.3" to "0.1", syncing with the actual default in [`config.py`](config.py) (changed in round 28). The mismatch meant new SAM deployments would use 0.3 instead of the intended 0.1, producing more verbose summaries.
 - **Prompt quality — anti-verbosity rule**: Added "Каждый абзац — одна мысль. Без воды и пояснений очевидного" rule to both [`CHANNEL_SUMMARY_PROMPT`](prompts.py) and [`GROUP_SUMMARY_PROMPT`](prompts.py). Directly targets the AUTOWORK_INSTRUCTIONS goal of improving quality and conciseness by discouraging the LLM from padding summaries with filler explanations.

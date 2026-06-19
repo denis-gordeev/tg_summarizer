@@ -5,7 +5,7 @@ import time
 from typing import Any, Dict
 from s3_sync import download_from_s3, upload_to_s3
 from summarizer import run_summarizer, DeadlineExceededError
-from utils import get_circuit_breaker_state
+from utils import get_circuit_breaker_state, reset_circuit_breaker, get_token_usage, reset_token_usage
 
 SAFETY_MARGIN_SECONDS = 10
 
@@ -49,6 +49,9 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         logger.info("Lambda invocation %s", request_id)
 
     start_time = time.monotonic()
+
+    reset_circuit_breaker()
+    reset_token_usage()
 
     # Ensure we can write files (sessions, history) in Lambda
     try:
@@ -105,6 +108,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         logger.error("Lambda execution failed after %.1fs [%s]: %s", elapsed, error_type, e, exc_info=True)
         upload_to_s3()
         cb_state = get_circuit_breaker_state()
+        token_usage = get_token_usage()
         return {
             'status': 'error',
             'error': str(e),
@@ -114,6 +118,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             'send_message': send_message,
             'save_changes': save_changes,
             'circuit_breaker': cb_state,
+            'token_usage': token_usage,
         }
     t_summarizer = time.monotonic() - t0
 
@@ -124,12 +129,14 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
     elapsed = time.monotonic() - start_time
     cb_state = get_circuit_breaker_state()
+    token_usage = get_token_usage()
     logger.info(
         "Lambda completed in %.1fs (download=%.1fs, summarizer=%.1fs, upload=%.1fs) "
-        "[send=%s, save=%s, today_groups=%s, today_msgs=%s] [cb=%s]",
+        "[send=%s, save=%s, today_groups=%s, today_msgs=%s] [cb=%s] [tokens=%d+%d]",
         elapsed, t_download, t_summarizer, t_upload,
         send_message, save_changes, include_today_processed_groups,
         include_today_processed_messages, cb_state["state"],
+        token_usage["prompt_tokens"], token_usage["completion_tokens"],
     )
 
     return {
@@ -141,4 +148,5 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         'include_today_processed_groups': include_today_processed_groups,
         'include_today_processed_messages': include_today_processed_messages,
         'circuit_breaker': cb_state,
+        'token_usage': token_usage,
     }

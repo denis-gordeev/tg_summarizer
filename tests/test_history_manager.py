@@ -64,7 +64,8 @@ class ShouldRunGroupSummarizationParseErrorTests(unittest.TestCase):
         fake_utils.extract_all_channels = lambda text: []
         fake_utils.text_hash = lambda text: __import__('hashlib').sha256(text.encode()).hexdigest()[:16]
         fake_utils.count_characters = lambda text: len(text)
-        fake_utils.enforce_summary_length = lambda text, max_chars: text[:max_chars]
+        fake_utils.enforce_summary_length = lambda text, max_chars: text
+        fake_utils.strip_meta_artifacts = lambda text: text
         fake_telegram_client = types.ModuleType("telegram_client")
         fake_telegram_client.user_client = None
         fake_telegram_client.clients_loop = None
@@ -244,7 +245,8 @@ class RunAsyncWithLoopTests(unittest.TestCase):
         fake_utils.extract_all_channels = lambda text: []
         fake_utils.text_hash = lambda text: __import__('hashlib').sha256(text.encode()).hexdigest()[:16]
         fake_utils.count_characters = lambda text: len(text)
-        fake_utils.enforce_summary_length = lambda text, max_chars: text[:max_chars]
+        fake_utils.enforce_summary_length = lambda text, max_chars: text
+        fake_utils.strip_meta_artifacts = lambda text: text
         fake_telegram_client = types.ModuleType("telegram_client")
         fake_telegram_client.user_client = None
         fake_telegram_client.clients_loop = None
@@ -403,7 +405,8 @@ class UpdateExistingSummaryPreservesMessageIdTests(unittest.TestCase):
         fake_utils.extract_all_channels = lambda text: []
         fake_utils.text_hash = lambda text: __import__('hashlib').sha256(text.encode()).hexdigest()[:16]
         fake_utils.count_characters = lambda text: len(text)
-        fake_utils.enforce_summary_length = lambda text, max_chars: text[:max_chars]
+        fake_utils.enforce_summary_length = lambda text, max_chars: text
+        fake_utils.strip_meta_artifacts = lambda text: text
         fake_telegram_client = types.ModuleType("telegram_client")
         fake_telegram_client.user_client = None
         fake_telegram_client.clients_loop = None
@@ -483,7 +486,8 @@ class HistoryCacheTests(unittest.TestCase):
         fake_utils.extract_all_channels = lambda text: []
         fake_utils.text_hash = lambda text: __import__('hashlib').sha256(text.encode()).hexdigest()[:16]
         fake_utils.count_characters = lambda text: len(text)
-        fake_utils.enforce_summary_length = lambda text, max_chars: text[:max_chars]
+        fake_utils.enforce_summary_length = lambda text, max_chars: text
+        fake_utils.strip_meta_artifacts = lambda text: text
         fake_telegram_client = types.ModuleType("telegram_client")
         fake_telegram_client.user_client = None
         fake_telegram_client.clients_loop = None
@@ -587,7 +591,8 @@ class CacheInvalidationTests(unittest.TestCase):
         fake_utils.extract_all_channels = lambda text: []
         fake_utils.text_hash = lambda text: __import__('hashlib').sha256(text.encode()).hexdigest()[:16]
         fake_utils.count_characters = lambda text: len(text)
-        fake_utils.enforce_summary_length = lambda text, max_chars: text[:max_chars]
+        fake_utils.enforce_summary_length = lambda text, max_chars: text
+        fake_utils.strip_meta_artifacts = lambda text: text
         fake_telegram_client = types.ModuleType("telegram_client")
         fake_telegram_client.user_client = None
         fake_telegram_client.clients_loop = None
@@ -639,7 +644,8 @@ class CacheInvalidationTests(unittest.TestCase):
         fake_utils.extract_all_channels = lambda text: []
         fake_utils.text_hash = lambda text: __import__('hashlib').sha256(text.encode()).hexdigest()[:16]
         fake_utils.count_characters = lambda text: len(text)
-        fake_utils.enforce_summary_length = lambda text, max_chars: text[:max_chars]
+        fake_utils.enforce_summary_length = lambda text, max_chars: text
+        fake_utils.strip_meta_artifacts = lambda text: text
         fake_telegram_client = types.ModuleType("telegram_client")
         fake_telegram_client.user_client = None
         fake_telegram_client.clients_loop = None
@@ -704,7 +710,8 @@ class LoadSummariesHistoryRestoreTests(unittest.TestCase):
         fake_utils.extract_all_channels = lambda text: []
         fake_utils.text_hash = lambda text: __import__('hashlib').sha256(text.encode()).hexdigest()[:16]
         fake_utils.count_characters = lambda text: len(text)
-        fake_utils.enforce_summary_length = lambda text, max_chars: text[:max_chars]
+        fake_utils.enforce_summary_length = lambda text, max_chars: text
+        fake_utils.strip_meta_artifacts = lambda text: text
         fake_telegram_client = types.ModuleType("telegram_client")
         fake_telegram_client.user_client = None
         fake_telegram_client.clients_loop = None
@@ -787,7 +794,8 @@ class LoadGroupSummariesHistoryRestoreTests(unittest.TestCase):
         fake_utils.extract_all_channels = lambda text: []
         fake_utils.text_hash = lambda text: __import__('hashlib').sha256(text.encode()).hexdigest()[:16]
         fake_utils.count_characters = lambda text: len(text)
-        fake_utils.enforce_summary_length = lambda text, max_chars: text[:max_chars]
+        fake_utils.enforce_summary_length = lambda text, max_chars: text
+        fake_utils.strip_meta_artifacts = lambda text: text
         fake_telegram_client = types.ModuleType("telegram_client")
         fake_telegram_client.user_client = None
         fake_telegram_client.clients_loop = None
@@ -874,7 +882,8 @@ class SaveUpdatedSummaryNoMatchTests(unittest.TestCase):
         fake_utils.extract_all_channels = lambda text: []
         fake_utils.text_hash = lambda text: __import__('hashlib').sha256(text.encode()).hexdigest()[:16]
         fake_utils.count_characters = lambda text: len(text)
-        fake_utils.enforce_summary_length = lambda text, max_chars: text[:max_chars]
+        fake_utils.enforce_summary_length = lambda text, max_chars: text
+        fake_utils.strip_meta_artifacts = lambda text: text
         fake_telegram_client = types.ModuleType("telegram_client")
         fake_telegram_client.user_client = None
         fake_telegram_client.clients_loop = None
@@ -962,7 +971,8 @@ class UpdateExistingSummaryLLMTests(unittest.TestCase):
         fake_utils.now_iso = lambda: "2026-01-01T00:00:00"
         fake_utils.text_hash = lambda text: __import__('hashlib').sha256(text.encode()).hexdigest()[:16]
         fake_utils.count_characters = lambda text: len(text)
-        fake_utils.enforce_summary_length = lambda text, max_chars: text[:max_chars]
+        fake_utils.enforce_summary_length = lambda text, max_chars: text
+        fake_utils.strip_meta_artifacts = lambda text: text
 
         stubs = {
             "dotenv": fake_dotenv,
@@ -1033,7 +1043,8 @@ class UpdateExistingSummaryLLMTests(unittest.TestCase):
         fake_utils.now_iso = lambda: "2026-01-01T00:00:00"
         fake_utils.text_hash = lambda text: __import__('hashlib').sha256(text.encode()).hexdigest()[:16]
         fake_utils.count_characters = lambda text: len(text)
-        fake_utils.enforce_summary_length = lambda text, max_chars: text[:max_chars]
+        fake_utils.enforce_summary_length = lambda text, max_chars: text
+        fake_utils.strip_meta_artifacts = lambda text: text
 
         stubs = {
             "dotenv": fake_dotenv,
@@ -1104,7 +1115,8 @@ class UpdateExistingSummaryLLMTests(unittest.TestCase):
         fake_utils.now_iso = lambda: "2026-01-01T00:00:00"
         fake_utils.text_hash = lambda text: __import__('hashlib').sha256(text.encode()).hexdigest()[:16]
         fake_utils.count_characters = lambda text: len(text)
-        fake_utils.enforce_summary_length = lambda text, max_chars: text[:max_chars]
+        fake_utils.enforce_summary_length = lambda text, max_chars: text
+        fake_utils.strip_meta_artifacts = lambda text: text
 
         stubs = {
             "dotenv": fake_dotenv,
@@ -1175,7 +1187,8 @@ class UpdateExistingSummaryLLMTests(unittest.TestCase):
         fake_utils.now_iso = lambda: "2026-01-01T00:00:00"
         fake_utils.text_hash = lambda text: __import__('hashlib').sha256(text.encode()).hexdigest()[:16]
         fake_utils.count_characters = lambda text: len(text)
-        fake_utils.enforce_summary_length = lambda text, max_chars: text[:max_chars]
+        fake_utils.enforce_summary_length = lambda text, max_chars: text
+        fake_utils.strip_meta_artifacts = lambda text: text
 
         stubs = {
             "dotenv": fake_dotenv,
@@ -1248,7 +1261,8 @@ class UpdateExistingSummaryTemperatureTests(unittest.TestCase):
         fake_utils.now_iso = lambda: "2026-01-01T00:00:00"
         fake_utils.text_hash = lambda text: __import__('hashlib').sha256(text.encode()).hexdigest()[:16]
         fake_utils.count_characters = lambda text: len(text)
-        fake_utils.enforce_summary_length = lambda text, max_chars: text[:max_chars]
+        fake_utils.enforce_summary_length = lambda text, max_chars: text
+        fake_utils.strip_meta_artifacts = lambda text: text
 
         stubs = {
             "dotenv": fake_dotenv,
@@ -1323,7 +1337,8 @@ class SharedLoadSaveHelperTests(unittest.TestCase):
         fake_utils.extract_all_channels = lambda text: []
         fake_utils.text_hash = lambda text: __import__('hashlib').sha256(text.encode()).hexdigest()[:16]
         fake_utils.count_characters = lambda text: len(text)
-        fake_utils.enforce_summary_length = lambda text, max_chars: text[:max_chars]
+        fake_utils.enforce_summary_length = lambda text, max_chars: text
+        fake_utils.strip_meta_artifacts = lambda text: text
         fake_telegram_client = types.ModuleType("telegram_client")
         fake_telegram_client.user_client = None
         fake_telegram_client.clients_loop = None
@@ -1442,7 +1457,8 @@ class GroupSummariesCacheEmptyTests(unittest.TestCase):
         fake_utils.extract_all_channels = lambda text: []
         fake_utils.text_hash = lambda text: __import__('hashlib').sha256(text.encode()).hexdigest()[:16]
         fake_utils.count_characters = lambda text: len(text)
-        fake_utils.enforce_summary_length = lambda text, max_chars: text[:max_chars]
+        fake_utils.enforce_summary_length = lambda text, max_chars: text
+        fake_utils.strip_meta_artifacts = lambda text: text
         fake_telegram_client = types.ModuleType("telegram_client")
         fake_telegram_client.user_client = None
         fake_telegram_client.clients_loop = None
@@ -1514,7 +1530,8 @@ class SharedSaveSummaryHelperTests(unittest.TestCase):
         fake_utils.now_iso = lambda: "2026-01-01T00:00:00"
         fake_utils.text_hash = lambda text: __import__('hashlib').sha256(text.encode()).hexdigest()[:16]
         fake_utils.count_characters = lambda text: len(text)
-        fake_utils.enforce_summary_length = lambda text, max_chars: text[:max_chars]
+        fake_utils.enforce_summary_length = lambda text, max_chars: text
+        fake_utils.strip_meta_artifacts = lambda text: text
         fake_telegram_client = types.ModuleType("telegram_client")
         fake_telegram_client.user_client = None
         fake_telegram_client.clients_loop = None
@@ -1599,7 +1616,8 @@ class UpdateSummaryLengthGuardTests(unittest.TestCase):
         fake_utils.now_iso = lambda: "2026-01-01T00:00:00"
         fake_utils.text_hash = lambda text: __import__('hashlib').sha256(text.encode()).hexdigest()[:16]
         fake_utils.count_characters = lambda text: len(text)
-        fake_utils.enforce_summary_length = lambda text, max_chars: text[:max_chars]
+        fake_utils.enforce_summary_length = lambda text, max_chars: text
+        fake_utils.strip_meta_artifacts = lambda text: text
 
         stubs = {
             "dotenv": fake_dotenv,
@@ -1861,6 +1879,7 @@ class UpdateSummaryEnforcesLengthTests(unittest.TestCase):
         fake_utils.text_hash = lambda text: __import__('hashlib').sha256(text.encode()).hexdigest()[:16]
         fake_utils.count_characters = lambda text: len(text)
         fake_utils.enforce_summary_length = lambda text, max_chars: text[:max_chars]
+        fake_utils.strip_meta_artifacts = lambda text: text
 
         stubs = {
             "dotenv": fake_dotenv,
@@ -1943,6 +1962,7 @@ class UpdateSummaryFallbackUsesCountCharactersTests(unittest.TestCase):
         fake_utils.text_hash = lambda text: __import__('hashlib').sha256(text.encode()).hexdigest()[:16]
         fake_utils.count_characters = count_characters_html
         fake_utils.enforce_summary_length = lambda text, max_chars: text
+        fake_utils.strip_meta_artifacts = lambda text: text
 
         stubs = {
             "dotenv": fake_dotenv,
@@ -2026,6 +2046,7 @@ class SaveUpdatedSummaryNoRedundantEnforceTests(unittest.TestCase):
         fake_utils.text_hash = lambda text: __import__('hashlib').sha256(text.encode()).hexdigest()[:16]
         fake_utils.count_characters = lambda text: len(text)
         fake_utils.enforce_summary_length = lambda text, max_chars: text
+        fake_utils.strip_meta_artifacts = lambda text: text
         fake_telegram_client = types.ModuleType("telegram_client")
         fake_telegram_client.user_client = None
         fake_telegram_client.clients_loop = None
@@ -2178,7 +2199,8 @@ class FallbackDedupLinksTests(unittest.TestCase):
         fake_utils.now_iso = lambda: "2026-01-01T00:00:00"
         fake_utils.text_hash = lambda text: __import__('hashlib').sha256(text.encode()).hexdigest()[:16]
         fake_utils.count_characters = lambda text: len(text)
-        fake_utils.enforce_summary_length = lambda text, max_chars: text[:max_chars]
+        fake_utils.enforce_summary_length = lambda text, max_chars: text
+        fake_utils.strip_meta_artifacts = lambda text: text
 
         stubs = {
             "dotenv": fake_dotenv,
@@ -2272,6 +2294,7 @@ class SaveUpdatedSummaryWithSummariesParamTests(unittest.TestCase):
         fake_utils.text_hash = lambda text: __import__('hashlib').sha256(text.encode()).hexdigest()[:16]
         fake_utils.count_characters = lambda text: len(text)
         fake_utils.enforce_summary_length = lambda text, max_chars: text
+        fake_utils.strip_meta_artifacts = lambda text: text
         fake_telegram_client = types.ModuleType("telegram_client")
         fake_telegram_client.user_client = None
         fake_telegram_client.clients_loop = None

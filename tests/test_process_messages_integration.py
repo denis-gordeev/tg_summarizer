@@ -65,6 +65,7 @@ def _setup_stubs():
     fake_utils.count_characters = lambda text: len(text)
     fake_utils.text_hash = lambda text: hashlib.sha256(text.encode()).hexdigest()[:16]
     fake_utils.enforce_summary_length = lambda text, max_chars: text[:max_chars]
+    fake_utils.strip_meta_artifacts = lambda text: text
     sys.modules["utils"] = fake_utils
 
     # --- Stub config ---
@@ -1984,6 +1985,7 @@ class DedupCoveredMessagesExtractionTests(unittest.TestCase):
         fake_utils.extract_links = lambda text: []
         fake_utils.count_characters = len
         fake_utils.enforce_summary_length = lambda text, max_chars: text
+        fake_utils.strip_meta_artifacts = lambda text: text
         fake_utils.text_hash = lambda text: hashlib.sha256(text.encode()).hexdigest()[:16]
 
         fake_telegram_client = types.ModuleType("telegram_client")

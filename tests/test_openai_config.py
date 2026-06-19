@@ -1670,5 +1670,174 @@ class CircuitBreakerHalfOpenTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(cost_warnings), 0)
 
 
+class EmptyChoicesGuardTests(unittest.IsolatedAsyncioTestCase):
+    """Tests for empty choices guard in call_openai."""
+
+    async def test_call_openai_returns_empty_on_empty_choices(self):
+        """call_openai should return '' when OpenAI returns empty choices array."""
+        import importlib
+        import sys
+        import types
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_openai = types.ModuleType("openai")
+
+        class FakeAsyncOpenAI:
+            def __init__(self, api_key, **kwargs):
+                self.api_key = api_key
+                self.chat = types.SimpleNamespace(
+                    completions=types.SimpleNamespace(
+                        create=AsyncMock(return_value=type("Response", (), {"choices": []})())
+                    )
+                )
+
+        class FakeOpenAIError(Exception):
+            pass
+
+        fake_openai.AsyncOpenAI = FakeAsyncOpenAI
+        fake_openai.OpenAI = FakeAsyncOpenAI
+        fake_openai.APIError = FakeOpenAIError
+        fake_openai.RateLimitError = type("RateLimitError", (FakeOpenAIError,), {"status_code": None})
+        fake_openai.APIConnectionError = type("APIConnectionError", (FakeOpenAIError,), {})
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv, "openai": fake_openai}):
+            with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+                sys.modules.pop("config", None)
+                sys.modules.pop("utils", None)
+                config = importlib.import_module("config")
+                utils = importlib.import_module("utils")
+
+        with patch.object(utils.logger, "warning") as mock_warn:
+            result = await utils.call_openai("system", "user")
+            self.assertEqual(result, "")
+            warn_msgs = [str(c) for c in mock_warn.call_args_list]
+            self.assertTrue(any("empty choices" in w.lower() for w in warn_msgs),
+                            "Expected empty choices warning")
+
+
+class ResetCircuitBreakerTests(unittest.IsolatedAsyncioTestCase):
+    """Tests for reset_circuit_breaker function."""
+
+    async def test_reset_circuit_breaker_clears_state(self):
+        """reset_circuit_breaker should clear failures and open_since."""
+        import importlib
+        import sys
+        import types
+        from unittest.mock import MagicMock, patch
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_openai = types.ModuleType("openai")
+
+        class FakeAsyncOpenAI:
+            def __init__(self, api_key, **kwargs):
+                pass
+
+        class FakeOpenAIError(Exception):
+            pass
+
+        fake_openai.AsyncOpenAI = FakeAsyncOpenAI
+        fake_openai.OpenAI = FakeAsyncOpenAI
+        fake_openai.APIError = FakeOpenAIError
+        fake_openai.RateLimitError = type("RateLimitError", (FakeOpenAIError,), {"status_code": None})
+        fake_openai.APIConnectionError = type("APIConnectionError", (FakeOpenAIError,), {})
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv, "openai": fake_openai}):
+            with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+                sys.modules.pop("config", None)
+                sys.modules.pop("utils", None)
+                config = importlib.import_module("config")
+                utils = importlib.import_module("utils")
+
+        utils._CIRCUIT_BREAKER_FAILURES = 5
+        utils._CIRCUIT_BREAKER_OPEN_SINCE = 123.45
+
+        utils.reset_circuit_breaker()
+
+        self.assertEqual(utils._CIRCUIT_BREAKER_FAILURES, 0)
+        self.assertEqual(utils._CIRCUIT_BREAKER_OPEN_SINCE, 0.0)
+
+
+class TokenUsageTests(unittest.IsolatedAsyncioTestCase):
+    """Tests for cumulative token usage tracking."""
+
+    async def _setup_utils(self):
+        import importlib
+        import sys
+        import types
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_openai = types.ModuleType("openai")
+
+        fake_usage = MagicMock()
+        fake_usage.prompt_tokens = 100
+        fake_usage.completion_tokens = 50
+        fake_usage.total_tokens = 150
+
+        class FakeAsyncOpenAI:
+            def __init__(self, api_key, **kwargs):
+                self.api_key = api_key
+                self.chat = types.SimpleNamespace(
+                    completions=types.SimpleNamespace(
+                        create=AsyncMock(return_value=type(
+                            "Response", (),
+                            {
+                                "choices": [type("Choice", (), {"message": type("Message", (), {"content": "ok"})()})()],
+                                "usage": fake_usage,
+                            },
+                        )())
+                    )
+                )
+
+        class FakeOpenAIError(Exception):
+            pass
+
+        fake_openai.AsyncOpenAI = FakeAsyncOpenAI
+        fake_openai.OpenAI = FakeAsyncOpenAI
+        fake_openai.APIError = FakeOpenAIError
+        fake_openai.RateLimitError = type("RateLimitError", (FakeOpenAIError,), {"status_code": None})
+        fake_openai.APIConnectionError = type("APIConnectionError", (FakeOpenAIError,), {})
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv, "openai": fake_openai}):
+            with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+                sys.modules.pop("config", None)
+                sys.modules.pop("utils", None)
+                config = importlib.import_module("config")
+                utils = importlib.import_module("utils")
+
+        return utils
+
+    async def test_token_usage_accumulates_across_calls(self):
+        """Cumulative token counters should accumulate across multiple call_openai calls."""
+        utils = await self._setup_utils()
+
+        utils.reset_token_usage()
+        self.assertEqual(utils.get_token_usage(), {"prompt_tokens": 0, "completion_tokens": 0})
+
+        await utils.call_openai("system", "user")
+        usage = utils.get_token_usage()
+        self.assertEqual(usage["prompt_tokens"], 100)
+        self.assertEqual(usage["completion_tokens"], 50)
+
+        await utils.call_openai("system", "user")
+        usage = utils.get_token_usage()
+        self.assertEqual(usage["prompt_tokens"], 200)
+        self.assertEqual(usage["completion_tokens"], 100)
+
+    async def test_reset_token_usage_clears_counters(self):
+        """reset_token_usage should reset both counters to 0."""
+        utils = await self._setup_utils()
+
+        await utils.call_openai("system", "user")
+        self.assertGreater(utils.get_token_usage()["prompt_tokens"], 0)
+
+        utils.reset_token_usage()
+        self.assertEqual(utils.get_token_usage(), {"prompt_tokens": 0, "completion_tokens": 0})
+
+
 if __name__ == "__main__":
     unittest.main()

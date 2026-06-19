@@ -88,6 +88,7 @@ def _stub_dependencies(fake_openai_response: str = "[1] New AI breakthrough"):
     ]
     fake_utils.count_characters = _stub_count_characters
     fake_utils.enforce_summary_length = _stub_enforce_summary_length
+    fake_utils.strip_meta_artifacts = lambda text: text
 
     async def fake_call_openai(system_prompt, user_content, max_tokens=None, **kwargs):
         return fake_openai_response
@@ -554,6 +555,97 @@ class ExactHashDedupTests(unittest.TestCase):
         )
         result = mp._remove_intra_batch_duplicates(msgs)
         self.assertEqual(len(result), 2)
+
+
+class LengthPreFilterDedupTests(unittest.TestCase):
+    """Tests for length-based pre-filter in _remove_intra_batch_duplicates."""
+
+    def test_different_length_texts_not_compared_by_sequencematcher(self):
+        """Texts differing in length by >50% should skip SequenceMatcher."""
+        stub_modules = _stub_dependencies()
+        mp = _import_message_processor(stub_modules)
+        short_text = "AI news" + " x" * 50
+        long_text = "AI news" + " y" * 200
+        msgs = _make_messages(
+            channels=["@a", "@b"],
+            texts=[short_text, long_text],
+        )
+        result = mp._remove_intra_batch_duplicates(msgs)
+        self.assertEqual(len(result), 2, "Length-different texts should both be kept")
+
+    def test_similar_length_texts_still_deduplicated(self):
+        """Texts of similar length should still go through SequenceMatcher."""
+        stub_modules = _stub_dependencies()
+        mp = _import_message_processor(stub_modules)
+        base = "AI breakthrough in natural language processing " * 10
+        near_dup = base + "extra word"
+        msgs = _make_messages(
+            channels=["@a", "@b"],
+            texts=[base, near_dup],
+        )
+        result = mp._remove_intra_batch_duplicates(msgs)
+        self.assertLessEqual(len(result), 2)
+
+
+class StripMetaArtifactsTests(unittest.TestCase):
+    """Tests for strip_meta_artifacts removing LLM intro/outro phrases."""
+
+    def _import_utils(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_openai = types.ModuleType("openai")
+
+        class FakeOpenAI:
+            def __init__(self, api_key, **kwargs):
+                pass
+
+        class FakeOpenAIError(Exception):
+            pass
+
+        fake_openai.OpenAI = FakeOpenAI
+        fake_openai.AsyncOpenAI = FakeOpenAI
+        fake_openai.APIError = FakeOpenAIError
+        fake_openai.RateLimitError = type("RateLimitError", (FakeOpenAIError,), {"status_code": None})
+        fake_openai.APIConnectionError = type("APIConnectionError", (FakeOpenAIError,), {})
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv, "openai": fake_openai}):
+            with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+                sys.modules.pop("config", None)
+                sys.modules.pop("utils", None)
+                import importlib
+                return importlib.import_module("utils")
+
+    def test_strips_intro_phrase(self):
+        utils = self._import_utils()
+        text = "В этом дайджесте мы рассмотрим новые модели\n<b>AI news</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("В этом дайджесте", result)
+        self.assertIn("<b>AI news</b>", result)
+
+    def test_strips_outro_phrase(self):
+        utils = self._import_utils()
+        text = "<b>AI news</b>\nИтого, рынок растёт"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Итого", result)
+        self.assertIn("<b>AI news</b>", result)
+
+    def test_preserves_clean_summary(self):
+        utils = self._import_utils()
+        text = "<b>🧠 AI модели</b>\nGPT-5 выпущен [1]"
+        result = utils.strip_meta_artifacts(text)
+        self.assertEqual(result, text)
+
+    def test_strips_итак_intro(self):
+        utils = self._import_utils()
+        text = "Итак, подведём итоги\n<b>News</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Итак", result)
+
+    def test_strips_в_заключение(self):
+        utils = self._import_utils()
+        text = "<b>News</b>\nВ заключение отметим что"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("В заключение", result)
 
 
 if __name__ == "__main__":
