@@ -1669,6 +1669,25 @@ class CircuitBreakerHalfOpenTests(unittest.IsolatedAsyncioTestCase):
         cost_warnings = [c for c in mock_warn.call_args_list if "cost table" in str(c)]
         self.assertEqual(len(cost_warnings), 0)
 
+    async def test_cost_estimate_for_gpt41_nano(self):
+        """Cost estimate for gpt-4.1-nano uses its own pricing ($0.10/$0.40 per 1M)."""
+        config, utils = await self._setup_utils()
+
+        cost = utils._estimate_cost_usd("gpt-4.1-nano", 1_000_000, 1_000_000)
+        self.assertAlmostEqual(cost, 0.10 + 0.40, places=2)
+
+    async def test_no_warning_for_gpt41_nano(self):
+        """gpt-4.1-nano is in cost table — no warning should be emitted."""
+        config, utils = await self._setup_utils()
+
+        config.OPENAI_MODEL = "gpt-4.1-nano"
+        with patch.object(utils, "openai_client", None), \
+             patch.object(utils, "AsyncOpenAI", return_value=Mock()) as mock_openai, \
+             patch.object(utils.logger, "warning") as mock_warn:
+            await utils.call_openai("sys", "user")
+        cost_warnings = [c for c in mock_warn.call_args_list if "cost table" in str(c)]
+        self.assertEqual(len(cost_warnings), 0)
+
 
 class EmptyChoicesGuardTests(unittest.IsolatedAsyncioTestCase):
     """Tests for empty choices guard in call_openai."""

@@ -118,15 +118,16 @@ def download_from_s3() -> None:
             pass
 
 
-def upload_to_s3() -> None:
+def upload_to_s3() -> dict:
+    """Upload state files to S3. Returns dict with uploaded/failed/skipped_empty counts."""
     bucket = os.getenv("STATE_S3_BUCKET", "").strip()
     if not bucket:
         logger.debug("STATE_S3_BUCKET is not set; skipping S3 upload")
-        return
+        return {"uploaded": 0, "failed": 0, "skipped_empty": 0}
 
     client = _get_s3_client()
     if client is None:
-        return
+        return {"uploaded": 0, "failed": 0, "skipped_empty": 0}
 
     prefix = os.getenv("STATE_S3_PREFIX", "")
     uploaded = 0
@@ -159,3 +160,4 @@ def upload_to_s3() -> None:
             failed += 1
 
     logger.info("S3 upload: %d files uploaded, %d failed, %d skipped (empty)", uploaded, failed, skipped_empty)
+    return {"uploaded": uploaded, "failed": failed, "skipped_empty": skipped_empty}

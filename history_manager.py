@@ -25,7 +25,7 @@ from config import (
     GROUP_SUMMARY_MAX_LENGTH,
 )
 from models import MessageInfo, SummaryInfo
-from utils import call_openai, extract_links, count_characters, enforce_summary_length, load_json_file, save_json_file, now_iso, text_hash
+from utils import call_openai, extract_links, extract_all_channels, count_characters, enforce_summary_length, load_json_file, save_json_file, now_iso, text_hash
 
 logger = logging.getLogger(__name__)
 
@@ -142,8 +142,6 @@ async def _restore_summaries_from_channel(
                 break
             logger.debug("Processing message: id=%d, date=%s", msg.id, msg.date)
             if msg.text and msg.text.strip():
-                from utils import extract_all_channels
-
                 channels = extract_all_channels(msg.text)
 
                 summary_info = SummaryInfo(

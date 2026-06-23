@@ -2,6 +2,38 @@
 
 Живой список задач для автоматических раундов.
 
+## Completed in 2026-06-23 round (Lambda hardening round 31, prompt anti-list, cost guard, S3 observability, module import cleanup)
+
+- **Prompt quality — anti-list rule**: Added "Без нумерованных и маркированных списков — только сплошной текст с абзацами" and "Без подзаголовков внутри раздела — один заголовок на тему" rules to both [`CHANNEL_SUMMARY_PROMPT`](prompts.py) and [`GROUP_SUMMARY_PROMPT`](prompts.py). LLMs frequently produce verbose bullet/numbered lists and nested sub-headers in Telegram digests, which render poorly and waste tokens. Directly targets the AUTOWORK_INSTRUCTIONS goal of improving quality and conciseness.
+- **Cost monitoring — gpt-4.1-nano in cost table**: Added `"gpt-4.1-nano": (0.10, 0.40)` to [`_COST_PER_MILLION`](utils.py) cost lookup. gpt-4.1-nano is cheaper than gpt-4o-mini ($0.10/$0.40 vs $0.15/$0.60 per 1M tokens), making it a valid model per AUTOWORK_INSTRUCTIONS cost constraint. Without this entry, using gpt-4.1-nano would trigger a false cost-table warning.
+- **Cost monitoring — CloudWatch cost alarm**: Added `OpenAICostAlarm` in [`template.yaml`](template.yaml) — alerts when `EstimatedCostUSD` EMF metric exceeds $0.10 per invocation (Maximum statistic, 5-minute period). Uses the existing EMF metric from [`_emit_openai_latency()`](utils.py). Enables proactive cost anomaly detection without manual CloudWatch log inspection.
+- **Model guard — AllowedValues in template.yaml**: Added `AllowedValues` constraint to `OpenAIModel` parameter in [`template.yaml`](template.yaml) — restricts to `"gpt-4o-mini"`, `"gpt-4.1-mini"`, `"gpt-4.1-nano"`. Prevents accidental SAM deployment with expensive models (e.g., gpt-4, gpt-4o) that would violate the AUTOWORK_INSTRUCTIONS cost constraint.
+- **Observability — S3 upload status in Lambda response**: Changed [`upload_to_s3()`](s3_sync.py) to return `{"uploaded": N, "failed": N, "skipped_empty": N}` dict instead of `None`. Both success and error Lambda responses now include `s3_upload` field. Previously, S3 upload stats were only in CloudWatch logs — now available in the structured Lambda response for programmatic monitoring.
+- **Quality — expanded strip_meta_artifacts**: Added `"другие ссылки:"` pattern to [`_META_ARTIFACT_PATTERNS`](utils.py). LLMs sometimes add "Другие ссылки:" as a standalone section header in summaries despite prompt rules prohibiting it. The pattern only matches lines with trailing colon after "другие ссылки", so inline usage like "Другие ссылки в статье" is preserved.
+- **Code quality — module-level import**: Moved `from utils import extract_all_channels` from local import inside [`_restore_summaries_from_channel()`](history_manager.py) to the module-level import block. `extract_all_channels` has no circular dependency risk — it only depends on [`channel_manager`](channel_manager.py) and [`utils`](utils.py), which are already imported at module level. Eliminates per-call import overhead.
+- **Tests added**: 11 new tests (total 319, up from 308):
+  - `test_strips_другие_ссылки_outro`: verifies "Другие ссылки:" section header stripped from summary end
+  - `test_preserves_другие_ссылки_without_colon`: verifies "Другие ссылки в статье" preserved (no colon after "ссылки")
+  - `test_cost_estimate_for_gpt41_nano`: verifies gpt-4.1-nano cost calculation ($0.10/$0.40 per 1M tokens)
+  - `test_no_warning_for_gpt41_nano`: verifies no cost-table warning for gpt-4.1-nano
+  - `test_channel_summary_prompt_prohibits_lists`: verifies "Без нумерованных и маркированных списков" in prompts
+  - `test_channel_summary_prompt_prohibits_subheaders`: verifies "Без подзаголовков внутри раздела" in prompts
+  - `test_handler_includes_s3_upload_status_on_success`: verifies `s3_upload` dict in success Lambda response
+  - `test_handler_includes_s3_upload_status_on_error`: verifies `s3_upload` dict in error Lambda response
+  - `test_upload_returns_counts_dict`: verifies `upload_to_s3()` returns dict with uploaded/failed/skipped_empty
+  - `test_upload_returns_empty_dict_when_no_bucket`: verifies zeroed dict when no S3 bucket configured
+  - `test_extract_all_channels_is_module_level_import`: verifies `extract_all_channels` is module-level import in history_manager (AST check)
+- Updated test stubs in [`tests/test_lambda_handler.py`](tests/test_lambda_handler.py) — all `upload_to_s3` patches now return `{"uploaded": N, "failed": N, "skipped_empty": N}` dict.
+- Updated test stubs in [`tests/test_history_manager.py`](tests/test_history_manager.py) — added `extract_all_channels` to all `fake_utils` stubs.
+- All 319 tests pass without errors.
+
+## Next actions
+
+- Consider adding Lambda warmer to avoid cold-start Telegram reconnection overhead
+- Consider adding CloudWatch dashboard for circuit breaker state (open/closed/half-open transitions)
+- Consider adding CloudWatch metric filter on `token_usage` field for cost alerting
+- Consider evaluating gpt-4.1-nano as default model for cost reduction (cheaper than gpt-4o-mini)
+
 ## Completed in 2026-06-19 round (Lambda hardening round 30, meta-artifact stripping, empty choices guard, circuit breaker reset, token usage tracking, dedup length pre-filter)
 
 - **Summary quality — strip LLM meta-artifacts**: Added [`strip_meta_artifacts()`](utils.py) with regex patterns that strip common LLM intro/outro phrases ("в этом дайджесте", "итого", "в заключение", "подведя итог", "в итоге", "итак", "в общем", "вкратце", "как видно") from summary text. Applied in both [`summarize_text()`](message_processor.py) and [`summarize_group_text()`](message_processor.py) before `enforce_summary_length()`. Directly targets the AUTOWORK_INSTRUCTIONS goal of improving quality and conciseness — despite prompt rules prohibiting these phrases, LLMs still occasionally produce them. The post-processor catches violations cheaply.
@@ -34,10 +66,8 @@
 ## Next actions
 
 - Consider adding Lambda warmer to avoid cold-start Telegram reconnection overhead
-- Consider adding structured error response body for S3 upload failures (separate from Lambda status)
 - Consider adding CloudWatch dashboard for circuit breaker state (open/closed/half-open transitions)
-- Consider adding gpt-4.1-mini to template.yaml as an alternative model option
-- Consider adding CloudWatch metric filter on `token_usage` field for cost alerting
+- Consider evaluating gpt-4.1-nano as default model for cost reduction (cheaper than gpt-4o-mini)
 
 - **Bug fix — template.yaml temperature drift**: Fixed `OpenAISummaryTemperature` default in [`template.yaml`](template.yaml) from "0.3" to "0.1", syncing with the actual default in [`config.py`](config.py) (changed in round 28). The mismatch meant new SAM deployments would use 0.3 instead of the intended 0.1, producing more verbose summaries.
 - **Prompt quality — anti-verbosity rule**: Added "Каждый абзац — одна мысль. Без воды и пояснений очевидного" rule to both [`CHANNEL_SUMMARY_PROMPT`](prompts.py) and [`GROUP_SUMMARY_PROMPT`](prompts.py). Directly targets the AUTOWORK_INSTRUCTIONS goal of improving quality and conciseness by discouraging the LLM from padding summaries with filler explanations.

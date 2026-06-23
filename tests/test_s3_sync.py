@@ -182,6 +182,44 @@ class S3SyncOperationTests(unittest.TestCase):
                 os.chdir(previous_cwd)
 
 
+    def test_upload_returns_counts_dict(self):
+        """upload_to_s3 should return a dict with uploaded/failed/skipped_empty counts."""
+        client = FakeS3Client()
+
+        with tempfile.TemporaryDirectory() as tmpdir, \
+             patch.dict(
+                 os.environ,
+                 {
+                     "STATE_S3_BUCKET": "bucket",
+                     "STATE_S3_PREFIX": "prefix",
+                     "STATE_SYNC_FILES": "state/a.json",
+                 },
+                 clear=False,
+             ), \
+             patch.object(s3_sync, "_get_s3_client", return_value=client):
+            previous_cwd = os.getcwd()
+            os.chdir(tmpdir)
+            try:
+                Path("state").mkdir()
+                Path("state/a.json").write_text("content", encoding="utf-8")
+                result = s3_sync.upload_to_s3()
+                self.assertIsInstance(result, dict)
+                self.assertEqual(result["uploaded"], 1)
+                self.assertEqual(result["failed"], 0)
+                self.assertEqual(result["skipped_empty"], 0)
+            finally:
+                os.chdir(previous_cwd)
+
+    def test_upload_returns_empty_dict_when_no_bucket(self):
+        """upload_to_s3 should return zeroed dict when no S3 bucket is configured."""
+        with patch.dict(os.environ, {"STATE_S3_BUCKET": ""}, clear=False):
+            result = s3_sync.upload_to_s3()
+            self.assertIsInstance(result, dict)
+            self.assertEqual(result["uploaded"], 0)
+            self.assertEqual(result["failed"], 0)
+            self.assertEqual(result["skipped_empty"], 0)
+
+
 class S3ClientCachingTests(unittest.TestCase):
     def test_get_s3_client_caches_client(self):
         """_get_s3_client should return the same client on subsequent calls."""

@@ -72,7 +72,7 @@ class HandlerTests(unittest.TestCase):
 
         with patch.object(self.lambda_handler.os, "chdir") as mock_chdir, \
              patch.object(self.lambda_handler, "download_from_s3") as mock_download, \
-             patch.object(self.lambda_handler, "upload_to_s3") as mock_upload, \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 1, "failed": 0, "skipped_empty": 0}) as mock_upload, \
              patch.object(self.lambda_handler, "run_summarizer", async_mock) as mock_run, \
              patch.object(self.lambda_handler.asyncio, "run", side_effect=_run_and_close) as mock_asyncio_run:
             result = self.lambda_handler.handler(event, context=None)
@@ -109,7 +109,7 @@ class HandlerTests(unittest.TestCase):
 
         with patch.object(self.lambda_handler.os, "chdir"), \
              patch.object(self.lambda_handler, "download_from_s3"), \
-             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 0, "failed": 0, "skipped_empty": 0}), \
              patch.object(self.lambda_handler, "run_summarizer", async_mock) as mock_run, \
              patch.object(self.lambda_handler.asyncio, "run", side_effect=_run_and_close):
             self.lambda_handler.handler(event, context=fake_context)
@@ -134,7 +134,7 @@ class HandlerTests(unittest.TestCase):
 
         with patch.object(self.lambda_handler.os, "chdir"), \
              patch.object(self.lambda_handler, "download_from_s3"), \
-             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 0, "failed": 0, "skipped_empty": 0}), \
              patch.object(self.lambda_handler, "run_summarizer", async_mock), \
              patch.object(self.lambda_handler.asyncio, "run", side_effect=_run_and_close):
             result = self.lambda_handler.handler(event, context=fake_context)
@@ -152,7 +152,7 @@ class HandlerTests(unittest.TestCase):
 
         with patch.object(self.lambda_handler.os, "chdir"), \
              patch.object(self.lambda_handler, "download_from_s3"), \
-             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 0, "failed": 0, "skipped_empty": 0}), \
              patch.object(self.lambda_handler, "run_summarizer", async_mock) as mock_run, \
              patch.object(self.lambda_handler.asyncio, "run", side_effect=_run_and_close):
             self.lambda_handler.handler(event, context=None)
@@ -172,7 +172,7 @@ class HandlerTests(unittest.TestCase):
 
         with patch.object(self.lambda_handler.os, "chdir"), \
              patch.object(self.lambda_handler, "download_from_s3"), \
-             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 0, "failed": 0, "skipped_empty": 0}), \
              patch.object(self.lambda_handler, "run_summarizer", async_mock), \
              patch.object(self.lambda_handler.asyncio, "run", side_effect=_run_and_close), \
              patch.object(self.lambda_handler.logger, "info") as mock_log:
@@ -191,7 +191,7 @@ class HandlerTests(unittest.TestCase):
 
         with patch.object(self.lambda_handler.os, "chdir"), \
              patch.object(self.lambda_handler, "download_from_s3"), \
-             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 0, "failed": 0, "skipped_empty": 0}), \
              patch.object(self.lambda_handler, "run_summarizer", _raise):
             result = self.lambda_handler.handler(event, context=None)
 
@@ -208,7 +208,7 @@ class HandlerTests(unittest.TestCase):
 
         with patch.object(self.lambda_handler.os, "chdir"), \
              patch.object(self.lambda_handler, "download_from_s3"), \
-             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 0, "failed": 0, "skipped_empty": 0}), \
              patch.object(self.lambda_handler, "run_summarizer", async_mock), \
              patch.object(self.lambda_handler.asyncio, "run", side_effect=_run_and_close):
             result = self.lambda_handler.handler(event, context=None)
@@ -224,7 +224,7 @@ class HandlerTests(unittest.TestCase):
 
         with patch.object(self.lambda_handler.os, "chdir"), \
              patch.object(self.lambda_handler, "download_from_s3"), \
-             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 0, "failed": 0, "skipped_empty": 0}), \
              patch.object(self.lambda_handler, "run_summarizer", _raise):
             result = self.lambda_handler.handler(event, context=None)
 
@@ -241,7 +241,7 @@ class HandlerTests(unittest.TestCase):
 
         with patch.object(self.lambda_handler.os, "chdir"), \
              patch.object(self.lambda_handler, "download_from_s3"), \
-             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 0, "failed": 0, "skipped_empty": 0}), \
              patch.dict(sys.modules, {"config": types.SimpleNamespace(validate_config=_raise_value_error)}):
             result = self.lambda_handler.handler(event, context=None)
 
@@ -259,7 +259,7 @@ class HandlerTests(unittest.TestCase):
 
         with patch.object(self.lambda_handler.os, "chdir"), \
              patch.object(self.lambda_handler, "download_from_s3"), \
-             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 0, "failed": 0, "skipped_empty": 0}), \
              patch.object(self.lambda_handler, "run_summarizer", async_mock), \
              patch.object(self.lambda_handler.asyncio, "run", side_effect=_run_and_close), \
              patch.object(self.lambda_handler.logger, "info") as mock_log:
@@ -294,7 +294,7 @@ class HandlerTests(unittest.TestCase):
 
         with patch.object(self.lambda_handler.os, "chdir"), \
              patch.object(self.lambda_handler, "download_from_s3"), \
-             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 0, "failed": 0, "skipped_empty": 0}), \
              patch.object(self.lambda_handler, "run_summarizer", _raise):
             result = self.lambda_handler.handler(event, context=None)
 
@@ -309,7 +309,7 @@ class HandlerTests(unittest.TestCase):
 
         with patch.object(self.lambda_handler.os, "chdir"), \
              patch.object(self.lambda_handler, "download_from_s3"), \
-             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 0, "failed": 0, "skipped_empty": 0}), \
              patch.dict(sys.modules, {"config": types.SimpleNamespace(validate_config=_raise_value_error)}):
             result = self.lambda_handler.handler(event, context=None)
 
@@ -328,7 +328,7 @@ class HandlerTests(unittest.TestCase):
 
         with patch.object(self.lambda_handler.os, "chdir"), \
              patch.object(self.lambda_handler, "download_from_s3"), \
-             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 0, "failed": 0, "skipped_empty": 0}), \
              patch.object(self.lambda_handler, "run_summarizer", async_mock), \
              patch.object(self.lambda_handler.asyncio, "run", side_effect=_run_and_close), \
              patch.object(self.lambda_handler.logger, "info") as mock_log:
@@ -349,7 +349,7 @@ class HandlerTests(unittest.TestCase):
 
         with patch.object(self.lambda_handler.os, "chdir"), \
              patch.object(self.lambda_handler, "download_from_s3"), \
-             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 0, "failed": 0, "skipped_empty": 0}), \
              patch.object(self.lambda_handler, "run_summarizer", async_mock), \
              patch.object(self.lambda_handler.asyncio, "run", side_effect=_run_and_close):
             result = self.lambda_handler.handler(event, context=None)
@@ -367,7 +367,7 @@ class HandlerTests(unittest.TestCase):
 
         with patch.object(self.lambda_handler.os, "chdir"), \
              patch.object(self.lambda_handler, "download_from_s3"), \
-             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 0, "failed": 0, "skipped_empty": 0}), \
              patch.object(self.lambda_handler, "run_summarizer", _raise):
             result = self.lambda_handler.handler(event, context=None)
 
@@ -386,7 +386,7 @@ class HandlerTests(unittest.TestCase):
 
         with patch.object(self.lambda_handler.os, "chdir"), \
              patch.object(self.lambda_handler, "download_from_s3"), \
-             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 0, "failed": 0, "skipped_empty": 0}), \
              patch.object(self.lambda_handler, "run_summarizer", async_mock), \
              patch.object(self.lambda_handler.asyncio, "run", side_effect=_run_and_close), \
              patch.object(self.lambda_handler.logger, "info") as mock_log:
@@ -408,7 +408,7 @@ class HandlerTests(unittest.TestCase):
 
         with patch.object(self.lambda_handler.os, "chdir"), \
              patch.object(self.lambda_handler, "download_from_s3"), \
-             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 0, "failed": 0, "skipped_empty": 0}), \
              patch.object(self.lambda_handler, "run_summarizer", async_mock), \
              patch.object(self.lambda_handler.asyncio, "run", side_effect=_run_and_close), \
              patch.object(self.lambda_handler.logger, "info") as mock_log:
@@ -429,7 +429,7 @@ class HandlerTests(unittest.TestCase):
 
         with patch.object(self.lambda_handler.os, "chdir"), \
              patch.object(self.lambda_handler, "download_from_s3"), \
-             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 0, "failed": 0, "skipped_empty": 0}), \
              patch.object(self.lambda_handler, "run_summarizer", async_mock), \
              patch.object(self.lambda_handler.asyncio, "run", side_effect=_run_and_close):
             result = self.lambda_handler.handler(event, context=None)
@@ -447,7 +447,7 @@ class HandlerTests(unittest.TestCase):
 
         with patch.object(self.lambda_handler.os, "chdir"), \
              patch.object(self.lambda_handler, "download_from_s3"), \
-             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 0, "failed": 0, "skipped_empty": 0}), \
              patch.object(self.lambda_handler, "run_summarizer", _raise):
             result = self.lambda_handler.handler(event, context=None)
 
@@ -465,7 +465,7 @@ class HandlerTests(unittest.TestCase):
 
         with patch.object(self.lambda_handler.os, "chdir"), \
              patch.object(self.lambda_handler, "download_from_s3"), \
-             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 0, "failed": 0, "skipped_empty": 0}), \
              patch.object(self.lambda_handler, "run_summarizer", async_mock), \
              patch.object(self.lambda_handler.asyncio, "run", side_effect=_run_and_close), \
              patch.object(self.lambda_handler, "reset_circuit_breaker") as mock_reset:
@@ -484,7 +484,7 @@ class HandlerTests(unittest.TestCase):
 
         with patch.object(self.lambda_handler.os, "chdir"), \
              patch.object(self.lambda_handler, "download_from_s3"), \
-             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 0, "failed": 0, "skipped_empty": 0}), \
              patch.object(self.lambda_handler, "run_summarizer", async_mock), \
              patch.object(self.lambda_handler.asyncio, "run", side_effect=_run_and_close), \
              patch.object(self.lambda_handler, "reset_token_usage") as mock_reset:
@@ -503,7 +503,7 @@ class HandlerTests(unittest.TestCase):
 
         with patch.object(self.lambda_handler.os, "chdir"), \
              patch.object(self.lambda_handler, "download_from_s3"), \
-             patch.object(self.lambda_handler, "upload_to_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 0, "failed": 0, "skipped_empty": 0}), \
              patch.object(self.lambda_handler, "run_summarizer", async_mock), \
              patch.object(self.lambda_handler.asyncio, "run", side_effect=_run_and_close), \
              patch.object(self.lambda_handler.logger, "info") as mock_log:
@@ -512,6 +512,44 @@ class HandlerTests(unittest.TestCase):
         token_logs = [call for call in mock_log.call_args_list
                       if "tokens=" in str(call)]
         self.assertTrue(len(token_logs) > 0, "Expected 'tokens=' in completion log")
+
+    def test_handler_includes_s3_upload_status_on_success(self):
+        """Handler should include s3_upload dict in success response."""
+        event = {"send_message": True, "save_changes": True}
+
+        async_mock = AsyncMock()
+
+        def _run_and_close(coro):
+            coro.close()
+
+        with patch.object(self.lambda_handler.os, "chdir"), \
+             patch.object(self.lambda_handler, "download_from_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 3, "failed": 0, "skipped_empty": 1}), \
+             patch.object(self.lambda_handler, "run_summarizer", async_mock), \
+             patch.object(self.lambda_handler.asyncio, "run", side_effect=_run_and_close):
+            result = self.lambda_handler.handler(event, context=None)
+
+        self.assertIn("s3_upload", result)
+        self.assertEqual(result["s3_upload"]["uploaded"], 3)
+        self.assertEqual(result["s3_upload"]["failed"], 0)
+        self.assertEqual(result["s3_upload"]["skipped_empty"], 1)
+
+    def test_handler_includes_s3_upload_status_on_error(self):
+        """Handler should include s3_upload dict in error response."""
+        event = {"send_message": True, "save_changes": True}
+
+        async def _raise(**kwargs):
+            raise RuntimeError("test error")
+
+        with patch.object(self.lambda_handler.os, "chdir"), \
+             patch.object(self.lambda_handler, "download_from_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 1, "failed": 1, "skipped_empty": 0}), \
+             patch.object(self.lambda_handler, "run_summarizer", _raise):
+            result = self.lambda_handler.handler(event, context=None)
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("s3_upload", result)
+        self.assertEqual(result["s3_upload"]["failed"], 1)
 
 
 class SummarizerGroupDeadlineTests(unittest.TestCase):

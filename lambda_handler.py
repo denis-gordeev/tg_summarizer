@@ -106,7 +106,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         elapsed = time.monotonic() - start_time
         error_type = _classify_error(e)
         logger.error("Lambda execution failed after %.1fs [%s]: %s", elapsed, error_type, e, exc_info=True)
-        upload_to_s3()
+        s3_upload_result = upload_to_s3()
         cb_state = get_circuit_breaker_state()
         token_usage = get_token_usage()
         return {
@@ -119,12 +119,13 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             'save_changes': save_changes,
             'circuit_breaker': cb_state,
             'token_usage': token_usage,
+            's3_upload': s3_upload_result,
         }
     t_summarizer = time.monotonic() - t0
 
     # Push updated state back to S3
     t0 = time.monotonic()
-    upload_to_s3()
+    s3_upload_result = upload_to_s3()
     t_upload = time.monotonic() - t0
 
     elapsed = time.monotonic() - start_time
@@ -149,4 +150,5 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         'include_today_processed_messages': include_today_processed_messages,
         'circuit_breaker': cb_state,
         'token_usage': token_usage,
+        's3_upload': s3_upload_result,
     }

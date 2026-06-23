@@ -647,6 +647,37 @@ class StripMetaArtifactsTests(unittest.TestCase):
         result = utils.strip_meta_artifacts(text)
         self.assertNotIn("В заключение", result)
 
+    def test_strips_другие_ссылки_outro(self):
+        utils = self._import_utils()
+        text = "<b>AI модели</b>\nGPT-5 выпущен [1]\nДругие ссылки: [2]"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Другие ссылки:", result)
+        self.assertIn("GPT-5", result)
+
+    def test_preserves_другие_ссылки_without_colon(self):
+        utils = self._import_utils()
+        text = "<b>AI модели</b>\nДругие ссылки в статье [1]"
+        result = utils.strip_meta_artifacts(text)
+        self.assertIn("Другие ссылки в статье", result)
+
+
+class PromptAntiListTests(unittest.TestCase):
+    """Tests for anti-list and anti-subheader rules in summary prompts."""
+
+    def test_channel_summary_prompt_prohibits_lists(self):
+        """CHANNEL_SUMMARY_PROMPT should contain anti-list rule."""
+        import ast
+
+        with open("prompts.py") as f:
+            source = f.read()
+        self.assertIn("Без нумерованных и маркированных списков", source)
+
+    def test_channel_summary_prompt_prohibits_subheaders(self):
+        """CHANNEL_SUMMARY_PROMPT should contain anti-subheader rule."""
+        with open("prompts.py") as f:
+            source = f.read()
+        self.assertIn("Без подзаголовков внутри раздела", source)
+
 
 if __name__ == "__main__":
     unittest.main()

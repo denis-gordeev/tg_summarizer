@@ -129,6 +129,7 @@ def extract_all_channels(text: str) -> list[str]:
 _COST_PER_MILLION = {
     "gpt-4o-mini": (0.15, 0.60),
     "gpt-4.1-mini": (0.40, 1.60),
+    "gpt-4.1-nano": (0.10, 0.40),
 }
 
 def _estimate_cost_usd(model: str, prompt_tokens: int, completion_tokens: int) -> float:
@@ -383,6 +384,7 @@ def _truncate_html_preserving_tags(text: str, max_visible_chars: int) -> str:
 _META_ARTIFACT_PATTERNS = [
     re.compile(r"^[^<\n]*?(?:в этом дайджесте|итого|в заключение|подведя итог|в итоге|итак|в общем|вкратце|как видно)[^\n]*\n*", re.IGNORECASE),
     re.compile(r"\n[^<\n]*?(?:в этом дайджесте|итого|в заключение|подведя итог|в итоге|итак|в общем|вкратце|как видно)[^\n]*$", re.IGNORECASE),
+    re.compile(r"\n[^<\n]*?другие ссылки:\s*[^\n]*$", re.IGNORECASE),
 ]
 
 
