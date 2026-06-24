@@ -26,6 +26,7 @@ def _load_lambda_handler():
     fake_utils.reset_circuit_breaker = lambda: None
     fake_utils.get_token_usage = lambda: {"prompt_tokens": 0, "completion_tokens": 0}
     fake_utils.reset_token_usage = lambda: None
+    fake_utils._estimate_cost_usd = lambda model, pt, ct: (pt * 0.10 + ct * 0.40) / 1_000_000
     sys.modules["summarizer"] = fake_summarizer
     sys.modules["config"] = fake_config
     sys.modules["utils"] = fake_utils
@@ -633,6 +634,71 @@ class PerSourceFetchTimingTests(unittest.TestCase):
         self.assertIn("source_start", source, "_fetch_from_sources should track source_start time")
         self.assertIn("time.monotonic() - source_start", source,
                        "_fetch_from_sources should log elapsed time per source")
+
+
+class EmitInvocationSummaryTests(unittest.TestCase):
+    """Tests for _emit_invocation_summary EMF metric in lambda_handler."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.lambda_handler = _load_lambda_handler()
+
+    def test_emit_invocation_summary_writes_emf(self):
+        """_emit_invocation_summary should write an EMF JSON line to stdout."""
+        import io
+        fake_stdout = io.StringIO()
+        with patch.object(self.lambda_handler.sys, "stdout", fake_stdout):
+            self.lambda_handler._emit_invocation_summary(100, 50, 5.2, "gpt-4.1-nano")
+        output = fake_stdout.getvalue()
+        self.assertIn("CumulativePromptTokens", output)
+        self.assertIn("CumulativeCompletionTokens", output)
+        self.assertIn("CumulativeCostUSD", output)
+        self.assertIn("ElapsedSeconds", output)
+        self.assertIn("tg_summarizer/Invocation", output)
+
+    def test_emit_invocation_summary_skips_zero_tokens(self):
+        """_emit_invocation_summary should skip when no tokens used."""
+        import io
+        fake_stdout = io.StringIO()
+        with patch.object(self.lambda_handler.sys, "stdout", fake_stdout):
+            self.lambda_handler._emit_invocation_summary(0, 0, 5.2, "gpt-4.1-nano")
+        output = fake_stdout.getvalue()
+        self.assertEqual(output, "")
+
+    def test_handler_emits_invocation_summary_on_success(self):
+        """Handler should call _emit_invocation_summary on success path."""
+        event = {"send_message": True, "save_changes": True}
+
+        async_mock = AsyncMock()
+
+        def _run_and_close(coro):
+            coro.close()
+
+        with patch.object(self.lambda_handler.os, "chdir"), \
+             patch.object(self.lambda_handler, "download_from_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 0, "failed": 0, "skipped_empty": 0}), \
+             patch.object(self.lambda_handler, "run_summarizer", async_mock), \
+             patch.object(self.lambda_handler.asyncio, "run", side_effect=_run_and_close), \
+             patch.object(self.lambda_handler, "_emit_invocation_summary") as mock_emit:
+            self.lambda_handler.handler(event, context=None)
+
+        mock_emit.assert_called_once()
+
+    def test_handler_emits_invocation_summary_on_error(self):
+        """Handler should call _emit_invocation_summary on error path."""
+        event = {"send_message": True, "save_changes": True}
+
+        async def _raise(**kwargs):
+            raise RuntimeError("test error")
+
+        with patch.object(self.lambda_handler.os, "chdir"), \
+             patch.object(self.lambda_handler, "download_from_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 0, "failed": 0, "skipped_empty": 0}), \
+             patch.object(self.lambda_handler, "run_summarizer", _raise), \
+             patch.object(self.lambda_handler, "_emit_invocation_summary") as mock_emit:
+            self.lambda_handler.handler(event, context=None)
+
+        mock_emit.assert_called_once()
 
 
 if __name__ == "__main__":

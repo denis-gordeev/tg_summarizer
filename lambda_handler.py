@@ -1,11 +1,13 @@
+import json as _json
 import os
 import logging
 import asyncio
+import sys
 import time
 from typing import Any, Dict
 from s3_sync import download_from_s3, upload_to_s3
 from summarizer import run_summarizer, DeadlineExceededError
-from utils import get_circuit_breaker_state, reset_circuit_breaker, get_token_usage, reset_token_usage
+from utils import get_circuit_breaker_state, reset_circuit_breaker, get_token_usage, reset_token_usage, _estimate_cost_usd
 from config import OPENAI_MODEL
 
 SAFETY_MARGIN_SECONDS = 10
@@ -16,6 +18,45 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _emit_invocation_summary(
+    prompt_tokens: int, completion_tokens: int, elapsed_seconds: float, model: str
+) -> None:
+    """Emit a per-invocation EMF metric with cumulative cost/tokens (no Model dimension).
+
+    Unlike the per-call EMF in utils._emit_openai_latency (which has Function+Model
+    dimensions), this metric uses only the Function dimension, enabling CloudWatch
+    aggregation across models for daily cost alerting.
+    """
+    if prompt_tokens == 0 and completion_tokens == 0:
+        return
+    try:
+        cost_usd = _estimate_cost_usd(model, prompt_tokens, completion_tokens)
+        emf = {
+            "_aws": {
+                "Timestamp": int(time.time() * 1000),
+                "CloudWatchMetrics": [{
+                    "Namespace": "tg_summarizer/Invocation",
+                    "Dimensions": [["Function"]],
+                    "Metrics": [
+                        {"Name": "CumulativePromptTokens", "Unit": "None"},
+                        {"Name": "CumulativeCompletionTokens", "Unit": "None"},
+                        {"Name": "CumulativeCostUSD", "Unit": "None"},
+                        {"Name": "ElapsedSeconds", "Unit": "Seconds"},
+                    ]
+                }]
+            },
+            "Function": os.getenv("AWS_LAMBDA_FUNCTION_NAME", "local"),
+            "CumulativePromptTokens": prompt_tokens,
+            "CumulativeCompletionTokens": completion_tokens,
+            "CumulativeCostUSD": round(cost_usd, 6),
+            "ElapsedSeconds": round(elapsed_seconds, 1),
+        }
+        sys.stdout.write(_json.dumps(emf, separators=(",", ":")) + "\n")
+        sys.stdout.flush()
+    except Exception:
+        pass
 
 
 def _classify_error(exc: Exception) -> str:
@@ -110,6 +151,9 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         s3_upload_result = upload_to_s3()
         cb_state = get_circuit_breaker_state()
         token_usage = get_token_usage()
+        _emit_invocation_summary(
+            token_usage["prompt_tokens"], token_usage["completion_tokens"], elapsed, OPENAI_MODEL
+        )
         return {
             'status': 'error',
             'error': str(e),
@@ -133,6 +177,9 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     elapsed = time.monotonic() - start_time
     cb_state = get_circuit_breaker_state()
     token_usage = get_token_usage()
+    _emit_invocation_summary(
+        token_usage["prompt_tokens"], token_usage["completion_tokens"], elapsed, OPENAI_MODEL
+    )
     logger.info(
         "Lambda completed in %.1fs (download=%.1fs, summarizer=%.1fs, upload=%.1fs) "
         "[send=%s, save=%s, today_groups=%s, today_msgs=%s] [cb=%s] [tokens=%d+%d]",

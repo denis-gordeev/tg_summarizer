@@ -2,6 +2,37 @@
 
 Живой список задач для автоматических раундов.
 
+## Completed in 2026-06-24 round 2 (Lambda hardening round 33, daily cost alerting, meta-artifacts expansion, input validation)
+
+- **Observability — per-invocation cumulative cost EMF metric**: Added [`_emit_invocation_summary()`](lambda_handler.py) that emits an EMF metric at the end of each Lambda invocation (both success and error paths) with `CumulativePromptTokens`, `CumulativeCompletionTokens`, `CumulativeCostUSD`, and `ElapsedSeconds` under the `tg_summarizer/Invocation` namespace with only the `Function` dimension (no `Model`). Unlike the per-call EMF in [`_emit_openai_latency()`](utils.py) (which has `Function+Model` dimensions), this metric aggregates across models, enabling CloudWatch Sum-based daily cost alerting. Skips emission when no tokens were used.
+- **Observability — daily cost alarm**: Added `OpenAIDailyCostAlarm` in [`template.yaml`](template.yaml) — alerts when cumulative `CumulativeCostUSD` (Sum statistic, 86400s period) exceeds $1.00 per day. Uses the new `tg_summarizer/Invocation` namespace. Complements the existing `OpenAICostAlarm` (per-invocation Maximum > $0.10). Directly addresses the TODO item "Consider adding CloudWatch metric filter on `token_usage` field for cost alerting" — the EMF metric approach is cleaner than a Logs metric filter and provides the same daily cost alerting capability.
+- **Observability — dashboard invocation widget**: Added a fourth widget "Per-Invocation Cost & Tokens" to [`SummarizerDashboard`](template.yaml) showing `CumulativeCostUSD` (left axis, USD), `CumulativePromptTokens` and `CumulativeCompletionTokens` (right axis, tokens) from the new `tg_summarizer/Invocation` namespace. Provides per-invocation cost and token visibility alongside the existing per-call OpenAI metrics.
+- **Quality — expanded strip_meta_artifacts**: Added `"также стоит отметить"` pattern to the intro/outro patterns in [`_META_ARTIFACT_PATTERNS`](utils.py). Added `"смотри также:"` and `"подробнее:"` as colon-terminated patterns — these LLM meta-artifacts appear as standalone "Смотри также: [link]" or "Подробнее: [link]" lines that violate the "Без введения, заключения и мета-комментариев" prompt rule. The colon requirement preserves inline usage like "Подробнее о модели GPT-5" in the body.
+- **Robustness — empty input validation in call_openai**: Added non-empty validation for `system_prompt` and `user_content` in [`call_openai()`](utils.py). Empty or whitespace-only inputs now return `""` immediately with a warning log, avoiding a wasted API call that would return useless results. Prevents edge cases where upstream code passes empty content (e.g., a message with no text after truncation).
+- **Tests added**: 16 new tests (total 345, up from 329):
+  - `test_emit_invocation_summary_writes_emf`: verifies EMF JSON output with correct metrics and namespace
+  - `test_emit_invocation_summary_skips_zero_tokens`: verifies no EMF output when tokens are 0
+  - `test_handler_emits_invocation_summary_on_success`: verifies `_emit_invocation_summary` called on success
+  - `test_handler_emits_invocation_summary_on_error`: verifies `_emit_invocation_summary` called on error
+  - `test_template_contains_daily_cost_alarm`: verifies `OpenAIDailyCostAlarm`, `CumulativeCostUSD`, `tg_summarizer/Invocation`, and 86400s period in template.yaml
+  - `test_template_dashboard_contains_invocation_widget`: verifies dashboard has CumulativeCostUSD/PromptTokens/CompletionTokens from Invocation namespace
+  - `test_strips_также_стоит_отметить_intro`: verifies "Также стоит отметить" stripped from summary start
+  - `test_strips_также_стоит_отметить_outro`: verifies "Также стоит отметить" stripped from summary end
+  - `test_strips_смотри_также_with_colon_outro`: verifies "Смотри также:" stripped
+  - `test_strips_подробнее_with_colon_outro`: verifies "Подробнее:" stripped
+  - `test_preserves_смотри_также_in_body`: verifies "смотри также" (no colon) preserved in body
+  - `test_preserves_подробнее_in_body`: verifies "Подробнее о модели" preserved in body
+  - `test_call_openai_returns_empty_on_empty_system_prompt`: verifies empty system prompt returns ""
+  - `test_call_openai_returns_empty_on_whitespace_system_prompt`: verifies whitespace-only system prompt returns ""
+  - `test_call_openai_returns_empty_on_empty_user_content`: verifies empty user content returns ""
+  - `test_call_openai_returns_empty_on_whitespace_user_content`: verifies whitespace-only user content returns ""
+- Updated test stub in [`tests/test_lambda_handler.py`](tests/test_lambda_handler.py) — added `_estimate_cost_usd` to `fake_utils` stub.
+- All 345 tests pass without errors.
+
+## Next actions
+
+- Consider adding Lambda warmer to avoid cold-start Telegram reconnection overhead
+
 ## Completed in 2026-06-24 round (Lambda hardening round 32, default model, CloudWatch dashboard, model observability, meta-artifacts expansion)
 
 - **Cost optimization — gpt-4.1-nano as default model**: Changed default `OPENAI_MODEL` from `gpt-4o-mini` to `gpt-4.1-nano` in [`config.py`](config.py), [`template.yaml`](template.yaml), and [`.env.example`](.env.example). gpt-4.1-nano costs $0.10/$0.40 per 1M tokens (input/output) vs gpt-4o-mini's $0.15/$0.60 — a ~33% reduction on both input and output tokens. The model was already in the cost table and AllowedValues; only the default changed. Users can still select `gpt-4o-mini` or `gpt-4.1-mini` via the `OpenAIModel` SAM parameter or `OPENAI_MODEL` env var. Directly addresses the AUTOWORK_INSTRUCTIONS cost constraint ("Выбранные решения не должны быть дороже gpt-4o-mini") and the long-standing TODO item "Consider evaluating gpt-4.1-nano as default model".
@@ -23,9 +54,6 @@
 - All 329 tests pass without errors.
 
 ## Next actions
-
-- Consider adding Lambda warmer to avoid cold-start Telegram reconnection overhead
-- Consider adding CloudWatch metric filter on `token_usage` field for cost alerting
 
 - **Prompt quality — anti-list rule**: Added "Без нумерованных и маркированных списков — только сплошной текст с абзацами" and "Без подзаголовков внутри раздела — один заголовок на тему" rules to both [`CHANNEL_SUMMARY_PROMPT`](prompts.py) and [`GROUP_SUMMARY_PROMPT`](prompts.py). LLMs frequently produce verbose bullet/numbered lists and nested sub-headers in Telegram digests, which render poorly and waste tokens. Directly targets the AUTOWORK_INSTRUCTIONS goal of improving quality and conciseness.
 - **Cost monitoring — gpt-4.1-nano in cost table**: Added `"gpt-4.1-nano": (0.10, 0.40)` to [`_COST_PER_MILLION`](utils.py) cost lookup. gpt-4.1-nano is cheaper than gpt-4o-mini ($0.10/$0.40 vs $0.15/$0.60 per 1M tokens), making it a valid model per AUTOWORK_INSTRUCTIONS cost constraint. Without this entry, using gpt-4.1-nano would trigger a false cost-table warning.
@@ -53,7 +81,6 @@
 ## Next actions
 
 - Consider adding Lambda warmer to avoid cold-start Telegram reconnection overhead
-- Consider adding CloudWatch metric filter on `token_usage` field for cost alerting
 
 ## Completed in 2026-06-19 round (Lambda hardening round 30, meta-artifact stripping, empty choices guard, circuit breaker reset, token usage tracking, dedup length pre-filter)
 

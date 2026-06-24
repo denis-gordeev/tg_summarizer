@@ -221,6 +221,13 @@ async def call_openai(
     """Универсальная функция для вызова OpenAI API с retry и exponential backoff."""
     global openai_client, _CIRCUIT_BREAKER_FAILURES, _CIRCUIT_BREAKER_OPEN_SINCE, _cumulative_prompt_tokens, _cumulative_completion_tokens
 
+    if not system_prompt or not system_prompt.strip():
+        logger.warning("call_openai called with empty system_prompt — skipping")
+        return ""
+    if not user_content or not user_content.strip():
+        logger.warning("call_openai called with empty user_content — skipping")
+        return ""
+
     if _CIRCUIT_BREAKER_FAILURES >= CIRCUIT_BREAKER_THRESHOLD:
         elapsed_since_open = _time.monotonic() - _CIRCUIT_BREAKER_OPEN_SINCE
         if elapsed_since_open < CIRCUIT_BREAKER_RESET_SEC:
@@ -382,9 +389,11 @@ def _truncate_html_preserving_tags(text: str, max_visible_chars: int) -> str:
 
 
 _META_ARTIFACT_PATTERNS = [
-    re.compile(r"^[^<\n]*?(?:в этом дайджесте|итого|в заключение|подведя итог|в итоге|итак|в общем|вкратце|как видно|обратите внимание|напомним)[^\n]*\n*", re.IGNORECASE),
-    re.compile(r"\n[^<\n]*?(?:в этом дайджесте|итого|в заключение|подведя итог|в итоге|итак|в общем|вкратце|как видно|обратите внимание|напомним)[^\n]*$", re.IGNORECASE),
+    re.compile(r"^[^<\n]*?(?:в этом дайджесте|итого|в заключение|подведя итог|в итоге|итак|в общем|вкратце|как видно|обратите внимание|напомним|также стоит отметить)[^\n]*\n*", re.IGNORECASE),
+    re.compile(r"\n[^<\n]*?(?:в этом дайджесте|итого|в заключение|подведя итог|в итоге|итак|в общем|вкратце|как видно|обратите внимание|напомним|также стоит отметить)[^\n]*$", re.IGNORECASE),
     re.compile(r"\n[^<\n]*?другие ссылки:\s*[^\n]*$", re.IGNORECASE),
+    re.compile(r"^[^<\n]*?(?:смотри также|подробнее)\s*:\s*[^\n]*\n*", re.IGNORECASE),
+    re.compile(r"\n[^<\n]*?(?:смотри также|подробнее)\s*:\s*[^\n]*$", re.IGNORECASE),
 ]
 
 

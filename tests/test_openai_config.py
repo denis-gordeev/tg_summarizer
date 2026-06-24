@@ -1863,5 +1863,58 @@ class TokenUsageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(utils.get_token_usage(), {"prompt_tokens": 0, "completion_tokens": 0})
 
 
+class EmptyInputValidationTests(unittest.IsolatedAsyncioTestCase):
+    """Tests for call_openai empty input validation."""
+
+    async def _setup_utils(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_openai = types.ModuleType("openai")
+
+        class FakeAsyncOpenAI:
+            def __init__(self, api_key, **kwargs):
+                pass
+
+            class chat:
+                class completions:
+                    @staticmethod
+                    async def create(**kwargs):
+                        raise AssertionError("API should not be called with empty input")
+
+        class FakeOpenAIError(Exception):
+            pass
+
+        fake_openai.AsyncOpenAI = FakeAsyncOpenAI
+        fake_openai.APIError = FakeOpenAIError
+        fake_openai.RateLimitError = type("RateLimitError", (FakeOpenAIError,), {"status_code": None})
+        fake_openai.APIConnectionError = type("APIConnectionError", (FakeOpenAIError,), {})
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv, "openai": fake_openai}):
+            with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+                sys.modules.pop("config", None)
+                sys.modules.pop("utils", None)
+                return importlib.import_module("utils")
+
+    async def test_call_openai_returns_empty_on_empty_system_prompt(self):
+        utils = await self._setup_utils()
+        result = await utils.call_openai("", "user content")
+        self.assertEqual(result, "")
+
+    async def test_call_openai_returns_empty_on_whitespace_system_prompt(self):
+        utils = await self._setup_utils()
+        result = await utils.call_openai("   ", "user content")
+        self.assertEqual(result, "")
+
+    async def test_call_openai_returns_empty_on_empty_user_content(self):
+        utils = await self._setup_utils()
+        result = await utils.call_openai("system prompt", "")
+        self.assertEqual(result, "")
+
+    async def test_call_openai_returns_empty_on_whitespace_user_content(self):
+        utils = await self._setup_utils()
+        result = await utils.call_openai("system prompt", "   ")
+        self.assertEqual(result, "")
+
+
 if __name__ == "__main__":
     unittest.main()

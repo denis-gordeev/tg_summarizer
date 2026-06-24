@@ -687,6 +687,46 @@ class StripMetaArtifactsTests(unittest.TestCase):
         result = utils.strip_meta_artifacts(text)
         self.assertIn("обратить внимание", result)
 
+    def test_strips_также_стоит_отметить_intro(self):
+        utils = self._import_utils()
+        text = "Также стоит отметить выход GPT-5\n<b>AI news</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Также стоит отметить", result)
+        self.assertIn("<b>AI news</b>", result)
+
+    def test_strips_также_стоит_отметить_outro(self):
+        utils = self._import_utils()
+        text = "<b>AI news</b>\nТакже стоит отметить выход GPT-5"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Также стоит отметить", result)
+        self.assertIn("<b>AI news</b>", result)
+
+    def test_preserves_смотри_также_in_body(self):
+        utils = self._import_utils()
+        text = "<b>AI news</b>\nРекомендуем смотри также статью о GPT-5 [1]"
+        result = utils.strip_meta_artifacts(text)
+        self.assertIn("смотри также", result)
+
+    def test_preserves_подробнее_in_body(self):
+        utils = self._import_utils()
+        text = "<b>AI news</b>\nПодробнее о модели GPT-5 читайте в [1]"
+        result = utils.strip_meta_artifacts(text)
+        self.assertIn("Подробнее о модели", result)
+
+    def test_strips_смотри_также_with_colon_outro(self):
+        utils = self._import_utils()
+        text = "<b>AI news</b>\nСмотри также: [2]"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Смотри также:", result)
+        self.assertIn("<b>AI news</b>", result)
+
+    def test_strips_подробнее_with_colon_outro(self):
+        utils = self._import_utils()
+        text = "<b>AI news</b>\nПодробнее: <a href=\"...\">link</a>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Подробнее:", result)
+        self.assertIn("<b>AI news</b>", result)
+
 
 class PromptAntiListTests(unittest.TestCase):
     """Tests for anti-list and anti-subheader rules in summary prompts."""
@@ -726,6 +766,22 @@ class TemplateDashboardTests(unittest.TestCase):
         nano_pos = content.index("gpt-4.1-nano")
         mini_pos = content.index("gpt-4o-mini")
         self.assertLess(nano_pos, mini_pos, "gpt-4.1-nano should be first in AllowedValues")
+
+    def test_template_contains_daily_cost_alarm(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        self.assertIn("OpenAIDailyCostAlarm", content)
+        self.assertIn("CumulativeCostUSD", content)
+        self.assertIn("tg_summarizer/Invocation", content)
+        self.assertIn("86400", content)
+
+    def test_template_dashboard_contains_invocation_widget(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        self.assertIn("CumulativeCostUSD", content)
+        self.assertIn("CumulativePromptTokens", content)
+        self.assertIn("CumulativeCompletionTokens", content)
+        self.assertIn("tg_summarizer/Invocation", content)
 
 
 if __name__ == "__main__":

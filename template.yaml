@@ -422,6 +422,23 @@ Resources:
           Value: !Ref SummarizerFunction
       TreatMissingData: notBreaching
 
+  OpenAIDailyCostAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-openai-daily-cost"
+      AlarmDescription: "Alarm for daily OpenAI estimated cost exceeding budget (EMF metric from lambda_handler)"
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 1
+      Threshold: 1.0
+      MetricName: CumulativeCostUSD
+      Namespace: tg_summarizer/Invocation
+      Period: 86400
+      Statistic: Sum
+      Dimensions:
+        - Name: Function
+          Value: !Ref SummarizerFunction
+      TreatMissingData: notBreaching
+
   SummarizerDashboard:
     Type: AWS::CloudWatch::Dashboard
     Properties:
@@ -429,6 +446,22 @@ Resources:
       DashboardBody: !Sub |
         {
           "widgets": [
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
+                  ["tg_summarizer/Invocation", "CumulativeCostUSD", "Function", "${SummarizerFunction}"],
+                  ["tg_summarizer/Invocation", "CumulativePromptTokens", "Function", "${SummarizerFunction}"],
+                  ["tg_summarizer/Invocation", "CumulativeCompletionTokens", "Function", "${SummarizerFunction}"]
+                ],
+                "period": 300,
+                "stat": "Sum",
+                "region": "${AWS::Region}",
+                "title": "Per-Invocation Cost & Tokens",
+                "yAxis": { "left": { "label": "USD" }, "right": { "label": "tokens" } }
+              },
+              "width": 12, "height": 6
+            },
             {
               "type": "metric",
               "properties": {
