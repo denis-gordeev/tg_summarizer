@@ -97,11 +97,11 @@ Parameters:
   OpenAIModel:
     Type: String
     Description: OpenAI model to use
-    Default: "gpt-4o-mini"
+    Default: "gpt-4.1-nano"
     AllowedValues:
+      - "gpt-4.1-nano"
       - "gpt-4o-mini"
       - "gpt-4.1-mini"
-      - "gpt-4.1-nano"
   
   OpenAIDefaultMaxTokens:
     Type: String
@@ -421,6 +421,61 @@ Resources:
         - Name: Function
           Value: !Ref SummarizerFunction
       TreatMissingData: notBreaching
+
+  SummarizerDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub "${AWS::StackName}-dashboard"
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
+                  ["tg_summarizer/OpenAI", "Latency", "Function", "${SummarizerFunction}", "Model", "*"],
+                  ["tg_summarizer/OpenAI", "EstimatedCostUSD", "Function", "${SummarizerFunction}", "Model", "*"]
+                ],
+                "period": 300,
+                "stat": "Average",
+                "region": "${AWS::Region}",
+                "title": "OpenAI Latency & Cost",
+                "yAxis": { "left": { "label": "seconds" }, "right": { "label": "USD" } }
+              },
+              "width": 12, "height": 6
+            },
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
+                  ["tg_summarizer/OpenAI", "PromptTokens", "Function", "${SummarizerFunction}", "Model", "*"],
+                  ["tg_summarizer/OpenAI", "CompletionTokens", "Function", "${SummarizerFunction}", "Model", "*"]
+                ],
+                "period": 300,
+                "stat": "Sum",
+                "region": "${AWS::Region}",
+                "title": "OpenAI Token Usage"
+              },
+              "width": 12, "height": 6
+            },
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
+                  ["AWS/Lambda", "Duration", "FunctionName", "${SummarizerFunction}"],
+                  ["AWS/Lambda", "Errors", "FunctionName", "${SummarizerFunction}"],
+                  ["AWS/Lambda", "Invocations", "FunctionName", "${SummarizerFunction}"],
+                  ["AWS/Lambda", "Throttles", "FunctionName", "${SummarizerFunction}"]
+                ],
+                "period": 300,
+                "stat": "Sum",
+                "region": "${AWS::Region}",
+                "title": "Lambda Metrics"
+              },
+              "width": 12, "height": 6
+            }
+          ]
+        }
 
   Outputs:
   SummarizerFunctionArn:

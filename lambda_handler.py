@@ -6,6 +6,7 @@ from typing import Any, Dict
 from s3_sync import download_from_s3, upload_to_s3
 from summarizer import run_summarizer, DeadlineExceededError
 from utils import get_circuit_breaker_state, reset_circuit_breaker, get_token_usage, reset_token_usage
+from config import OPENAI_MODEL
 
 SAFETY_MARGIN_SECONDS = 10
 
@@ -117,6 +118,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             'elapsed_seconds': round(elapsed, 1),
             'send_message': send_message,
             'save_changes': save_changes,
+            'model': OPENAI_MODEL,
             'circuit_breaker': cb_state,
             'token_usage': token_usage,
             's3_upload': s3_upload_result,
@@ -148,6 +150,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         'save_changes': save_changes,
         'include_today_processed_groups': include_today_processed_groups,
         'include_today_processed_messages': include_today_processed_messages,
+        'model': OPENAI_MODEL,
         'circuit_breaker': cb_state,
         'token_usage': token_usage,
         's3_upload': s3_upload_result,

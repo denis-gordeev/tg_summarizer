@@ -20,6 +20,7 @@ def _load_lambda_handler():
     fake_summarizer.DeadlineExceededError = DeadlineExceededError
     fake_config = types.ModuleType("config")
     fake_config.validate_config = lambda: None
+    fake_config.OPENAI_MODEL = "gpt-4.1-nano"
     fake_utils = types.ModuleType("utils")
     fake_utils.get_circuit_breaker_state = lambda: {"state": "closed", "failures": 0}
     fake_utils.reset_circuit_breaker = lambda: None
@@ -550,6 +551,42 @@ class HandlerTests(unittest.TestCase):
         self.assertEqual(result["status"], "error")
         self.assertIn("s3_upload", result)
         self.assertEqual(result["s3_upload"]["failed"], 1)
+
+    def test_handler_includes_model_name_in_success_response(self):
+        """Handler should include model name in success response."""
+        event = {"send_message": True, "save_changes": True}
+
+        async_mock = AsyncMock()
+
+        def _run_and_close(coro):
+            coro.close()
+
+        with patch.object(self.lambda_handler.os, "chdir"), \
+             patch.object(self.lambda_handler, "download_from_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 0, "failed": 0, "skipped_empty": 0}), \
+             patch.object(self.lambda_handler, "run_summarizer", async_mock), \
+             patch.object(self.lambda_handler.asyncio, "run", side_effect=_run_and_close):
+            result = self.lambda_handler.handler(event, context=None)
+
+        self.assertIn("model", result)
+        self.assertEqual(result["model"], "gpt-4.1-nano")
+
+    def test_handler_includes_model_name_in_error_response(self):
+        """Handler should include model name in error response."""
+        event = {"send_message": True, "save_changes": True}
+
+        async def _raise(**kwargs):
+            raise RuntimeError("test error")
+
+        with patch.object(self.lambda_handler.os, "chdir"), \
+             patch.object(self.lambda_handler, "download_from_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 0, "failed": 0, "skipped_empty": 0}), \
+             patch.object(self.lambda_handler, "run_summarizer", _raise):
+            result = self.lambda_handler.handler(event, context=None)
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("model", result)
+        self.assertEqual(result["model"], "gpt-4.1-nano")
 
 
 class SummarizerGroupDeadlineTests(unittest.TestCase):

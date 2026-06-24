@@ -660,6 +660,33 @@ class StripMetaArtifactsTests(unittest.TestCase):
         result = utils.strip_meta_artifacts(text)
         self.assertIn("Другие ссылки в статье", result)
 
+    def test_strips_обратите_внимание_intro(self):
+        utils = self._import_utils()
+        text = "Обратите внимание на новую модель\n<b>AI news</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Обратите внимание", result)
+        self.assertIn("<b>AI news</b>", result)
+
+    def test_strips_напомним_intro(self):
+        utils = self._import_utils()
+        text = "Напомним, что OpenAI выпустил GPT-5\n<b>AI news</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Напомним", result)
+        self.assertIn("<b>AI news</b>", result)
+
+    def test_strips_обратите_внимание_outro(self):
+        utils = self._import_utils()
+        text = "<b>AI news</b>\nОбратите внимание на эту новость"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Обратите внимание", result)
+        self.assertIn("<b>AI news</b>", result)
+
+    def test_preserves_обратите_внимание_in_body(self):
+        utils = self._import_utils()
+        text = "<b>AI news</b>\nСтоит обратить внимание на модель GPT-5 [1]"
+        result = utils.strip_meta_artifacts(text)
+        self.assertIn("обратить внимание", result)
+
 
 class PromptAntiListTests(unittest.TestCase):
     """Tests for anti-list and anti-subheader rules in summary prompts."""
@@ -677,6 +704,28 @@ class PromptAntiListTests(unittest.TestCase):
         with open("prompts.py") as f:
             source = f.read()
         self.assertIn("Без подзаголовков внутри раздела", source)
+
+
+class TemplateDashboardTests(unittest.TestCase):
+    """Tests for CloudWatch Dashboard in template.yaml."""
+
+    def test_template_contains_dashboard_resource(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        self.assertIn("SummarizerDashboard", content)
+        self.assertIn("AWS::CloudWatch::Dashboard", content)
+
+    def test_template_default_model_is_gpt41_nano(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        self.assertIn('Default: "gpt-4.1-nano"', content)
+
+    def test_template_allowed_values_gpt41_nano_first(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        nano_pos = content.index("gpt-4.1-nano")
+        mini_pos = content.index("gpt-4o-mini")
+        self.assertLess(nano_pos, mini_pos, "gpt-4.1-nano should be first in AllowedValues")
 
 
 if __name__ == "__main__":

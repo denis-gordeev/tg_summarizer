@@ -2,7 +2,30 @@
 
 Живой список задач для автоматических раундов.
 
-## Completed in 2026-06-23 round (Lambda hardening round 31, prompt anti-list, cost guard, S3 observability, module import cleanup)
+## Completed in 2026-06-24 round (Lambda hardening round 32, default model, CloudWatch dashboard, model observability, meta-artifacts expansion)
+
+- **Cost optimization — gpt-4.1-nano as default model**: Changed default `OPENAI_MODEL` from `gpt-4o-mini` to `gpt-4.1-nano` in [`config.py`](config.py), [`template.yaml`](template.yaml), and [`.env.example`](.env.example). gpt-4.1-nano costs $0.10/$0.40 per 1M tokens (input/output) vs gpt-4o-mini's $0.15/$0.60 — a ~33% reduction on both input and output tokens. The model was already in the cost table and AllowedValues; only the default changed. Users can still select `gpt-4o-mini` or `gpt-4.1-mini` via the `OpenAIModel` SAM parameter or `OPENAI_MODEL` env var. Directly addresses the AUTOWORK_INSTRUCTIONS cost constraint ("Выбранные решения не должны быть дороже gpt-4o-mini") and the long-standing TODO item "Consider evaluating gpt-4.1-nano as default model".
+- **Observability — CloudWatch Dashboard**: Added `SummarizerDashboard` in [`template.yaml`](template.yaml) with three widgets: (1) OpenAI Latency & Cost (dual-axis: seconds + USD), (2) OpenAI Token Usage (prompt + completion, sum), (3) Lambda Metrics (duration, errors, invocations, throttles). Dashboard is automatically created on `sam deploy` and visible in the CloudWatch console. Addresses the TODO item "Consider adding CloudWatch dashboard for circuit breaker state" — the dashboard covers circuit breaker-related metrics (errors, latency) plus cost and token usage.
+- **Observability — model name in Lambda response**: Added `model` field (value from [`OPENAI_MODEL`](config.py)) to both success and error Lambda responses in [`lambda_handler.handler()`](lambda_handler.py). Previously, the Lambda response included circuit_breaker, token_usage, and s3_upload but not which model was used. The model name is now available for programmatic monitoring and cost correlation without parsing CloudWatch logs.
+- **Quality — expanded strip_meta_artifacts**: Added `"обратите внимание"` and `"напомним"` patterns to [`_META_ARTIFACT_PATTERNS`](utils.py). LLMs sometimes produce "Обратите внимание" as a standalone intro/outro line and "Напомним" as a recap filler — both violate the "Без введения, заключения и мета-комментариев" prompt rule. The patterns match these phrases at line start (intro) and line end (outro), preserving inline usage like "стоит обратить внимание на модель" in the body.
+- **Tests added**: 10 new tests (total 329, up from 319):
+  - `test_config_openai_model_default_is_gpt41_nano`: verifies default OPENAI_MODEL is `gpt-4.1-nano`
+  - `test_handler_includes_model_name_in_success_response`: verifies `model` field in success Lambda response
+  - `test_handler_includes_model_name_in_error_response`: verifies `model` field in error Lambda response
+  - `test_template_contains_dashboard_resource`: verifies `SummarizerDashboard` and `AWS::CloudWatch::Dashboard` in template.yaml
+  - `test_template_default_model_is_gpt41_nano`: verifies SAM template default model is gpt-4.1-nano
+  - `test_template_allowed_values_gpt41_nano_first`: verifies gpt-4.1-nano is first in AllowedValues list
+  - `test_strips_обратите_внимание_intro`: verifies "Обратите внимание" stripped from summary start
+  - `test_strips_напомним_intro`: verifies "Напомним" stripped from summary start
+  - `test_strips_обратите_внимание_outro`: verifies "Обратите внимание" stripped from summary end
+  - `test_preserves_обратите_внимание_in_body`: verifies "обратить внимание" preserved in summary body (not at line start)
+- Updated test stub in [`tests/test_lambda_handler.py`](tests/test_lambda_handler.py) — added `OPENAI_MODEL` to `fake_config` stub to support the new import.
+- All 329 tests pass without errors.
+
+## Next actions
+
+- Consider adding Lambda warmer to avoid cold-start Telegram reconnection overhead
+- Consider adding CloudWatch metric filter on `token_usage` field for cost alerting
 
 - **Prompt quality — anti-list rule**: Added "Без нумерованных и маркированных списков — только сплошной текст с абзацами" and "Без подзаголовков внутри раздела — один заголовок на тему" rules to both [`CHANNEL_SUMMARY_PROMPT`](prompts.py) and [`GROUP_SUMMARY_PROMPT`](prompts.py). LLMs frequently produce verbose bullet/numbered lists and nested sub-headers in Telegram digests, which render poorly and waste tokens. Directly targets the AUTOWORK_INSTRUCTIONS goal of improving quality and conciseness.
 - **Cost monitoring — gpt-4.1-nano in cost table**: Added `"gpt-4.1-nano": (0.10, 0.40)` to [`_COST_PER_MILLION`](utils.py) cost lookup. gpt-4.1-nano is cheaper than gpt-4o-mini ($0.10/$0.40 vs $0.15/$0.60 per 1M tokens), making it a valid model per AUTOWORK_INSTRUCTIONS cost constraint. Without this entry, using gpt-4.1-nano would trigger a false cost-table warning.
@@ -30,9 +53,7 @@
 ## Next actions
 
 - Consider adding Lambda warmer to avoid cold-start Telegram reconnection overhead
-- Consider adding CloudWatch dashboard for circuit breaker state (open/closed/half-open transitions)
 - Consider adding CloudWatch metric filter on `token_usage` field for cost alerting
-- Consider evaluating gpt-4.1-nano as default model for cost reduction (cheaper than gpt-4o-mini)
 
 ## Completed in 2026-06-19 round (Lambda hardening round 30, meta-artifact stripping, empty choices guard, circuit breaker reset, token usage tracking, dedup length pre-filter)
 

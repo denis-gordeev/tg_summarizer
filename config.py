@@ -113,7 +113,7 @@ def validate_config() -> None:
         )
 
 
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-nano")
 OPENAI_DEFAULT_MAX_TOKENS = _get_int_env("OPENAI_DEFAULT_MAX_TOKENS", 300)
 OPENAI_CHANNEL_SUMMARY_MAX_TOKENS = _get_int_env(
     "OPENAI_CHANNEL_SUMMARY_MAX_TOKENS", 1500

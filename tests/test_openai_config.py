@@ -60,6 +60,11 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.OPENAI_CHANNEL_SUMMARY_MAX_TOKENS, 456)
         self.assertEqual(config.OPENAI_GROUP_SUMMARY_MAX_TOKENS, 789)
 
+    def test_config_openai_model_default_is_gpt41_nano(self):
+        with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+            config = _reload_module("config")
+        self.assertEqual(config.OPENAI_MODEL, "gpt-4.1-nano")
+
     def test_config_rejects_non_positive_token_limits(self):
         env = {
             **REQUIRED_ENV,
