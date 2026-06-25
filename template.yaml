@@ -256,9 +256,15 @@ Parameters:
     Type: String
     Description: SSM Parameter Store path for OpenAI API Key (takes precedence over OpenAIApiKey)
     Default: ""
+  
+  WarmupScheduleExpression:
+    Type: String
+    Description: EventBridge schedule for Lambda warmup (leave empty to disable)
+    Default: ""
 
 Conditions:
   HasStateBucket: !Not [!Equals [!Ref StateBucket, ""]]
+  HasWarmupSchedule: !Not [!Equals [!Ref WarmupScheduleExpression, ""]]
   UseSsmTelegramApiId: !Not [!Equals [!Ref TelegramApiIdSsmPath, ""]]
   UseSsmTelegramApiHash: !Not [!Equals [!Ref TelegramApiHashSsmPath, ""]]
   UseSsmTelegramBotToken: !Not [!Equals [!Ref TelegramBotTokenSsmPath, ""]]
@@ -323,6 +329,12 @@ Resources:
                   "include_today_processed_groups": false,
                   "include_today_processed_messages": false
                 }
+        WarmupRun:
+          Type: Schedule
+          Condition: HasWarmupSchedule
+          Properties:
+            Schedule: !Ref WarmupScheduleExpression
+            Input: '{"warmup": true}'
 
   StateBucket:
     Type: AWS::Serverless::SimpleBucket
@@ -510,7 +522,7 @@ Resources:
           ]
         }
 
-  Outputs:
+Outputs:
   SummarizerFunctionArn:
     Description: "Lambda Function ARN"
     Value: !GetAtt SummarizerFunction.Arn

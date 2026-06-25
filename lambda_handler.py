@@ -85,6 +85,13 @@ def _parse_event_flag(value: Any, default: bool) -> bool:
     return default
 
 
+async def _warmup_telegram():
+    """Start and stop Telegram clients to refresh sessions and keep the execution environment warm."""
+    from telegram_client import start_clients, stop_clients
+    await start_clients()
+    await stop_clients()
+
+
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     request_id = getattr(context, 'aws_request_id', None) if context else None
     if request_id:
@@ -95,16 +102,29 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     reset_circuit_breaker()
     reset_token_usage()
 
-    # Ensure we can write files (sessions, history) in Lambda
     try:
         os.chdir('/tmp')
     except Exception:
         pass
 
-    # Pull state from S3 if configured
     t0 = time.monotonic()
     download_from_s3()
     t_download = time.monotonic() - t0
+
+    warmup = _parse_event_flag(event.get('warmup'), False)
+    if warmup:
+        logger.info("Lambda warmup — connecting Telegram clients")
+        try:
+            asyncio.run(_warmup_telegram())
+        except Exception as e:
+            logger.warning("Warmup Telegram connection failed: %s", e)
+        upload_to_s3()
+        elapsed = time.monotonic() - start_time
+        return {
+            'status': 'warmed',
+            'request_id': request_id,
+            'elapsed_seconds': round(elapsed, 1),
+        }
 
     # Defaults can be overridden via EventBridge input transform
     send_message = _parse_event_flag(event.get('send_message'), True)

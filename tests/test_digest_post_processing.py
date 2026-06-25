@@ -727,6 +727,47 @@ class StripMetaArtifactsTests(unittest.TestCase):
         self.assertNotIn("Подробнее:", result)
         self.assertIn("<b>AI news</b>", result)
 
+    def test_strips_стоит_отметить_intro(self):
+        utils = self._import_utils()
+        text = "Стоит отметить выход новой модели\n<b>AI news</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Стоит отметить", result)
+        self.assertIn("<b>AI news</b>", result)
+
+    def test_strips_следует_отметить_intro(self):
+        utils = self._import_utils()
+        text = "Следует отметить важность модели\n<b>AI news</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Следует отметить", result)
+        self.assertIn("<b>AI news</b>", result)
+
+    def test_strips_важно_отметить_intro(self):
+        utils = self._import_utils()
+        text = "Важно отметить, что GPT-5 вышел\n<b>AI news</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Важно отметить", result)
+        self.assertIn("<b>AI news</b>", result)
+
+    def test_strips_подводя_итог_outro(self):
+        utils = self._import_utils()
+        text = "<b>AI news</b>\nПодводя итог, рынок растёт"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Подводя итог", result)
+        self.assertIn("<b>AI news</b>", result)
+
+    def test_strips_резюмируя_outro(self):
+        utils = self._import_utils()
+        text = "<b>AI news</b>\nРезюмируя, прогресс налицо"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Резюмируя", result)
+        self.assertIn("<b>AI news</b>", result)
+
+    def test_preserves_стоит_отметить_in_body(self):
+        utils = self._import_utils()
+        text = "<b>AI news</b>\nМодель GPT-5 стоит отметить среди прочих [1]"
+        result = utils.strip_meta_artifacts(text)
+        self.assertIn("стоит отметить", result)
+
 
 class PromptAntiListTests(unittest.TestCase):
     """Tests for anti-list and anti-subheader rules in summary prompts."""
@@ -744,6 +785,21 @@ class PromptAntiListTests(unittest.TestCase):
         with open("prompts.py") as f:
             source = f.read()
         self.assertIn("Без подзаголовков внутри раздела", source)
+
+
+class PromptBrevityTests(unittest.TestCase):
+    """Tests for brevity emphasis in summary prompts."""
+
+    def test_channel_summary_prompt_has_brevity_rule(self):
+        with open("prompts.py") as f:
+            source = f.read()
+        self.assertIn("без вводных слов", source)
+
+    def test_group_summary_prompt_has_brevity_rule(self):
+        with open("prompts.py") as f:
+            source = f.read()
+        count = source.count("без вводных слов")
+        self.assertGreaterEqual(count, 2, "Both prompts should have brevity rule")
 
 
 class TemplateDashboardTests(unittest.TestCase):
@@ -782,6 +838,29 @@ class TemplateDashboardTests(unittest.TestCase):
         self.assertIn("CumulativePromptTokens", content)
         self.assertIn("CumulativeCompletionTokens", content)
         self.assertIn("tg_summarizer/Invocation", content)
+
+    def test_template_outputs_at_top_level(self):
+        """Outputs section should be at YAML top level, not nested in Resources."""
+        with open("template.yaml") as f:
+            lines = f.readlines()
+        for i, line in enumerate(lines):
+            if line.strip() == "Outputs:":
+                indent = len(line) - len(line.lstrip())
+                self.assertEqual(indent, 0, "Outputs should be at top level (0 indent)")
+                break
+        else:
+            self.fail("Outputs section not found in template.yaml")
+
+    def test_template_contains_warmup_schedule_parameter(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        self.assertIn("WarmupScheduleExpression", content)
+
+    def test_template_contains_warmup_event(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        self.assertIn("WarmupRun", content)
+        self.assertIn("HasWarmupSchedule", content)
 
 
 if __name__ == "__main__":

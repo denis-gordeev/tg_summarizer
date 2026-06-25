@@ -217,7 +217,6 @@ async def start_clients() -> None:
     global user_client, bot_client, clients_loop
     current_loop = asyncio.get_running_loop()
 
-    # If clients were created on a different loop (e.g., previous Lambda invoke), recreate them
     if clients_loop is not None and clients_loop is not current_loop:
         try:
             if user_client is not None and user_client.is_connected():
@@ -242,10 +241,24 @@ async def start_clients() -> None:
             "tg_summarizer_bot", API_ID, API_HASH,
             connection_retries=3, retry_delay=2, timeout=15,
         )
-    if not user_client.is_connected():
-        await user_client.start()
-    if not bot_client.is_connected():
-        await bot_client.start(bot_token=BOT_TOKEN)
+
+    max_retries = 2
+    retry_delay = 2.0
+    for attempt in range(max_retries):
+        try:
+            if not user_client.is_connected():
+                await user_client.start()
+            if not bot_client.is_connected():
+                await bot_client.start(bot_token=BOT_TOKEN)
+            break
+        except Exception as e:
+            if attempt < max_retries - 1:
+                logger.warning("Telegram client start failed (attempt %d/%d): %s — retrying in %.1fs", attempt + 1, max_retries, e, retry_delay)
+                await asyncio.sleep(retry_delay)
+                retry_delay *= 2
+            else:
+                logger.error("Telegram client start failed after %d attempts: %s", max_retries, e)
+                raise
 
 
 async def stop_clients() -> None:

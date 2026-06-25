@@ -636,6 +636,32 @@ class PerSourceFetchTimingTests(unittest.TestCase):
                        "_fetch_from_sources should log elapsed time per source")
 
 
+class TelegramReconnectRetryTests(unittest.TestCase):
+    """Tests for Telegram client reconnection retry in start_clients."""
+
+    def test_start_clients_has_retry_loop(self):
+        """start_clients should have a retry loop for Telegram connection (AST check)."""
+        import ast
+
+        with open("telegram_client.py") as f:
+            source = f.read()
+        tree = ast.parse(source)
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.AsyncFunctionDef) and node.name == "start_clients":
+                for child in ast.walk(node):
+                    if isinstance(child, ast.For):
+                        target = child.target
+                        if isinstance(target, ast.Name) and target.id == "attempt":
+                            return
+        self.fail("start_clients should have a retry for-loop with 'attempt' variable")
+
+    def test_start_clients_max_retries_constant(self):
+        with open("telegram_client.py") as f:
+            source = f.read()
+        self.assertIn("max_retries", source)
+
+
 class EmitInvocationSummaryTests(unittest.TestCase):
     """Tests for _emit_invocation_summary EMF metric in lambda_handler."""
 
@@ -699,6 +725,74 @@ class EmitInvocationSummaryTests(unittest.TestCase):
             self.lambda_handler.handler(event, context=None)
 
         mock_emit.assert_called_once()
+
+
+class WarmupHandlerTests(unittest.TestCase):
+    """Tests for Lambda warmup event handling."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.lambda_handler = _load_lambda_handler()
+
+    def test_warmup_returns_warmed_status(self):
+        event = {"warmup": True}
+
+        with patch.object(self.lambda_handler.os, "chdir"), \
+             patch.object(self.lambda_handler, "download_from_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 0, "failed": 0, "skipped_empty": 0}), \
+             patch.object(self.lambda_handler.asyncio, "run"):
+            result = self.lambda_handler.handler(event, context=None)
+
+        self.assertEqual(result["status"], "warmed")
+        self.assertIn("elapsed_seconds", result)
+
+    def test_warmup_downloads_and_uploads_s3(self):
+        event = {"warmup": True}
+
+        with patch.object(self.lambda_handler.os, "chdir"), \
+             patch.object(self.lambda_handler, "download_from_s3") as mock_download, \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 0, "failed": 0, "skipped_empty": 0}) as mock_upload, \
+             patch.object(self.lambda_handler.asyncio, "run"):
+            self.lambda_handler.handler(event, context=None)
+
+        mock_download.assert_called_once()
+        mock_upload.assert_called_once()
+
+    def test_warmup_does_not_run_summarizer(self):
+        event = {"warmup": True}
+
+        async_mock = AsyncMock()
+
+        with patch.object(self.lambda_handler.os, "chdir"), \
+             patch.object(self.lambda_handler, "download_from_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 0, "failed": 0, "skipped_empty": 0}), \
+             patch.object(self.lambda_handler, "run_summarizer", async_mock) as mock_run, \
+             patch.object(self.lambda_handler.asyncio, "run"):
+            result = self.lambda_handler.handler(event, context=None)
+
+        mock_run.assert_not_called()
+
+    def test_warmup_returns_warmed_on_telegram_failure(self):
+        event = {"warmup": True}
+
+        with patch.object(self.lambda_handler.os, "chdir"), \
+             patch.object(self.lambda_handler, "download_from_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 0, "failed": 0, "skipped_empty": 0}), \
+             patch.object(self.lambda_handler.asyncio, "run", side_effect=RuntimeError("connection failed")):
+            result = self.lambda_handler.handler(event, context=None)
+
+        self.assertEqual(result["status"], "warmed")
+
+    def test_warmup_string_true(self):
+        event = {"warmup": "true"}
+
+        with patch.object(self.lambda_handler.os, "chdir"), \
+             patch.object(self.lambda_handler, "download_from_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 0, "failed": 0, "skipped_empty": 0}), \
+             patch.object(self.lambda_handler.asyncio, "run"):
+            result = self.lambda_handler.handler(event, context=None)
+
+        self.assertEqual(result["status"], "warmed")
 
 
 if __name__ == "__main__":

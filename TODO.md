@@ -2,7 +2,38 @@
 
 Живой список задач для автоматических раундов.
 
-## Completed in 2026-06-24 round 2 (Lambda hardening round 33, daily cost alerting, meta-artifacts expansion, input validation)
+## Completed in 2026-06-25 round (Lambda hardening round 34, Lambda warmup, Telegram retry, prompt brevity, meta-artifacts expansion, template fix)
+
+- **Lambda warmup support**: Added `warmup` event flag handling in [`lambda_handler.handler()`](lambda_handler.py). When `warmup=true`, the handler downloads S3 state, starts and stops Telegram clients (via [`_warmup_telegram()`](lambda_handler.py)), uploads state, and returns `{'status': 'warmed'}` without running the summarizer. Added [`_warmup_telegram()`](lambda_handler.py) async function that connects and disconnects Telegram clients to refresh session files. Added `WarmupScheduleExpression` parameter (default: empty = disabled) and `HasWarmupSchedule` condition in [`template.yaml`](template.yaml). When enabled, a second EventBridge `WarmupRun` schedule triggers the Lambda with `{"warmup": true}`, keeping the execution environment warm and Telegram sessions fresh between daily runs. Directly addresses the "Consider adding Lambda warmer" TODO item.
+- **Telegram reconnection retry**: Added retry with exponential backoff in [`start_clients()`](telegram_client.py). `user_client.start()` and `bot_client.start()` are now wrapped in a retry loop (`max_retries=2`, initial delay 2s, doubling). Previously, a transient Telegram API failure during client start would immediately crash the entire Lambda invocation. Now retries once with a 2-second backoff before giving up, making the Lambda more resilient to brief Telegram connectivity issues.
+- **Prompt quality — brevity emphasis**: Added "Пиши максимально кратко, без вводных слов и оборотов" rule to both [`CHANNEL_SUMMARY_PROMPT`](prompts.py) and [`GROUP_SUMMARY_PROMPT`](prompts.py). Directly targets the AUTOWORK_INSTRUCTIONS goal of improving quality and conciseness. The rule complements the existing "Без воды и пояснений очевидного" rule by specifically targeting filler phrases ("вводные слова") that LLMs frequently produce despite other instructions.
+- **Quality — expanded strip_meta_artifacts**: Added `"стоит отметить"`, `"следует отметить"`, `"важно отметить"` to the intro pattern and `"подводя итог"`, `"резюмируя"` to both intro and outro patterns in [`_META_ARTIFACT_PATTERNS`](utils.py). These are common LLM filler phrases that violate the "Без введения, заключения и мета-комментариев" prompt rule. "стоит отметить", "следует отметить", and "важно отметить" are added only to the intro pattern (not outro) because they can appear legitimately in body text (e.g., "Модель GPT-5 стоит отметить среди прочих"). "подводя итог" and "резюмируя" are clear meta-artifacts in any position.
+- **Bug fix — template.yaml Outputs indentation**: Fixed [`template.yaml`](template.yaml) — `Outputs` section was incorrectly nested inside `Resources` (2-space indent) instead of being a top-level YAML key (0 indent). While SAM/CloudFormation may have handled this gracefully, the correct placement ensures template validation passes strictly and avoids future deployment issues.
+- **Tests added**: 18 new tests (total 363, up from 345):
+  - `test_warmup_returns_warmed_status`: verifies warmup event returns `{'status': 'warmed'}`
+  - `test_warmup_downloads_and_uploads_s3`: verifies S3 download+upload on warmup
+  - `test_warmup_does_not_run_summarizer`: verifies summarizer not called on warmup
+  - `test_warmup_returns_warmed_on_telegram_failure`: verifies warmup succeeds even if Telegram connection fails
+  - `test_warmup_string_true`: verifies `warmup="true"` parsed correctly
+  - `test_start_clients_has_retry_loop`: verifies AST: start_clients has retry for-loop
+  - `test_start_clients_max_retries_constant`: verifies `max_retries` in start_clients
+  - `test_channel_summary_prompt_has_brevity_rule`: verifies "без вводных слов" in prompts
+  - `test_group_summary_prompt_has_brevity_rule`: verifies both prompts have brevity rule
+  - `test_strips_стоит_отметить_intro`: verifies "Стоит отметить" stripped from summary start
+  - `test_strips_следует_отметить_intro`: verifies "Следует отметить" stripped from summary start
+  - `test_strips_важно_отметить_intro`: verifies "Важно отметить" stripped from summary start
+  - `test_strips_подводя_итог_outro`: verifies "Подводя итог" stripped from summary end
+  - `test_strips_резюмируя_outro`: verifies "Резюмируя" stripped from summary end
+  - `test_preserves_стоит_отметить_in_body`: verifies "стоит отметить" in body preserved
+  - `test_template_outputs_at_top_level`: verifies `Outputs` at 0 indent in template.yaml
+  - `test_template_contains_warmup_schedule_parameter`: verifies `WarmupScheduleExpression` in template
+  - `test_template_contains_warmup_event`: verifies `WarmupRun` and `HasWarmupSchedule` in template
+- All 363 tests pass without errors.
+
+## Next actions
+
+- Consider tuning warmup schedule frequency for cost-effectiveness
+- Consider adding CloudWatch alarm on Lambda warmup failures
 
 - **Observability — per-invocation cumulative cost EMF metric**: Added [`_emit_invocation_summary()`](lambda_handler.py) that emits an EMF metric at the end of each Lambda invocation (both success and error paths) with `CumulativePromptTokens`, `CumulativeCompletionTokens`, `CumulativeCostUSD`, and `ElapsedSeconds` under the `tg_summarizer/Invocation` namespace with only the `Function` dimension (no `Model`). Unlike the per-call EMF in [`_emit_openai_latency()`](utils.py) (which has `Function+Model` dimensions), this metric aggregates across models, enabling CloudWatch Sum-based daily cost alerting. Skips emission when no tokens were used.
 - **Observability — daily cost alarm**: Added `OpenAIDailyCostAlarm` in [`template.yaml`](template.yaml) — alerts when cumulative `CumulativeCostUSD` (Sum statistic, 86400s period) exceeds $1.00 per day. Uses the new `tg_summarizer/Invocation` namespace. Complements the existing `OpenAICostAlarm` (per-invocation Maximum > $0.10). Directly addresses the TODO item "Consider adding CloudWatch metric filter on `token_usage` field for cost alerting" — the EMF metric approach is cleaner than a Logs metric filter and provides the same daily cost alerting capability.
