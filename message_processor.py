@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from typing import List, Optional, Set
 from models import MessageInfo, SummaryInfo
-from utils import call_openai, extract_links, count_characters, enforce_summary_length, strip_meta_artifacts, text_hash
+from utils import call_openai, extract_links, count_characters, enforce_summary_length, strip_meta_artifacts, text_hash, is_circuit_breaker_open
 from config import (
     SIMILARITY_LLM_UPPER,
     ENABLE_SUMMARIES_DEDUPLICATION,
@@ -115,6 +115,8 @@ async def is_nlp_related(text: str) -> tuple[bool, str]:
         return False, "too_short"
     if _is_obvious_non_nlp(text):
         return False, "ad_keyword"
+    if is_circuit_breaker_open():
+        return False, "circuit_breaker_open"
     truncated = text[:NLP_CHECK_MAX_INPUT_CHARS]
     answer = await call_openai(prompts.NLP_RELEVANCE_PROMPT, truncated, max_tokens=10, temperature=0)
     return answer.lower().strip().startswith("да"), answer

@@ -89,6 +89,7 @@ def _stub_dependencies(fake_openai_response: str = "[1] New AI breakthrough"):
     fake_utils.count_characters = _stub_count_characters
     fake_utils.enforce_summary_length = _stub_enforce_summary_length
     fake_utils.strip_meta_artifacts = lambda text: text
+    fake_utils.is_circuit_breaker_open = lambda: False
 
     async def fake_call_openai(system_prompt, user_content, max_tokens=None, **kwargs):
         return fake_openai_response
@@ -900,6 +901,253 @@ class TemplateDashboardTests(unittest.TestCase):
             content = f.read()
         self.assertIn("WarmupRun", content)
         self.assertIn("HasWarmupSchedule", content)
+
+
+class NewMetaArtifactPatternsTests(unittest.TestCase):
+    """Tests for newly added meta-artifact patterns (таким образом, отметим, etc.)."""
+
+    def _import_utils(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_openai = types.ModuleType("openai")
+
+        class FakeOpenAI:
+            def __init__(self, api_key, **kwargs):
+                pass
+
+        class FakeOpenAIError(Exception):
+            pass
+
+        fake_openai.OpenAI = FakeOpenAI
+        fake_openai.AsyncOpenAI = FakeOpenAI
+        fake_openai.APIError = FakeOpenAIError
+        fake_openai.RateLimitError = type("RateLimitError", (FakeOpenAIError,), {"status_code": None})
+        fake_openai.APIConnectionError = type("APIConnectionError", (FakeOpenAIError,), {})
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv, "openai": fake_openai}):
+            with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+                sys.modules.pop("config", None)
+                sys.modules.pop("utils", None)
+                import importlib
+                return importlib.import_module("utils")
+
+    def test_strips_таким_образом_outro(self):
+        """'Таким образом' at start of text should be stripped."""
+        utils = self._import_utils()
+        text = "Таким образом, рынок растёт"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Таким образом", result)
+
+    def test_strips_таким_образом_intro(self):
+        """'Таким образом' at start of text should be stripped."""
+        utils = self._import_utils()
+        text = "Таким образом, всё хорошо\n<b>AI news</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Таким образом", result)
+
+    def test_preserves_таким_образом_in_middle(self):
+        """'таким образом' in the middle of body text should be preserved."""
+        utils = self._import_utils()
+        text = "<b>AI</b>\nМодель обрабатывает данные, и таким образом результат получается лучше"
+        result = utils.strip_meta_artifacts(text)
+        self.assertIn("таким образом", result.lower())
+
+    def test_strips_отметим_intro(self):
+        utils = self._import_utils()
+        text = "Отметим, что модель обновлена\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Отметим", result)
+
+    def test_strips_как_уже_упоминалось_outro(self):
+        utils = self._import_utils()
+        text = "<b>AI</b>\nКак уже упоминалось, это важно"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Как уже упоминалось", result)
+
+    def test_strips_в_данном_обзоре_intro(self):
+        utils = self._import_utils()
+        text = "В данном обзоре мы рассмотрим\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("В данном обзоре", result)
+
+    def test_strips_ниже_представлены_intro(self):
+        utils = self._import_utils()
+        text = "Ниже представлены результаты\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Ниже представлены", result)
+
+    def test_strips_давайте_рассмотрим_intro(self):
+        utils = self._import_utils()
+        text = "Давайте рассмотрим новые модели\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Давайте рассмотрим", result)
+
+
+class IsCircuitBreakerOpenTests(unittest.TestCase):
+    """Tests for is_circuit_breaker_open helper."""
+
+    def _import_utils(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_openai = types.ModuleType("openai")
+
+        class FakeOpenAI:
+            def __init__(self, api_key, **kwargs):
+                pass
+
+        class FakeOpenAIError(Exception):
+            pass
+
+        fake_openai.OpenAI = FakeOpenAI
+        fake_openai.AsyncOpenAI = FakeOpenAI
+        fake_openai.APIError = FakeOpenAIError
+        fake_openai.RateLimitError = type("RateLimitError", (FakeOpenAIError,), {"status_code": None})
+        fake_openai.APIConnectionError = type("APIConnectionError", (FakeOpenAIError,), {})
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv, "openai": fake_openai}):
+            with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+                sys.modules.pop("config", None)
+                sys.modules.pop("utils", None)
+                import importlib
+                return importlib.import_module("utils")
+
+    def test_returns_false_when_closed(self):
+        utils = self._import_utils()
+        utils.reset_circuit_breaker()
+        self.assertFalse(utils.is_circuit_breaker_open())
+
+
+class NLPCircuitBreakerTests(unittest.TestCase):
+    """Tests for is_nlp_related returning circuit_breaker_open reason."""
+
+    def test_nlp_related_checks_circuit_breaker_before_llm(self):
+        """is_nlp_related should check circuit breaker and return early with circuit_breaker_open reason."""
+        import ast
+        with open("message_processor.py") as f:
+            source = f.read()
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.AsyncFunctionDef) and node.name == "is_nlp_related":
+                body_source = ast.get_source_segment(source, node)
+                self.assertIn("is_circuit_breaker_open", body_source,
+                              "is_nlp_related should check is_circuit_breaker_open before calling call_openai")
+                return
+        self.fail("is_nlp_related function not found")
+
+
+class LambdaEventValidationTests(unittest.TestCase):
+    """Tests for Lambda event input validation."""
+
+    @staticmethod
+    def _load_lambda_handler():
+        import importlib
+        fake_summarizer = types.ModuleType("summarizer")
+        fake_summarizer.run_summarizer = AsyncMock()
+        fake_summarizer.DeadlineExceededError = type("DeadlineExceededError", (Exception,), {})
+        fake_config = types.ModuleType("config")
+        fake_config.validate_config = lambda: None
+        fake_config.OPENAI_MODEL = "gpt-4.1-nano"
+        fake_utils = types.ModuleType("utils")
+        fake_utils.get_circuit_breaker_state = lambda: {"state": "closed", "failures": 0}
+        fake_utils.reset_circuit_breaker = lambda: None
+        fake_utils.get_token_usage = lambda: {"prompt_tokens": 0, "completion_tokens": 0}
+        fake_utils.reset_token_usage = lambda: None
+        fake_utils._estimate_cost_usd = lambda model, pt, ct: 0.0
+        sys.modules["summarizer"] = fake_summarizer
+        sys.modules["config"] = fake_config
+        sys.modules["utils"] = fake_utils
+        sys.modules.pop("lambda_handler", None)
+        return importlib.import_module("lambda_handler")
+
+    def test_handler_handles_none_event(self):
+        lambda_handler = self._load_lambda_handler()
+        with patch.object(lambda_handler.os, "chdir"), \
+             patch.object(lambda_handler, "download_from_s3"), \
+             patch.object(lambda_handler, "upload_to_s3", return_value={"uploaded": 0, "failed": 0, "skipped_empty": 0}):
+            result = lambda_handler.handler(None, None)
+            self.assertIn("status", result)
+
+    def test_handler_handles_string_event(self):
+        lambda_handler = self._load_lambda_handler()
+        with patch.object(lambda_handler.os, "chdir"), \
+             patch.object(lambda_handler, "download_from_s3"), \
+             patch.object(lambda_handler, "upload_to_s3", return_value={"uploaded": 0, "failed": 0, "skipped_empty": 0}):
+            result = lambda_handler.handler("not a dict", None)
+            self.assertIn("status", result)
+
+
+class NLPPromptSimpleYesNoTests(unittest.TestCase):
+    """Tests that NLP prompt asks for simple да/нет response."""
+
+    def test_nlp_prompt_asks_only_yes_no(self):
+        with open("prompts.py") as f:
+            source = f.read()
+        self.assertIn("Ответь только 'да' или 'нет'", source)
+        self.assertNotIn("напиши \"нет, причина:\"", source)
+
+
+class CostFallbackMatchesDefaultModelTests(unittest.TestCase):
+    """Tests that cost fallback uses gpt-4.1-nano pricing."""
+
+    def _import_utils(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_openai = types.ModuleType("openai")
+
+        class FakeOpenAI:
+            def __init__(self, api_key, **kwargs):
+                pass
+
+        class FakeOpenAIError(Exception):
+            pass
+
+        fake_openai.OpenAI = FakeOpenAI
+        fake_openai.AsyncOpenAI = FakeOpenAI
+        fake_openai.APIError = FakeOpenAIError
+        fake_openai.RateLimitError = type("RateLimitError", (FakeOpenAIError,), {"status_code": None})
+        fake_openai.APIConnectionError = type("APIConnectionError", (FakeOpenAIError,), {})
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv, "openai": fake_openai}):
+            with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+                sys.modules.pop("config", None)
+                sys.modules.pop("utils", None)
+                import importlib
+                return importlib.import_module("utils")
+
+    def test_cost_fallback_is_nano_pricing(self):
+        utils = self._import_utils()
+
+        cost = utils._estimate_cost_usd("unknown-model", 1_000_000, 0)
+        self.assertAlmostEqual(cost, 0.10, places=2,
+                               msg="Fallback cost for unknown model should match gpt-4.1-nano input pricing ($0.10/M)")
+
+        cost2 = utils._estimate_cost_usd("unknown-model", 0, 1_000_000)
+        self.assertAlmostEqual(cost2, 0.40, places=2,
+                               msg="Fallback cost for unknown model should match gpt-4.1-nano output pricing ($0.40/M)")
+
+
+class TemplateConfigSyncTests(unittest.TestCase):
+    """Tests that template.yaml includes all tunable config parameters."""
+
+    def test_template_has_update_match_max_summaries(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        self.assertIn("UpdateMatchMaxSummaries", content)
+
+    def test_template_has_max_channel_history_messages(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        self.assertIn("MaxChannelHistoryMessages", content)
+
+    def test_template_has_restore_history_days(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        self.assertIn("RestoreHistoryDays", content)
+
+    def test_template_has_group_summarization_interval(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        self.assertIn("GroupSummarizationIntervalSeconds", content)
 
 
 if __name__ == "__main__":

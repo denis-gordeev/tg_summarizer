@@ -6,10 +6,6 @@ from typing import List, Optional, Any
 
 from telethon import TelegramClient  # type: ignore[reportMissingTypeStubs]
 from telethon.errors import FloodWaitError  # type: ignore[reportMissingTypeStubs]
-from telethon.tl.functions.channels import (  # type: ignore[reportMissingTypeStubs]
-    GetChannelRecommendationsRequest,
-)
-from telethon.tl.types import InputChannel  # type: ignore[reportMissingTypeStubs]
 
 from config import API_HASH, API_ID, BOT_TOKEN, SOURCE_GROUPS, MAX_MESSAGES_PER_SOURCE, TELEGRAM_MAX_MESSAGE_LENGTH, FETCH_EXAMINED_MULTIPLIER
 from history_manager import load_group_summarization_history, load_summarization_history
@@ -35,52 +31,6 @@ async def _ensure_clients() -> None:
 async def _ensure_bot_client() -> None:
     """Ensure bot client is connected, starting it if needed."""
     await _ensure_clients()
-
-
-async def get_similar_channels_from_telegram(channel_username: Optional[str] = None) -> List[str]:
-    """Получает список похожих каналов через Telegram API."""
-    try:
-        global user_client
-        await _ensure_clients()
-
-        # Если указан канал, получаем рекомендации для него
-        if channel_username:
-            # Убираем @ если есть
-            channel_username = channel_username.lstrip("@")
-
-            # Получаем информацию о канале
-            try:
-                channel_entity = await user_client.get_entity(f"@{channel_username}")
-                channel_input = InputChannel(channel_entity.id, channel_entity.access_hash)
-
-                # Получаем рекомендации
-                result = await user_client(GetChannelRecommendationsRequest(channel=channel_input))
-
-                similar_channels = []
-                for chat in result.chats:
-                    if hasattr(chat, "username") and chat.username:
-                        similar_channels.append(f"@{chat.username}")
-
-                return similar_channels
-
-            except Exception as e:
-                logger.error("Error getting recommendations for channel %s: %s", channel_username, e)
-                return []
-
-        # Если канал не указан, получаем глобальные рекомендации
-        else:
-            result = await user_client(GetChannelRecommendationsRequest())
-
-            similar_channels = []
-            for chat in result.chats:
-                if hasattr(chat, "username") and chat.username:
-                    similar_channels.append(f"@{chat.username}")
-
-            return similar_channels
-
-    except Exception as e:
-        logger.error("Error getting similar channels: %s", e)
-        return []
 
 
 async def _fetch_from_sources(

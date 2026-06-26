@@ -133,7 +133,7 @@ _COST_PER_MILLION = {
 }
 
 def _estimate_cost_usd(model: str, prompt_tokens: int, completion_tokens: int) -> float:
-    input_per_m, output_per_m = _COST_PER_MILLION.get(model, (0.15, 0.60))
+    input_per_m, output_per_m = _COST_PER_MILLION.get(model, (0.10, 0.40))
     return prompt_tokens * input_per_m / 1_000_000 + completion_tokens * output_per_m / 1_000_000
 
 
@@ -192,6 +192,10 @@ def get_circuit_breaker_state() -> dict:
     if _CIRCUIT_BREAKER_OPEN_SINCE and (_time.monotonic() - _CIRCUIT_BREAKER_OPEN_SINCE) < CIRCUIT_BREAKER_RESET_SEC:
         return {"state": "open", "failures": _CIRCUIT_BREAKER_FAILURES, "open_since_elapsed": round(_time.monotonic() - _CIRCUIT_BREAKER_OPEN_SINCE, 1)}
     return {"state": "half_open", "failures": _CIRCUIT_BREAKER_FAILURES, "open_since_elapsed": round(_time.monotonic() - _CIRCUIT_BREAKER_OPEN_SINCE, 1)}
+
+
+def is_circuit_breaker_open() -> bool:
+    return get_circuit_breaker_state()["state"] == "open"
 
 
 def reset_circuit_breaker() -> None:
@@ -388,9 +392,15 @@ def _truncate_html_preserving_tags(text: str, max_visible_chars: int) -> str:
     return output.strip()
 
 
+_META_ARTIFACT_INTRO_ONLY = re.compile(
+    r"^[^<\n]*?(?:таким образом|отметим|заметим|в данном обзоре|в данной статье|ниже представлены|ниже приведены|давайте рассмотрим)[^\n]*\n*",
+    re.IGNORECASE,
+)
+
 _META_ARTIFACT_PATTERNS = [
-    re.compile(r"^[^<\n]*?(?:в этом дайджесте|итого|в заключение|подведя итог|в итоге|итак|в общем|вкратце|как видно|обратите внимание|напомним|также стоит отметить|стоит отметить|следует отметить|важно отметить|подводя итог|резюмируя|ключевые выводы|в целом)[^\n]*\n*", re.IGNORECASE),
-    re.compile(r"\n[^<\n]*?(?:в этом дайджесте|итого|в заключение|подведя итог|в итоге|итак|в общем|вкратце|как видно|обратите внимание|напомним|также стоит отметить|подводя итог|резюмируя|ключевые выводы|в целом)[^\n]*$", re.IGNORECASE),
+    re.compile(r"^[^<\n]*?(?:в этом дайджесте|итого|в заключение|подведя итог|в итоге|итак|в общем|вкратце|как видно|обратите внимание|напомним|также стоит отметить|стоит отметить|следует отметить|важно отметить|подводя итог|резюмируя|ключевые выводы|в целом|как уже упоминалось)[^\n]*\n*", re.IGNORECASE),
+    re.compile(r"\n[^<\n]*?(?:в этом дайджесте|итого|в заключение|подведя итог|в итоге|итак|в общем|вкратце|как видно|обратите внимание|напомним|также стоит отметить|подводя итог|резюмируя|ключевые выводы|в целом|как уже упоминалось)[^\n]*$", re.IGNORECASE),
+    _META_ARTIFACT_INTRO_ONLY,
     re.compile(r"\n[^<\n]*?другие ссылки:\s*[^\n]*$", re.IGNORECASE),
     re.compile(r"^[^<\n]*?(?:смотри также|подробнее)\s*:\s*[^\n]*\n*", re.IGNORECASE),
     re.compile(r"\n[^<\n]*?(?:смотри также|подробнее)\s*:\s*[^\n]*$", re.IGNORECASE),

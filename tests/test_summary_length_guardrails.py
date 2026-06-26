@@ -90,6 +90,7 @@ def _stub_dependencies():
     fake_utils.enforce_summary_length = _stub_enforce_summary_length
     fake_utils.strip_meta_artifacts = lambda text: text
     fake_utils.text_hash = lambda text: __import__('hashlib').sha256(text.encode()).hexdigest()[:16]
+    fake_utils.is_circuit_breaker_open = lambda: False
 
     return {
         "dotenv": fake_dotenv,

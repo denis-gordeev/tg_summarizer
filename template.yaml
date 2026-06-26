@@ -18,6 +18,8 @@ Globals:
         OPENAI_SUMMARY_TEMPERATURE: !Ref OpenAISummaryTemperature
         UPDATE_SUMMARY_MAX_TOKENS: !Ref UpdateSummaryMaxTokens
         UPDATE_SUMMARY_MAX_INPUT_CHARS: !Ref UpdateSummaryMaxInputChars
+        UPDATE_MATCH_MAX_SUMMARIES: !Ref UpdateMatchMaxSummaries
+        UPDATE_MATCH_MAX_CHARS_PER_SUMMARY: !Ref UpdateMatchMaxCharsPerSummary
         NLP_CHECK_MAX_INPUT_CHARS: !Ref NlpCheckMaxInputChars
         COVERAGE_CHECK_MAX_INPUT_CHARS: !Ref CoverageCheckMaxInputChars
         NLP_MIN_TEXT_LENGTH: !Ref NlpMinTextLength
@@ -29,6 +31,12 @@ Globals:
         ENABLE_SUMMARY_UPDATES: !Ref EnableSummaryUpdates
         SIMILARITY_LLM_UPPER: !Ref SimilarityLlmUpper
         MAX_COVERED_MESSAGE_UPDATES: !Ref MaxCoveredMessageUpdates
+        MAX_CHANNEL_HISTORY_MESSAGES: !Ref MaxChannelHistoryMessages
+        MAX_CHANNEL_SUMMARIES: !Ref MaxChannelSummaries
+        MAX_GROUP_HISTORY_MESSAGES: !Ref MaxGroupHistoryMessages
+        MAX_GROUP_SUMMARIES: !Ref MaxGroupSummaries
+        GROUP_SUMMARIZATION_INTERVAL_SECONDS: !Ref GroupSummarizationIntervalSeconds
+        RESTORE_HISTORY_DAYS: !Ref RestoreHistoryDays
         CIRCUIT_BREAKER_THRESHOLD: !Ref CircuitBreakerThreshold
         CIRCUIT_BREAKER_RESET_SEC: !Ref CircuitBreakerResetSec
         RESTORE_TIMEOUT_SEC: !Ref RestoreTimeoutSec
@@ -137,7 +145,17 @@ Parameters:
     Type: String
     Description: Max chars of summary content sent to update LLM call
     Default: "2000"
-   
+  
+  UpdateMatchMaxSummaries:
+    Type: String
+    Description: Max number of recent summaries sent to coverage+match check
+    Default: "5"
+  
+  UpdateMatchMaxCharsPerSummary:
+    Type: String
+    Description: Max chars per summary in coverage+match context
+    Default: "500"
+    
   NlpCheckMaxInputChars:
     Type: String
     Description: Max chars of message text sent to NLP relevance check
@@ -198,6 +216,36 @@ Parameters:
     Type: String
     Description: Max number of covered-message summary updates per invocation
     Default: "5"
+  
+  MaxChannelHistoryMessages:
+    Type: String
+    Description: Max processed message IDs retained in channel history
+    Default: "1000"
+  
+  MaxChannelSummaries:
+    Type: String
+    Description: Max summaries retained in channel summaries history
+    Default: "50"
+  
+  MaxGroupHistoryMessages:
+    Type: String
+    Description: Max processed message IDs retained in group history
+    Default: "1000"
+  
+  MaxGroupSummaries:
+    Type: String
+    Description: Max summaries retained in group summaries history
+    Default: "100"
+  
+  GroupSummarizationIntervalSeconds:
+    Type: String
+    Description: Minimum seconds between group summarization runs
+    Default: "86400"
+  
+  RestoreHistoryDays:
+    Type: String
+    Description: Number of days to look back when restoring summaries from channel
+    Default: "7"
    
   CircuitBreakerThreshold:
     Type: String

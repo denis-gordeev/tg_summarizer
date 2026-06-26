@@ -2,37 +2,49 @@
 
 Живой список задач для автоматических раундов.
 
-## Completed in 2026-06-26 round (Lambda hardening round 35, warmup observability, prompt brevity, meta-artifacts expansion, S3 upload warning)
+## Completed in 2026-06-26 round (Lambda hardening round 36, update meta-artifacts, circuit breaker NLP, prompt token savings, dead code removal, config sync)
 
-- **Observability — warmup EMF metric**: Added [`_emit_warmup_metric()`](lambda_handler.py) that emits an EMF metric under `tg_summarizer/Warmup` namespace with `Success` (1/0) and `ElapsedSeconds` on each warmup invocation. Previously, warmup events were invisible to CloudWatch beyond Lambda logs. Now warmup success/failure can be monitored and alerted on via CloudWatch metrics.
-- **Observability — CloudWatch alarm on warmup failures**: Added `WarmupFailuresAlarm` in [`template.yaml`](template.yaml) — alerts when `Success` metric (Minimum statistic) drops to 0 for 2 consecutive 5-minute periods, indicating persistent warmup failures. Only created when `HasWarmupSchedule` condition is true. Directly addresses the TODO item "Consider adding CloudWatch alarm on Lambda warmup failures".
-- **Observability — warmup status dashboard widget**: Added fifth widget "Warmup Status" to [`SummarizerDashboard`](template.yaml) showing `Success` (left axis, 0/1) and `ElapsedSeconds` (right axis, seconds) from the `tg_summarizer/Warmup` namespace. Provides visibility into warmup health alongside existing Lambda, OpenAI, and invocation metrics.
-- **Quality — expanded strip_meta_artifacts**: Added `"ключевые выводы"` and `"в целом"` patterns to both intro and outro patterns in [`_META_ARTIFACT_PATTERNS`](utils.py). These are common LLM meta-artifacts: "Ключевые выводы" is a summary recap header, "В целом" is a vague generalization filler. Both violate the "Без введения, заключения и мета-комментариев" prompt rule. Considered adding "главное" but rejected — too ambiguous, would strip legitimate body text like "Главное преимущество модели".
-- **Prompt quality — one sentence per fact rule**: Added "Одно предложение на факт, без пояснений" rule to both [`CHANNEL_SUMMARY_PROMPT`](prompts.py) and [`GROUP_SUMMARY_PROMPT`](prompts.py). Complements the existing "Пиши максимально кратко" and "Без воды" rules by specifically targeting verbose multi-sentence elaborations per fact. Directly targets the AUTOWORK_INSTRUCTIONS goal of improving quality and conciseness.
-- **Robustness — S3 upload failure warning**: Added warning log in [`lambda_handler.handler()`](lambda_handler.py) when `upload_to_s3()` returns non-zero `failed` count. Previously, S3 upload failures were only visible in the upload summary log line — now a dedicated warning makes them prominent in CloudWatch logs and enables metric-filter-based alerting.
-- **Tests added**: 15 new tests (total 378, up from 363):
-  - `test_emit_warmup_metric_writes_emf`: verifies EMF JSON output with correct metrics and namespace
-  - `test_emit_warmup_metric_success_is_1`: verifies Success=1 on successful warmup
-  - `test_emit_warmup_metric_failure_is_0`: verifies Success=0 on failed warmup
-  - `test_warmup_emits_metric_on_success`: verifies `_emit_warmup_metric` called with success=True
-  - `test_warmup_emits_metric_on_telegram_failure`: verifies `_emit_warmup_metric` called with success=False
-  - `test_handler_warns_on_s3_upload_failures`: verifies warning log on non-zero failed count
-  - `test_handler_no_warning_on_s3_upload_success`: verifies no warning when failed=0
-  - `test_template_contains_warmup_failures_alarm`: verifies `WarmupFailuresAlarm` and `tg_summarizer/Warmup` in template
-  - `test_template_dashboard_contains_warmup_widget`: verifies "Warmup Status" widget in dashboard
-  - `test_strips_ключевые_выводы_intro`: verifies "Ключевые выводы" stripped from summary start
-  - `test_strips_ключевые_выводы_outro`: verifies "Ключевые выводы" stripped from summary end
-  - `test_strips_в_целом_outro`: verifies "В целом" stripped from summary end
-  - `test_strips_в_целом_intro`: verifies "В целом" stripped from summary start
-  - `test_channel_summary_prompt_has_one_sentence_per_fact_rule`: verifies rule in channel prompt
-  - `test_group_summary_prompt_has_one_sentence_per_fact_rule`: verifies rule in both prompts
-- All 378 tests pass without errors.
+- **Quality — `strip_meta_artifacts` in `update_existing_summary`**: Added `strip_meta_artifacts()` call in [`update_existing_summary()`](history_manager.py) after the LLM response and fallback paths. Previously, only `summarize_text()` and `summarize_group_text()` applied meta-artifact stripping — the update path stored raw LLM output, allowing meta-artifacts like "Итак" or "В заключение" to leak into published summaries and persist in history. Added "Без вводных слов и заключений" to the update prompt to reduce the likelihood of meta-artifacts from the LLM.
+- **Robustness — fallback phrase renamed to avoid `strip_meta_artifacts` conflict**: Changed the fallback link append phrase in [`update_existing_summary()`](history_manager.py) from "Другие ссылки:" to "Доп. источники:". The old phrase was matched by `strip_meta_artifacts()` pattern `другие ссылки:`, causing silent data loss when a fallback-created summary was later re-processed (e.g., during channel restore). The new phrase "Доп. источники:" is not in the strip patterns, so appended links survive re-processing. Updated the update prompt to reference the new phrase. Updated all test assertions from "Другие ссылки:" to "Доп. источники:".
+- **Observability — circuit breaker check in `is_nlp_related`**: Added `is_circuit_breaker_open()` check in [`is_nlp_related()`](message_processor.py) — when the circuit breaker is open, `call_openai()` returns `""` and `is_nlp_related` was returning `(False, "")` with an empty reason, making it look like NLP rejection rather than circuit breaker rejection. Now returns `(False, "circuit_breaker_open")` immediately, skipping the LLM call entirely and providing a clear reason for CloudWatch log analysis. Added [`is_circuit_breaker_open()`](utils.py) helper that returns `True` when `get_circuit_breaker_state()["state"] == "open"`.
+- **Quality — expanded `strip_meta_artifacts`**: Added "таким образом", "отметим", "заметим", "как уже упоминалось", "в данном обзоре", "в данной статье", "ниже представлены", "ниже приведены", "давайте рассмотрим" to the intro pattern in [`_META_ARTIFACT_PATTERNS`](utils.py). "таким образом" and "отметим"/"заметим" are common LLM transition/filler phrases at the start of summaries. "в данном обзоре", "ниже представлены", "давайте рассмотрим" are meta-structural markers. These are only added to the intro pattern (start of text) because they can appear legitimately in body text — added as a separate [`_META_ARTIFACT_INTRO_ONLY`](utils.py) pattern. "как уже упоминалось" is added to both intro and outro patterns since it's always a redundant cross-reference.
+- **Cost optimization — NLP prompt simplified to да/нет**: Changed [`NLP_RELEVANCE_PROMPT`](prompts.py) from `"Если 'нет' — напиши "нет, причина: " и объясни"` to `"Ответь только 'да' или 'нет'"`. The previous instruction forced the LLM to generate an explanation (~10-30 completion tokens) for every rejected message, but `is_nlp_related()` only checks `answer.startswith("да")` — the reason was unused. With ~50-80% of messages rejected, this saves ~5-20 completion tokens per rejection. At `gpt-4.1-nano` pricing ($0.40/M output), this reduces NLP check output cost by ~50%.
+- **Cost optimization — fallback pricing matches default model**: Changed `_COST_PER_MILLION` fallback in [`_estimate_cost_usd()`](utils.py) from `(0.15, 0.60)` (gpt-4o-mini) to `(0.10, 0.40)` (gpt-4.1-nano). The default model is `gpt-4.1-nano`, so the fallback for unknown models should use its pricing, not the more expensive gpt-4o-mini pricing.
+- **Code quality — removed dead `get_similar_channels_from_telegram()`**: Removed 44-line unused function [`get_similar_channels_from_telegram()`](telegram_client.py) and its `GetChannelRecommendationsRequest`/`InputChannel` imports. This function was never called from any module in the codebase. Reduced Lambda package size and maintenance burden.
+- **Robustness — Lambda event input validation**: Added `if not isinstance(event, dict): event = {}` at the start of [`handler()`](lambda_handler.py). Previously, a malformed EventBridge event (string, None, etc.) would cause `AttributeError` on `event.get()`. Now gracefully defaults to empty dict, using default flag values.
+- **Observability — SAM template config sync**: Added 9 missing config constants as Parameters and Environment Variables in [`template.yaml`](template.yaml): `UpdateMatchMaxSummaries`, `UpdateMatchMaxCharsPerSummary`, `MaxChannelHistoryMessages`, `MaxChannelSummaries`, `MaxGroupHistoryMessages`, `MaxGroupSummaries`, `GroupSummarizationIntervalSeconds`, `RestoreHistoryDays`. Previously, these were configurable via env vars in `config.py` but not exposed in the SAM template, making them impossible to tune via CloudFormation without code changes.
+- **Documentation — `.env.example` sync**: Added 9 missing config constants to [`.env.example`](.env.example): `UPDATE_MATCH_MAX_SUMMARIES`, `UPDATE_MATCH_MAX_CHARS_PER_SUMMARY`, `MAX_CHANNEL_HISTORY_MESSAGES`, `MAX_CHANNEL_SUMMARIES`, `MAX_GROUP_HISTORY_MESSAGES`, `MAX_GROUP_SUMMARIES`, `GROUP_SUMMARIZATION_INTERVAL_SECONDS`, `RESTORE_HISTORY_DAYS`, `DEBUG`.
+- **Tests added**: 19 new tests (total 397, up from 378):
+  - `test_update_strips_meta_artifacts_from_llm_response`: verifies `strip_meta_artifacts` is called in `update_existing_summary`
+  - `test_strips_таким_образом_outro`: verifies "Таким образом" at text start stripped
+  - `test_strips_таким_образом_intro`: verifies "Таким образом" intro stripped
+  - `test_preserves_таким_образом_in_middle`: verifies "таким образом" in body preserved
+  - `test_strips_отметим_intro`: verifies "Отметим" intro stripped
+  - `test_strips_как_уже_упоминалось_outro`: verifies "Как уже упоминалось" outro stripped
+  - `test_strips_в_данном_обзоре_intro`: verifies "В данном обзоре" intro stripped
+  - `test_strips_ниже_представлены_intro`: verifies "Ниже представлены" intro stripped
+  - `test_strips_давайте_рассмотрим_intro`: verifies "Давайте рассмотрим" intro stripped
+  - `test_returns_false_when_closed`: verifies `is_circuit_breaker_open()` returns False when breaker is closed
+  - `test_nlp_related_checks_circuit_breaker_before_llm`: verifies `is_nlp_related` checks circuit breaker (AST)
+  - `test_handler_handles_none_event`: verifies Lambda handler handles None event gracefully
+  - `test_handler_handles_string_event`: verifies Lambda handler handles string event gracefully
+  - `test_nlp_prompt_asks_only_yes_no`: verifies NLP prompt asks for simple да/нет
+  - `test_cost_fallback_is_nano_pricing`: verifies fallback cost matches gpt-4.1-nano ($0.10/$0.40)
+  - `test_template_has_update_match_max_summaries`: verifies `UpdateMatchMaxSummaries` in template.yaml
+  - `test_template_has_max_channel_history_messages`: verifies `MaxChannelHistoryMessages` in template.yaml
+  - `test_template_has_restore_history_days`: verifies `RestoreHistoryDays` in template.yaml
+  - `test_template_has_group_summarization_interval`: verifies `GroupSummarizationIntervalSeconds` in template.yaml
+- Updated test stubs in [`tests/test_process_messages_integration.py`](tests/test_process_messages_integration.py), [`tests/test_digest_post_processing.py`](tests/test_digest_post_processing.py), [`tests/test_summary_length_guardrails.py`](tests/test_summary_length_guardrails.py) — added `is_circuit_breaker_open` to all `fake_utils` stubs.
+- Updated fallback phrase assertions in [`tests/test_history_manager.py`](tests/test_history_manager.py) — changed all "Другие ссылки:" assertions to "Доп. источники:".
+- All 397 tests pass without errors.
 
 ## Next actions
 
 - Consider adding CloudWatch Logs metric filter on S3 upload failure warning for automated alerting
 - Consider evaluating gpt-4.1-nano vs gpt-4o-mini quality tradeoff with A/B testing
 - Consider adding Lambda provisioned concurrency for more predictable cold starts
+- Consider moving update_existing_summary prompt to PromptManager for runtime tunability
+- Consider adding EMF metric for coverage dedup hit rate for tuning ENABLE_SUMMARIES_DEDUPLICATION
 
 ## Completed in 2026-06-25 round (Lambda hardening round 34, Lambda warmup, Telegram retry, prompt brevity, meta-artifacts expansion, template fix)
 

@@ -117,6 +117,8 @@ def _emit_warmup_metric(success: bool, elapsed_seconds: float) -> None:
 
 
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    if not isinstance(event, dict):
+        event = {}
     request_id = getattr(context, 'aws_request_id', None) if context else None
     if request_id:
         logger.info("Lambda invocation %s", request_id)

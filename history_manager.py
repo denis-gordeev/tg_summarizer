@@ -25,7 +25,7 @@ from config import (
     GROUP_SUMMARY_MAX_LENGTH,
 )
 from models import MessageInfo, SummaryInfo
-from utils import call_openai, extract_links, extract_all_channels, count_characters, enforce_summary_length, load_json_file, save_json_file, now_iso, text_hash
+from utils import call_openai, extract_links, extract_all_channels, count_characters, enforce_summary_length, load_json_file, save_json_file, now_iso, text_hash, strip_meta_artifacts
 
 logger = logging.getLogger(__name__)
 
@@ -359,8 +359,8 @@ async def update_existing_summary(
     update_prompt = f"""Вставь ссылку {new_link} в подходящее место саммари.
 Скопируй саммари и добавь ссылку рядом с релевантным абзацем. Остальной текст не меняй.
 Сохрани всё HTML-форматирование: <b>, <a href>, теги и сущности.
-Если нет подходящего места — добавь "Другие ссылки: {new_link}" в конец.
-Ответь только обновлённое саммари."""
+Если нет подходящего места — добавь "Доп. источники: {new_link}" в конец.
+Ответь только обновлённое саммари. Без вводных слов и заключений."""
 
     truncated_summary = summary.content[:UPDATE_SUMMARY_MAX_INPUT_CHARS]
     truncated_msg = new_message.text[:UPDATE_SUMMARY_MAX_INPUT_CHARS]
@@ -370,16 +370,18 @@ async def update_existing_summary(
         updated_content = await call_openai(update_prompt, user_content, max_tokens=UPDATE_SUMMARY_MAX_TOKENS, temperature=0)
         if not updated_content or count_characters(updated_content) < count_characters(summary.content) * 0.8:
             logger.warning("LLM update response too short (%d < %d*0.8); falling back to append", count_characters(updated_content or ""), count_characters(summary.content))
-            if "Другие ссылки:" in summary.content:
+            if "Доп. источники:" in summary.content:
                 updated_content = summary.content + f"\n{new_link}"
             else:
-                updated_content = summary.content + f"\n\nДругие ссылки: {new_link}"
+                updated_content = summary.content + f"\n\nДоп. источники: {new_link}"
     except Exception as e:
         logger.error("Error updating summary via LLM: %s; falling back to append", e)
-        if "Другие ссылки:" in summary.content:
+        if "Доп. источники:" in summary.content:
             updated_content = summary.content + f"\n{new_link}"
         else:
-            updated_content = summary.content + f"\n\nДругие ссылки: {new_link}"
+            updated_content = summary.content + f"\n\nДоп. источники: {new_link}"
+
+    updated_content = strip_meta_artifacts(updated_content)
 
     updated_channels = (
         summary.channels + [new_message.channel]

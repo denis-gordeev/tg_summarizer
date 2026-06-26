@@ -1153,7 +1153,7 @@ class UpdateExistingSummaryLLMTests(unittest.TestCase):
 
                 updated = asyncio.run(_test())
                 self.assertIn("Original summary", updated.content)
-                self.assertIn("Другие ссылки:", updated.content)
+                self.assertIn("Доп. источники:", updated.content)
 
     def test_update_existing_summary_fallback_on_empty_llm_response(self):
         """update_existing_summary should fall back to append on empty LLM response."""
@@ -1225,7 +1225,7 @@ class UpdateExistingSummaryLLMTests(unittest.TestCase):
                     return result
 
                 updated = asyncio.run(_test())
-                self.assertIn("Другие ссылки:", updated.content)
+                self.assertIn("Доп. источники:", updated.content)
 
 
 class UpdateExistingSummaryTemperatureTests(unittest.TestCase):
@@ -1670,7 +1670,7 @@ class UpdateSummaryLengthGuardTests(unittest.TestCase):
                     return await hm.update_existing_summary(summary, msg)
 
                 updated = asyncio.run(_test())
-                self.assertIn("Другие ссылки:", updated.content)
+                self.assertIn("Доп. источники:", updated.content)
                 self.assertIn(original_content, updated.content)
 
     def test_keeps_llm_response_when_length_sufficient(self):
@@ -1698,7 +1698,7 @@ class UpdateSummaryLengthGuardTests(unittest.TestCase):
 
                 updated = asyncio.run(_test())
                 self.assertEqual(updated.content, good_response)
-                self.assertNotIn("Другие ссылки:", updated.content)
+                self.assertNotIn("Доп. источники:", updated.content)
 
 
 class ConfigDedupToggleTests(unittest.TestCase):
@@ -2006,7 +2006,7 @@ class UpdateSummaryFallbackUsesCountCharactersTests(unittest.TestCase):
                     return await hm.update_existing_summary(summary, msg)
 
                 updated = asyncio.run(_test())
-                self.assertIn("Другие ссылки:", updated.content)
+                self.assertIn("Доп. источники:", updated.content)
 
 
 class SaveUpdatedSummaryNoRedundantEnforceTests(unittest.TestCase):
@@ -2178,7 +2178,7 @@ class AtomicJsonWriteTests(unittest.TestCase):
 
 
 class FallbackDedupLinksTests(unittest.TestCase):
-    """Tests for 'Другие ссылки' dedup in update_existing_summary fallback."""
+    """Tests for 'Доп. источники' dedup in update_existing_summary fallback."""
 
     def _make_stubs(self):
         import types
@@ -2233,8 +2233,8 @@ class FallbackDedupLinksTests(unittest.TestCase):
         }
         return stubs, FakeSummaryInfo, FakeMessageInfo
 
-    def test_no_duplicate_Другие_ссылки_on_repeated_fallback(self):
-        """When fallback is triggered on a summary that already has 'Другие ссылки:',
+    def test_no_duplicate_Доп_источники_on_repeated_fallback(self):
+        """When fallback is triggered on a summary that already has 'Доп. источники:',
         the new link should be appended to the existing section, not create a new one."""
         stubs, FakeSI, FakeMI = self._make_stubs()
 
@@ -2244,18 +2244,18 @@ class FallbackDedupLinksTests(unittest.TestCase):
                 sys.modules.pop("config", None)
                 hm = importlib.import_module("history_manager")
 
-                summary = FakeSI(content="Some summary\n\nДругие ссылки: <a href=\"https://t.me/ch/1\">[CH]</a>", message_id=1)
+                summary = FakeSI(content="Some summary\n\nДоп. источники: <a href=\"https://t.me/ch/1\">[CH]</a>", message_id=1)
                 msg = FakeMI(text="New info", channel="@test", message_id=42)
 
                 async def _test():
                     return await hm.update_existing_summary(summary, msg)
 
                 updated = asyncio.run(_test())
-                self.assertEqual(updated.content.count("Другие ссылки:"), 1,
-                                 "Should not create duplicate 'Другие ссылки:' sections")
+                self.assertEqual(updated.content.count("Доп. источники:"), 1,
+                                 "Should not create duplicate 'Доп. источники:' sections")
 
-    def test_creates_Другие_ссылки_when_absent(self):
-        """When summary has no 'Другие ссылки:', fallback should create the section."""
+    def test_creates_Доп_источники_when_absent(self):
+        """When summary has no 'Доп. источники:', fallback should create the section."""
         stubs, FakeSI, FakeMI = self._make_stubs()
 
         with patch.dict(sys.modules, stubs):
@@ -2271,7 +2271,7 @@ class FallbackDedupLinksTests(unittest.TestCase):
                     return await hm.update_existing_summary(summary, msg)
 
                 updated = asyncio.run(_test())
-                self.assertIn("Другие ссылки:", updated.content)
+                self.assertIn("Доп. источники:", updated.content)
 
 
 class SaveUpdatedSummaryWithSummariesParamTests(unittest.TestCase):
@@ -2390,6 +2390,80 @@ class ModuleImportTests(unittest.TestCase):
                         names = [alias.name for alias in child.names]
                         self.assertNotIn("extract_all_channels", names,
                                           "extract_all_channels should not be imported locally inside functions")
+
+
+class UpdateExistingSummaryStripMetaArtifactsTests(unittest.TestCase):
+    """Tests that update_existing_summary applies strip_meta_artifacts to LLM output."""
+
+    def test_update_strips_meta_artifacts_from_llm_response(self):
+        import types
+        import importlib
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_channel_manager = types.ModuleType("channel_manager")
+        fake_channel_manager.create_channel_abbreviation = lambda ch: "AB"
+        fake_channel_manager.load_channel_abbreviations = lambda: {}
+
+        class FakeSummaryInfo:
+            def __init__(self, content="", date=None, message_count=0, channels=None, message_id=None):
+                self.content = content
+                self.date = date or datetime.now(timezone.utc)
+                self.message_count = message_count
+                self.channels = channels or []
+                self.message_id = message_id
+
+        class FakeMessageInfo:
+            def __init__(self, text="", channel="", message_id=0, date=None, link=""):
+                self.text = text
+                self.channel = channel
+                self.message_id = message_id
+                self.date = date or datetime.now(timezone.utc)
+                self.link = link
+
+            def get_telegram_link(self):
+                return f"https://t.me/{self.channel.lstrip('@')}/{self.message_id}"
+
+        fake_models = types.ModuleType("models")
+        fake_models.SummaryInfo = FakeSummaryInfo
+        fake_models.MessageInfo = FakeMessageInfo
+        fake_prompts = types.ModuleType("prompts")
+        fake_prompts.prompts = types.SimpleNamespace()
+
+        fake_utils = types.ModuleType("utils")
+        fake_utils.call_openai = AsyncMock(return_value="Updated summary with link")
+        fake_utils.extract_links = lambda text: []
+        fake_utils.load_json_file = lambda *a, **kw: {"summaries": [], "last_updated": ""}
+        fake_utils.save_json_file = MagicMock(return_value=True)
+        fake_utils.now_iso = lambda: "2026-01-01T00:00:00"
+        fake_utils.text_hash = lambda text: __import__('hashlib').sha256(text.encode()).hexdigest()[:16]
+        fake_utils.count_characters = lambda text: len(text)
+        fake_utils.enforce_summary_length = lambda text, max_chars: text
+        fake_utils.strip_meta_artifacts = MagicMock(side_effect=lambda t: t)
+        fake_utils.extract_all_channels = lambda text: []
+
+        stubs = {
+            "dotenv": fake_dotenv,
+            "channel_manager": fake_channel_manager,
+            "models": fake_models,
+            "prompts": fake_prompts,
+            "utils": fake_utils,
+        }
+
+        with patch.dict(sys.modules, stubs):
+            with patch.dict(os.environ, {}, clear=True):
+                sys.modules.pop("history_manager", None)
+                sys.modules.pop("config", None)
+                hm = importlib.import_module("history_manager")
+
+                summary = FakeSummaryInfo(content="Original summary content here", message_id=1)
+                msg = FakeMessageInfo(text="New info", channel="@test", message_id=42)
+
+                async def _test():
+                    return await hm.update_existing_summary(summary, msg)
+
+                updated = asyncio.run(_test())
+                fake_utils.strip_meta_artifacts.assert_called_once()
 
 
 if __name__ == '__main__':
