@@ -92,6 +92,30 @@ async def _warmup_telegram():
     await stop_clients()
 
 
+def _emit_warmup_metric(success: bool, elapsed_seconds: float) -> None:
+    try:
+        emf = {
+            "_aws": {
+                "Timestamp": int(time.time() * 1000),
+                "CloudWatchMetrics": [{
+                    "Namespace": "tg_summarizer/Warmup",
+                    "Dimensions": [["Function"]],
+                    "Metrics": [
+                        {"Name": "Success", "Unit": "None"},
+                        {"Name": "ElapsedSeconds", "Unit": "Seconds"},
+                    ]
+                }]
+            },
+            "Function": os.getenv("AWS_LAMBDA_FUNCTION_NAME", "local"),
+            "Success": 1 if success else 0,
+            "ElapsedSeconds": round(elapsed_seconds, 1),
+        }
+        sys.stdout.write(_json.dumps(emf, separators=(",", ":")) + "\n")
+        sys.stdout.flush()
+    except Exception:
+        pass
+
+
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     request_id = getattr(context, 'aws_request_id', None) if context else None
     if request_id:
@@ -114,12 +138,15 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     warmup = _parse_event_flag(event.get('warmup'), False)
     if warmup:
         logger.info("Lambda warmup — connecting Telegram clients")
+        warmup_success = True
         try:
             asyncio.run(_warmup_telegram())
         except Exception as e:
             logger.warning("Warmup Telegram connection failed: %s", e)
+            warmup_success = False
         upload_to_s3()
         elapsed = time.monotonic() - start_time
+        _emit_warmup_metric(warmup_success, elapsed)
         return {
             'status': 'warmed',
             'request_id': request_id,
@@ -193,6 +220,13 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     t0 = time.monotonic()
     s3_upload_result = upload_to_s3()
     t_upload = time.monotonic() - t0
+
+    if s3_upload_result.get("failed", 0) > 0:
+        logger.warning(
+            "S3 upload had %d failures out of %d files — state may be incomplete",
+            s3_upload_result["failed"],
+            s3_upload_result["uploaded"] + s3_upload_result["failed"] + s3_upload_result.get("skipped_empty", 0),
+        )
 
     elapsed = time.monotonic() - start_time
     cb_state = get_circuit_breaker_state()

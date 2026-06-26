@@ -2,6 +2,38 @@
 
 Живой список задач для автоматических раундов.
 
+## Completed in 2026-06-26 round (Lambda hardening round 35, warmup observability, prompt brevity, meta-artifacts expansion, S3 upload warning)
+
+- **Observability — warmup EMF metric**: Added [`_emit_warmup_metric()`](lambda_handler.py) that emits an EMF metric under `tg_summarizer/Warmup` namespace with `Success` (1/0) and `ElapsedSeconds` on each warmup invocation. Previously, warmup events were invisible to CloudWatch beyond Lambda logs. Now warmup success/failure can be monitored and alerted on via CloudWatch metrics.
+- **Observability — CloudWatch alarm on warmup failures**: Added `WarmupFailuresAlarm` in [`template.yaml`](template.yaml) — alerts when `Success` metric (Minimum statistic) drops to 0 for 2 consecutive 5-minute periods, indicating persistent warmup failures. Only created when `HasWarmupSchedule` condition is true. Directly addresses the TODO item "Consider adding CloudWatch alarm on Lambda warmup failures".
+- **Observability — warmup status dashboard widget**: Added fifth widget "Warmup Status" to [`SummarizerDashboard`](template.yaml) showing `Success` (left axis, 0/1) and `ElapsedSeconds` (right axis, seconds) from the `tg_summarizer/Warmup` namespace. Provides visibility into warmup health alongside existing Lambda, OpenAI, and invocation metrics.
+- **Quality — expanded strip_meta_artifacts**: Added `"ключевые выводы"` and `"в целом"` patterns to both intro and outro patterns in [`_META_ARTIFACT_PATTERNS`](utils.py). These are common LLM meta-artifacts: "Ключевые выводы" is a summary recap header, "В целом" is a vague generalization filler. Both violate the "Без введения, заключения и мета-комментариев" prompt rule. Considered adding "главное" but rejected — too ambiguous, would strip legitimate body text like "Главное преимущество модели".
+- **Prompt quality — one sentence per fact rule**: Added "Одно предложение на факт, без пояснений" rule to both [`CHANNEL_SUMMARY_PROMPT`](prompts.py) and [`GROUP_SUMMARY_PROMPT`](prompts.py). Complements the existing "Пиши максимально кратко" and "Без воды" rules by specifically targeting verbose multi-sentence elaborations per fact. Directly targets the AUTOWORK_INSTRUCTIONS goal of improving quality and conciseness.
+- **Robustness — S3 upload failure warning**: Added warning log in [`lambda_handler.handler()`](lambda_handler.py) when `upload_to_s3()` returns non-zero `failed` count. Previously, S3 upload failures were only visible in the upload summary log line — now a dedicated warning makes them prominent in CloudWatch logs and enables metric-filter-based alerting.
+- **Tests added**: 15 new tests (total 378, up from 363):
+  - `test_emit_warmup_metric_writes_emf`: verifies EMF JSON output with correct metrics and namespace
+  - `test_emit_warmup_metric_success_is_1`: verifies Success=1 on successful warmup
+  - `test_emit_warmup_metric_failure_is_0`: verifies Success=0 on failed warmup
+  - `test_warmup_emits_metric_on_success`: verifies `_emit_warmup_metric` called with success=True
+  - `test_warmup_emits_metric_on_telegram_failure`: verifies `_emit_warmup_metric` called with success=False
+  - `test_handler_warns_on_s3_upload_failures`: verifies warning log on non-zero failed count
+  - `test_handler_no_warning_on_s3_upload_success`: verifies no warning when failed=0
+  - `test_template_contains_warmup_failures_alarm`: verifies `WarmupFailuresAlarm` and `tg_summarizer/Warmup` in template
+  - `test_template_dashboard_contains_warmup_widget`: verifies "Warmup Status" widget in dashboard
+  - `test_strips_ключевые_выводы_intro`: verifies "Ключевые выводы" stripped from summary start
+  - `test_strips_ключевые_выводы_outro`: verifies "Ключевые выводы" stripped from summary end
+  - `test_strips_в_целом_outro`: verifies "В целом" stripped from summary end
+  - `test_strips_в_целом_intro`: verifies "В целом" stripped from summary start
+  - `test_channel_summary_prompt_has_one_sentence_per_fact_rule`: verifies rule in channel prompt
+  - `test_group_summary_prompt_has_one_sentence_per_fact_rule`: verifies rule in both prompts
+- All 378 tests pass without errors.
+
+## Next actions
+
+- Consider adding CloudWatch Logs metric filter on S3 upload failure warning for automated alerting
+- Consider evaluating gpt-4.1-nano vs gpt-4o-mini quality tradeoff with A/B testing
+- Consider adding Lambda provisioned concurrency for more predictable cold starts
+
 ## Completed in 2026-06-25 round (Lambda hardening round 34, Lambda warmup, Telegram retry, prompt brevity, meta-artifacts expansion, template fix)
 
 - **Lambda warmup support**: Added `warmup` event flag handling in [`lambda_handler.handler()`](lambda_handler.py). When `warmup=true`, the handler downloads S3 state, starts and stops Telegram clients (via [`_warmup_telegram()`](lambda_handler.py)), uploads state, and returns `{'status': 'warmed'}` without running the summarizer. Added [`_warmup_telegram()`](lambda_handler.py) async function that connects and disconnects Telegram clients to refresh session files. Added `WarmupScheduleExpression` parameter (default: empty = disabled) and `HasWarmupSchedule` condition in [`template.yaml`](template.yaml). When enabled, a second EventBridge `WarmupRun` schedule triggers the Lambda with `{"warmup": true}`, keeping the execution environment warm and Telegram sessions fresh between daily runs. Directly addresses the "Consider adding Lambda warmer" TODO item.
@@ -33,7 +65,6 @@
 ## Next actions
 
 - Consider tuning warmup schedule frequency for cost-effectiveness
-- Consider adding CloudWatch alarm on Lambda warmup failures
 
 - **Observability — per-invocation cumulative cost EMF metric**: Added [`_emit_invocation_summary()`](lambda_handler.py) that emits an EMF metric at the end of each Lambda invocation (both success and error paths) with `CumulativePromptTokens`, `CumulativeCompletionTokens`, `CumulativeCostUSD`, and `ElapsedSeconds` under the `tg_summarizer/Invocation` namespace with only the `Function` dimension (no `Model`). Unlike the per-call EMF in [`_emit_openai_latency()`](utils.py) (which has `Function+Model` dimensions), this metric aggregates across models, enabling CloudWatch Sum-based daily cost alerting. Skips emission when no tokens were used.
 - **Observability — daily cost alarm**: Added `OpenAIDailyCostAlarm` in [`template.yaml`](template.yaml) — alerts when cumulative `CumulativeCostUSD` (Sum statistic, 86400s period) exceeds $1.00 per day. Uses the new `tg_summarizer/Invocation` namespace. Complements the existing `OpenAICostAlarm` (per-invocation Maximum > $0.10). Directly addresses the TODO item "Consider adding CloudWatch metric filter on `token_usage` field for cost alerting" — the EMF metric approach is cleaner than a Logs metric filter and provides the same daily cost alerting capability.
@@ -59,10 +90,6 @@
   - `test_call_openai_returns_empty_on_whitespace_user_content`: verifies whitespace-only user content returns ""
 - Updated test stub in [`tests/test_lambda_handler.py`](tests/test_lambda_handler.py) — added `_estimate_cost_usd` to `fake_utils` stub.
 - All 345 tests pass without errors.
-
-## Next actions
-
-- Consider adding Lambda warmer to avoid cold-start Telegram reconnection overhead
 
 ## Completed in 2026-06-24 round (Lambda hardening round 32, default model, CloudWatch dashboard, model observability, meta-artifacts expansion)
 
@@ -109,10 +136,6 @@
 - Updated test stubs in [`tests/test_history_manager.py`](tests/test_history_manager.py) — added `extract_all_channels` to all `fake_utils` stubs.
 - All 319 tests pass without errors.
 
-## Next actions
-
-- Consider adding Lambda warmer to avoid cold-start Telegram reconnection overhead
-
 ## Completed in 2026-06-19 round (Lambda hardening round 30, meta-artifact stripping, empty choices guard, circuit breaker reset, token usage tracking, dedup length pre-filter)
 
 - **Summary quality — strip LLM meta-artifacts**: Added [`strip_meta_artifacts()`](utils.py) with regex patterns that strip common LLM intro/outro phrases ("в этом дайджесте", "итого", "в заключение", "подведя итог", "в итоге", "итак", "в общем", "вкратце", "как видно") from summary text. Applied in both [`summarize_text()`](message_processor.py) and [`summarize_group_text()`](message_processor.py) before `enforce_summary_length()`. Directly targets the AUTOWORK_INSTRUCTIONS goal of improving quality and conciseness — despite prompt rules prohibiting these phrases, LLMs still occasionally produce them. The post-processor catches violations cheaply.
@@ -142,13 +165,7 @@
 - Updated test stubs in [`tests/test_digest_post_processing.py`](tests/test_digest_post_processing.py), [`tests/test_summary_length_guardrails.py`](tests/test_summary_length_guardrails.py), [`tests/test_history_manager.py`](tests/test_history_manager.py), [`tests/test_process_messages_integration.py`](tests/test_process_messages_integration.py) — added `strip_meta_artifacts` to all `fake_utils` stubs.
 - All 308 tests pass without errors.
 
-## Next actions
-
-- Consider adding Lambda warmer to avoid cold-start Telegram reconnection overhead
-- Consider adding CloudWatch dashboard for circuit breaker state (open/closed/half-open transitions)
-- Consider evaluating gpt-4.1-nano as default model for cost reduction (cheaper than gpt-4o-mini)
-
-- **Bug fix — template.yaml temperature drift**: Fixed `OpenAISummaryTemperature` default in [`template.yaml`](template.yaml) from "0.3" to "0.1", syncing with the actual default in [`config.py`](config.py) (changed in round 28). The mismatch meant new SAM deployments would use 0.3 instead of the intended 0.1, producing more verbose summaries.
+## Completed in 2026-06-19 round (Lambda hardening round 30, meta-artifact stripping, empty choices guard, circuit breaker reset, token usage tracking, dedup length pre-filter)
 - **Prompt quality — anti-verbosity rule**: Added "Каждый абзац — одна мысль. Без воды и пояснений очевидного" rule to both [`CHANNEL_SUMMARY_PROMPT`](prompts.py) and [`GROUP_SUMMARY_PROMPT`](prompts.py). Directly targets the AUTOWORK_INSTRUCTIONS goal of improving quality and conciseness by discouraging the LLM from padding summaries with filler explanations.
 - **Observability — circuit breaker state in Lambda response**: Added [`get_circuit_breaker_state()`](utils.py) that returns `{"state": "closed"|"open"|"half_open", "failures": N, ...}`. Both success and error Lambda responses now include a `circuit_breaker` field. The completion log includes `[cb=closed|open|half_open]`. Enables CloudWatch-based circuit breaker state monitoring without parsing logs.
 - **Cost table — gpt-4.1-mini pricing**: Added `"gpt-4.1-mini": (0.40, 1.60)` to [`_COST_PER_MILLION`](utils.py) cost lookup. The model is not cheaper than gpt-4o-mini but is a common alternative; including it in the cost table ensures `_estimate_cost_usd()` returns accurate costs and `call_openai()` does not emit a false "not in cost table" warning when gpt-4.1-mini is configured.
@@ -163,13 +180,6 @@
   - `test_handler_logs_circuit_breaker_state_in_completion_log`: verifies `[cb=...]` in completion log
 - Updated test stub in [`tests/test_lambda_handler.py`](tests/test_lambda_handler.py) — added fake `utils` module with `get_circuit_breaker_state` to support the new import.
 - All 292 tests pass without errors.
-
-## Next actions
-
-- Consider adding Lambda warmer to avoid cold-start Telegram reconnection overhead
-- Consider adding structured error response body for S3 upload failures (separate from Lambda status)
-- Consider adding CloudWatch dashboard for circuit breaker state (open/closed/half-open transitions)
-- Consider adding gpt-4.1-mini to template.yaml as an alternative model option
 
 - **Circuit breaker threshold configurable**: Moved `_CIRCUIT_BREAKER_THRESHOLD` from hardcoded constant in [`utils.py`](utils.py) to [`CIRCUIT_BREAKER_THRESHOLD`](config.py) in `config.py` (default 3, env `CIRCUIT_BREAKER_THRESHOLD`). Allows runtime tuning of the failure threshold without code changes — useful when OpenAI has intermittent issues and a higher threshold avoids premature circuit opening.
 - **Circuit breaker half-open auto-recovery**: Added [`CIRCUIT_BREAKER_RESET_SEC`](config.py) config (default 60, env `CIRCUIT_BREAKER_RESET_SEC`) and `_CIRCUIT_BREAKER_OPEN_SINCE` timestamp in [`utils.py`](utils.py). When the circuit breaker has been open for longer than `CIRCUIT_BREAKER_RESET_SEC`, one probe call is allowed through (half-open state). If the probe succeeds, the circuit closes and normal operation resumes. If it fails, the breaker stays open and the reset timer restarts. Previously, once the circuit breaker opened (3 consecutive failures), ALL subsequent OpenAI calls in the Lambda invocation returned `""` — even if OpenAI recovered mid-invocation. For a Lambda with 180s timeout and 30+ NLP checks, a transient 30s OpenAI outage at the start would waste the remaining 150s. With half-open recovery, the breaker probes every 60s and self-heals when the service recovers.
@@ -194,10 +204,8 @@
 
 ## Next actions
 
-- Consider adding Lambda warmer to avoid cold-start Telegram reconnection overhead
 - Consider adding structured error response body for S3 upload failures (separate from Lambda status)
 - Consider adding CloudWatch dashboard for circuit breaker state (open/closed/half-open transitions)
-- Consider adding `_CIRCUIT_BREAKER_*` state to Lambda response for observability
 
 ## Completed in 2026-06-17 round (Lambda hardening round 26, HTML entities, fsync, cost guard, hash dedup, S3 empty-file guard)
 
@@ -1006,7 +1014,7 @@
 - Updated `_dedup_covered_messages` direct-call tests in [`tests/test_process_messages_integration.py`](tests/test_process_messages_integration.py) — unpack 2-tuple return `(messages, summaries)` instead of single list.
 - All 263 tests pass without errors.
 
-## Next actions
+## Next actions (original)
 
 - **CI/CD**: Настроить GitHub Actions CI/CD для автоматического деплоя Lambda при мердже в main.
 - **Secrets management**: Перенести реальные секреты в AWS SSM Parameter Store (инфраструктура готова — `*_SSM_PATH` env vars и IAM policies в template.yaml).
@@ -1016,5 +1024,3 @@
 - **Coverage+match accuracy**: Отслеживать точность `_check_coverage_and_match` — если LLM иногда выбирает не лучший дайджест для обновления, можно увеличить `UPDATE_MATCH_MAX_CHARS_PER_SUMMARY`.
 - **NLP pre-filter tuning**: Мониторить процент сообщений, отклонённых `_is_obvious_non_nlp` — если ложноположительных срабатываний много, сузить список `NLP_AD_KEYWORDS` или добавить whitelist.
 - **Summary update LLM prompt**: Оценить эффект от нового промпта "Скопируй саммари и добавь ссылку" — если LLM всё ещё переписывает, можно ещё сильнее ограничить (например, "Ответь только строку, которую нужно вставить").
-- **OpenAI cost dashboard**: Используя новые EMF `PromptTokens`/`CompletionTokens` метрики, создать CloudWatch dashboard для мониторинга стоимости OpenAI API.
-- **Lambda error alerting by type**: Используя новый `error_type` в ответах Lambda, настроить CloudWatch metric filters для алертинга по типам ошибок (например, `error_type="config"` → немедленный алерт).

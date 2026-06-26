@@ -451,6 +451,24 @@ Resources:
           Value: !Ref SummarizerFunction
       TreatMissingData: notBreaching
 
+  WarmupFailuresAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasWarmupSchedule
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-warmup-failures"
+      AlarmDescription: "Alarm for Lambda warmup failures (EMF metric Success=0 from warmup handler)"
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 2
+      Threshold: 0
+      MetricName: Success
+      Namespace: tg_summarizer/Warmup
+      Period: 300
+      Statistic: Minimum
+      Dimensions:
+        - Name: Function
+          Value: !Ref SummarizerFunction
+      TreatMissingData: notBreaching
+
   SummarizerDashboard:
     Type: AWS::CloudWatch::Dashboard
     Properties:
@@ -516,6 +534,21 @@ Resources:
                 "stat": "Sum",
                 "region": "${AWS::Region}",
                 "title": "Lambda Metrics"
+              },
+              "width": 12, "height": 6
+            },
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
+                  ["tg_summarizer/Warmup", "Success", "Function", "${SummarizerFunction}"],
+                  ["tg_summarizer/Warmup", "ElapsedSeconds", "Function", "${SummarizerFunction}"]
+                ],
+                "period": 300,
+                "stat": "Average",
+                "region": "${AWS::Region}",
+                "title": "Warmup Status",
+                "yAxis": { "left": { "label": "success (0/1)" }, "right": { "label": "seconds" } }
               },
               "width": 12, "height": 6
             }

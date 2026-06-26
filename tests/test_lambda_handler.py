@@ -795,5 +795,116 @@ class WarmupHandlerTests(unittest.TestCase):
         self.assertEqual(result["status"], "warmed")
 
 
+class WarmupMetricTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.lambda_handler = _load_lambda_handler()
+
+    def test_emit_warmup_metric_writes_emf(self):
+        import io
+        fake_stdout = io.StringIO()
+        with patch.object(self.lambda_handler.sys, "stdout", fake_stdout):
+            self.lambda_handler._emit_warmup_metric(True, 3.2)
+        output = fake_stdout.getvalue()
+        self.assertIn("Success", output)
+        self.assertIn("ElapsedSeconds", output)
+        self.assertIn("tg_summarizer/Warmup", output)
+
+    def test_emit_warmup_metric_success_is_1(self):
+        import io, json
+        fake_stdout = io.StringIO()
+        with patch.object(self.lambda_handler.sys, "stdout", fake_stdout):
+            self.lambda_handler._emit_warmup_metric(True, 3.2)
+        data = json.loads(fake_stdout.getvalue().strip())
+        self.assertEqual(data["Success"], 1)
+
+    def test_emit_warmup_metric_failure_is_0(self):
+        import io, json
+        fake_stdout = io.StringIO()
+        with patch.object(self.lambda_handler.sys, "stdout", fake_stdout):
+            self.lambda_handler._emit_warmup_metric(False, 3.2)
+        data = json.loads(fake_stdout.getvalue().strip())
+        self.assertEqual(data["Success"], 0)
+
+    def test_warmup_emits_metric_on_success(self):
+        event = {"warmup": True}
+        with patch.object(self.lambda_handler.os, "chdir"), \
+             patch.object(self.lambda_handler, "download_from_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 0, "failed": 0, "skipped_empty": 0}), \
+             patch.object(self.lambda_handler.asyncio, "run"), \
+             patch.object(self.lambda_handler, "_emit_warmup_metric") as mock_emit:
+            self.lambda_handler.handler(event, context=None)
+        mock_emit.assert_called_once()
+        self.assertTrue(mock_emit.call_args[0][0])
+
+    def test_warmup_emits_metric_on_telegram_failure(self):
+        event = {"warmup": True}
+        with patch.object(self.lambda_handler.os, "chdir"), \
+             patch.object(self.lambda_handler, "download_from_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 0, "failed": 0, "skipped_empty": 0}), \
+             patch.object(self.lambda_handler.asyncio, "run", side_effect=RuntimeError("connection failed")), \
+             patch.object(self.lambda_handler, "_emit_warmup_metric") as mock_emit:
+            self.lambda_handler.handler(event, context=None)
+        mock_emit.assert_called_once()
+        self.assertFalse(mock_emit.call_args[0][0])
+
+
+class S3UploadWarningTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.lambda_handler = _load_lambda_handler()
+
+    def test_handler_warns_on_s3_upload_failures(self):
+        event = {"send_message": True, "save_changes": True}
+        async_mock = AsyncMock()
+
+        def _run_and_close(coro):
+            coro.close()
+
+        with patch.object(self.lambda_handler.os, "chdir"), \
+             patch.object(self.lambda_handler, "download_from_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 2, "failed": 1, "skipped_empty": 0}), \
+             patch.object(self.lambda_handler, "run_summarizer", async_mock), \
+             patch.object(self.lambda_handler.asyncio, "run", side_effect=_run_and_close), \
+             patch.object(self.lambda_handler.logger, "warning") as mock_warn:
+            self.lambda_handler.handler(event, context=None)
+
+        s3_warning_logs = [call for call in mock_warn.call_args_list
+                           if "S3 upload had" in str(call)]
+        self.assertTrue(len(s3_warning_logs) > 0, "Expected S3 upload failure warning")
+
+    def test_handler_no_warning_on_s3_upload_success(self):
+        event = {"send_message": True, "save_changes": True}
+        async_mock = AsyncMock()
+
+        def _run_and_close(coro):
+            coro.close()
+
+        with patch.object(self.lambda_handler.os, "chdir"), \
+             patch.object(self.lambda_handler, "download_from_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 3, "failed": 0, "skipped_empty": 0}), \
+             patch.object(self.lambda_handler, "run_summarizer", async_mock), \
+             patch.object(self.lambda_handler.asyncio, "run", side_effect=_run_and_close), \
+             patch.object(self.lambda_handler.logger, "warning") as mock_warn:
+            self.lambda_handler.handler(event, context=None)
+
+        s3_warning_logs = [call for call in mock_warn.call_args_list
+                           if "S3 upload had" in str(call)]
+        self.assertEqual(len(s3_warning_logs), 0, "No S3 upload warning expected on success")
+
+
+class TemplateWarmupAlarmTests(unittest.TestCase):
+    def test_template_contains_warmup_failures_alarm(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        self.assertIn("WarmupFailuresAlarm", content)
+        self.assertIn("tg_summarizer/Warmup", content)
+
+    def test_template_dashboard_contains_warmup_widget(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        self.assertIn("Warmup Status", content)
+
+
 if __name__ == "__main__":
     unittest.main()

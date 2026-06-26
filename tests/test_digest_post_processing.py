@@ -768,6 +768,34 @@ class StripMetaArtifactsTests(unittest.TestCase):
         result = utils.strip_meta_artifacts(text)
         self.assertIn("стоит отметить", result)
 
+    def test_strips_ключевые_выводы_intro(self):
+        utils = self._import_utils()
+        text = "Ключевые выводы дня\n<b>AI news</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Ключевые выводы", result)
+        self.assertIn("<b>AI news</b>", result)
+
+    def test_strips_ключевые_выводы_outro(self):
+        utils = self._import_utils()
+        text = "<b>AI news</b>\nКлючевые выводы: модели развиваются"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Ключевые выводы", result)
+        self.assertIn("<b>AI news</b>", result)
+
+    def test_strips_в_целом_outro(self):
+        utils = self._import_utils()
+        text = "<b>AI news</b>\nВ целом, рынок растёт"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("В целом", result)
+        self.assertIn("<b>AI news</b>", result)
+
+    def test_strips_в_целом_intro(self):
+        utils = self._import_utils()
+        text = "В целом, ситуация стабильная\n<b>AI news</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("В целом", result)
+        self.assertIn("<b>AI news</b>", result)
+
 
 class PromptAntiListTests(unittest.TestCase):
     """Tests for anti-list and anti-subheader rules in summary prompts."""
@@ -800,6 +828,17 @@ class PromptBrevityTests(unittest.TestCase):
             source = f.read()
         count = source.count("без вводных слов")
         self.assertGreaterEqual(count, 2, "Both prompts should have brevity rule")
+
+    def test_channel_summary_prompt_has_one_sentence_per_fact_rule(self):
+        with open("prompts.py") as f:
+            source = f.read()
+        self.assertIn("Одно предложение на факт", source)
+
+    def test_group_summary_prompt_has_one_sentence_per_fact_rule(self):
+        with open("prompts.py") as f:
+            source = f.read()
+        count = source.count("Одно предложение на факт")
+        self.assertGreaterEqual(count, 2, "Both prompts should have one-sentence-per-fact rule")
 
 
 class TemplateDashboardTests(unittest.TestCase):
