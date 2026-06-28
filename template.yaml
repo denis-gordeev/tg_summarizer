@@ -499,6 +499,24 @@ Resources:
           Value: !Ref SummarizerFunction
       TreatMissingData: notBreaching
 
+  S3UploadFailuresAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasStateBucket
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-s3-upload-failures"
+      AlarmDescription: "Alarm for S3 state upload failures detected via Lambda logs"
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 1
+      Threshold: 0
+      MetricName: S3UploadFailures
+      Namespace: tg_summarizer/S3
+      Period: 300
+      Statistic: Sum
+      Dimensions:
+        - Name: Function
+          Value: !Ref SummarizerFunction
+      TreatMissingData: notBreaching
+
   WarmupFailuresAlarm:
     Type: AWS::CloudWatch::Alarm
     Condition: HasWarmupSchedule

@@ -2052,3 +2052,64 @@ class DedupCoveredMessagesExtractionTests(unittest.TestCase):
             result, _summaries = asyncio.run(mp._dedup_covered_messages(msgs, False, sem, 0.0))
 
         self.assertEqual(len(result), 1)
+
+
+class CoverageDedupMetricTests(unittest.TestCase):
+    def test_emit_coverage_dedup_metric_in_source(self):
+        with open("message_processor.py") as f:
+            source = f.read()
+        self.assertIn("tg_summarizer/Coverage", source)
+        self.assertIn("CoveredMessages", source)
+        self.assertIn("TotalNlpMessages", source)
+        self.assertIn("NewMessages", source)
+        self.assertIn("StreamType", source)
+
+    def test_emit_coverage_dedup_metric_called_on_covered(self):
+        with open("message_processor.py") as f:
+            source = f.read()
+        self.assertIn("_emit_coverage_dedup_metric", source)
+        self.assertIn("covered_count", source)
+
+
+class UpdateSummaryPromptTests(unittest.TestCase):
+    def test_update_summary_prompt_in_prompt_manager(self):
+        with open("prompts.py") as f:
+            content = f.read()
+        self.assertIn("UPDATE_SUMMARY_PROMPT", content)
+
+    def test_update_summary_prompt_uses_format_placeholder(self):
+        with open("prompts.py") as f:
+            content = f.read()
+        self.assertIn("{new_link}", content)
+
+    def test_history_manager_uses_prompts_update_summary(self):
+        import ast
+        with open("history_manager.py") as f:
+            source = f.read()
+        tree = ast.parse(source)
+        found = False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Attribute):
+                if isinstance(node.value, ast.Name) and node.value.id == "prompts":
+                    if node.attr == "UPDATE_SUMMARY_PROMPT":
+                        found = True
+                        break
+        self.assertTrue(found, "history_manager should reference prompts.UPDATE_SUMMARY_PROMPT")
+
+
+class CompactNlpPromptTests(unittest.TestCase):
+    def test_nlp_prompt_is_compact(self):
+        with open("prompts.py") as f:
+            content = f.read()
+        start = content.index("NLP_RELEVANCE_PROMPT")
+        section = content[start:start + 1000]
+        self.assertIn("Ответь только 'да' или 'нет'", section)
+        self.assertNotIn("ПРИНИМАЙ ('да'):", section)
+
+    def test_nlp_prompt_has_accept_and_reject_sections(self):
+        with open("prompts.py") as f:
+            content = f.read()
+        start = content.index("NLP_RELEVANCE_PROMPT")
+        section = content[start:start + 1000]
+        self.assertIn("ПРИНИМАЙ", section)
+        self.assertIn("ОТКЛОНЯЙ", section)

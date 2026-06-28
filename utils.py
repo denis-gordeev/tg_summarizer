@@ -282,18 +282,19 @@ async def call_openai(
                 _cb_record_failure()
                 return ""
             _cb_record_success()
-            total_tokens = response.usage.total_tokens if hasattr(response, 'usage') and response.usage else 0
-            prompt_tokens = response.usage.prompt_tokens if hasattr(response, 'usage') and response.usage else 0
-            completion_tokens = response.usage.completion_tokens if hasattr(response, 'usage') and response.usage else 0
+            usage = getattr(response, 'usage', None)
+            total_tokens = usage.total_tokens if usage else 0
+            prompt_tokens = usage.prompt_tokens if usage else 0
+            completion_tokens = usage.completion_tokens if usage else 0
             _cumulative_prompt_tokens += prompt_tokens
             _cumulative_completion_tokens += completion_tokens
-            if hasattr(response, 'usage') and response.usage:
+            if usage:
                 logger.info(
                     "OpenAI usage: model=%s prompt=%d completion=%d total=%d latency=%.1fs",
                     OPENAI_MODEL,
-                    response.usage.prompt_tokens,
-                    response.usage.completion_tokens,
-                    response.usage.total_tokens,
+                    usage.prompt_tokens,
+                    usage.completion_tokens,
+                    usage.total_tokens,
                     elapsed,
                 )
             else:

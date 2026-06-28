@@ -26,6 +26,7 @@ from config import (
 )
 from models import MessageInfo, SummaryInfo
 from utils import call_openai, extract_links, extract_all_channels, count_characters, enforce_summary_length, load_json_file, save_json_file, now_iso, text_hash, strip_meta_artifacts
+from prompts import prompts
 
 logger = logging.getLogger(__name__)
 
@@ -356,11 +357,7 @@ async def update_existing_summary(
     else:
         new_link = f'<a href="{telegram_link}">[{channel_abbr}]</a>'
 
-    update_prompt = f"""Вставь ссылку {new_link} в подходящее место саммари.
-Скопируй саммари и добавь ссылку рядом с релевантным абзацем. Остальной текст не меняй.
-Сохрани всё HTML-форматирование: <b>, <a href>, теги и сущности.
-Если нет подходящего места — добавь "Доп. источники: {new_link}" в конец.
-Ответь только обновлённое саммари. Без вводных слов и заключений."""
+    update_prompt = prompts.UPDATE_SUMMARY_PROMPT.format(new_link=new_link)
 
     truncated_summary = summary.content[:UPDATE_SUMMARY_MAX_INPUT_CHARS]
     truncated_msg = new_message.text[:UPDATE_SUMMARY_MAX_INPUT_CHARS]

@@ -116,6 +116,30 @@ def _emit_warmup_metric(success: bool, elapsed_seconds: float) -> None:
         pass
 
 
+def _emit_s3_upload_metric(result: dict) -> None:
+    try:
+        emf = {
+            "_aws": {
+                "Timestamp": int(time.time() * 1000),
+                "CloudWatchMetrics": [{
+                    "Namespace": "tg_summarizer/S3",
+                    "Dimensions": [["Function"]],
+                    "Metrics": [
+                        {"Name": "S3UploadFailures", "Unit": "None"},
+                        {"Name": "S3UploadedFiles", "Unit": "None"},
+                    ]
+                }]
+            },
+            "Function": os.getenv("AWS_LAMBDA_FUNCTION_NAME", "local"),
+            "S3UploadFailures": result.get("failed", 0),
+            "S3UploadedFiles": result.get("uploaded", 0),
+        }
+        sys.stdout.write(_json.dumps(emf, separators=(",", ":")) + "\n")
+        sys.stdout.flush()
+    except Exception:
+        pass
+
+
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     if not isinstance(event, dict):
         event = {}
@@ -229,6 +253,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             s3_upload_result["failed"],
             s3_upload_result["uploaded"] + s3_upload_result["failed"] + s3_upload_result.get("skipped_empty", 0),
         )
+        _emit_s3_upload_metric(s3_upload_result)
 
     elapsed = time.monotonic() - start_time
     cb_state = get_circuit_breaker_state()

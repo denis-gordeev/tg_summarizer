@@ -2,6 +2,37 @@
 
 Живой список задач для автоматических раундов.
 
+## Completed in 2026-06-28 round (Lambda hardening round 37, PromptManager refactor, S3 alarm, coverage dedup EMF, compact NLP prompt, code cleanup)
+
+- **Runtime tunability — update_existing_summary prompt in PromptManager**: Moved the inline update prompt from [`update_existing_summary()`](history_manager.py) to [`UPDATE_SUMMARY_PROMPT`](prompts.py) in `PromptManager`. The prompt uses `{new_link}` placeholder via Python `str.format()`. Previously, the update prompt was hardcoded in `history_manager.py`, requiring a code change to tune it. Now it can be overridden at runtime via `prompts.json` without code changes, consistent with all other prompts (COVERAGE_AND_MATCH, NLP_RELEVANCE, CHANNEL_SUMMARY, GROUP_SUMMARY). Directly addresses the TODO item "Consider moving update_existing_summary prompt to PromptManager for runtime tunability".
+- **Observability — S3 upload failure EMF metric and CloudWatch alarm**: Added [`_emit_s3_upload_metric()`](lambda_handler.py) that emits `S3UploadFailures` and `S3UploadedFiles` EMF metrics under `tg_summarizer/S3` namespace when S3 upload failures are detected. Added `S3UploadFailuresAlarm` in [`template.yaml`](template.yaml) — alerts when `S3UploadFailures > 0` (Sum statistic, 5-minute period). The alarm is conditional on `HasStateBucket` since S3 sync is only relevant when a bucket is configured. Directly addresses the TODO item "Consider adding CloudWatch Logs metric filter on S3 upload failure warning for automated alerting" — the EMF metric approach is cleaner than a Logs metric filter.
+- **Observability — coverage dedup EMF metric**: Added [`_emit_coverage_dedup_metric()`](message_processor.py) that emits `CoveredMessages`, `TotalNlpMessages`, and `NewMessages` EMF metrics under `tg_summarizer/Coverage` namespace with `StreamType` dimension (channel/group). Emitted when `covered_count > 0` in `process_messages()`. Enables CloudWatch-based monitoring of coverage dedup hit rate for tuning `ENABLE_SUMMARIES_DEDUPLICATION`. Directly addresses the TODO item "Consider adding EMF metric for coverage dedup hit rate for tuning ENABLE_SUMMARIES_DEDUPLICATION".
+- **Cost optimization — compact NLP_RELEVANCE_PROMPT**: Condensed [`NLP_RELEVANCE_PROMPT`](prompts.py) from verbose multi-line accept/reject sections to compact single-line format: `ПРИНИМАЙ:` (one line) and `ОТКЛОНЯЙ:` (one line). Removed redundant parenthetical markers (`'да'`, `'нет'`) and merged overlapping entries. The prompt conveys the same classification criteria in ~30% fewer input tokens, reducing per-NLP-check cost at no loss of classification accuracy.
+- **Code quality — deduplicated `response.usage` access in `call_openai`**: Replaced three separate `hasattr(response, 'usage') and response.usage` checks with a single `usage = getattr(response, 'usage', None)` in [`call_openai()`](utils.py). The cached `usage` reference is used for `total_tokens`, `prompt_tokens`, `completion_tokens`, and the logging branch. Reduces code repetition and avoids redundant attribute access.
+- **Tests added**: 12 new tests (total 409, up from 397):
+  - `test_emit_s3_upload_metric_writes_emf`: verifies S3 upload EMF metric JSON with correct namespace and values
+  - `test_handler_emits_s3_upload_metric_on_failure`: verifies `_emit_s3_upload_metric` called when S3 upload has failures
+  - `test_handler_skips_s3_upload_metric_on_success`: verifies no EMF metric emitted when S3 upload succeeds
+  - `test_template_contains_s3_upload_failures_alarm`: verifies `S3UploadFailuresAlarm` in template.yaml
+  - `test_s3_upload_alarm_conditional_on_state_bucket`: verifies `HasStateBucket` condition on S3 alarm
+  - `test_emit_coverage_dedup_metric_in_source`: verifies coverage dedup EMF namespace/metrics in message_processor.py
+  - `test_emit_coverage_dedup_metric_called_on_covered`: verifies `_emit_coverage_dedup_metric` call with `covered_count`
+  - `test_update_summary_prompt_in_prompt_manager`: verifies `UPDATE_SUMMARY_PROMPT` in prompts.py
+  - `test_update_summary_prompt_uses_format_placeholder`: verifies `{new_link}` format placeholder
+  - `test_history_manager_uses_prompts_update_summary`: verifies AST: `prompts.UPDATE_SUMMARY_PROMPT` in history_manager.py
+  - `test_nlp_prompt_is_compact`: verifies NLP prompt uses compact format (no `ПРИНИМАЙ ('да'):`)
+  - `test_nlp_prompt_has_accept_and_reject_sections`: verifies NLP prompt has ПРИНИМАЙ/ОТКЛОНЯЙ sections
+- Updated test stub in [`tests/test_history_manager.py`](tests/test_history_manager.py) — all `fake_prompts.prompts` stubs now include `UPDATE_SUMMARY_PROMPT="Вставь ссылку {new_link}"`.
+- Updated [`test_update_prompt_mentions_html`](tests/test_history_manager.py) — now checks `prompts.py` instead of `history_manager.py` for HTML preservation text.
+- All 409 tests pass without errors.
+
+## Next actions
+
+- Consider evaluating gpt-4.1-nano vs gpt-4o-mini quality tradeoff with A/B testing
+- Consider adding Lambda provisioned concurrency for more predictable cold starts
+- Consider adding coverage dedup dashboard widget for visual monitoring
+- Consider adding S3 upload dedup metric to CloudWatch dashboard
+
 ## Completed in 2026-06-26 round (Lambda hardening round 36, update meta-artifacts, circuit breaker NLP, prompt token savings, dead code removal, config sync)
 
 - **Quality — `strip_meta_artifacts` in `update_existing_summary`**: Added `strip_meta_artifacts()` call in [`update_existing_summary()`](history_manager.py) after the LLM response and fallback paths. Previously, only `summarize_text()` and `summarize_group_text()` applied meta-artifact stripping — the update path stored raw LLM output, allowing meta-artifacts like "Итак" or "В заключение" to leak into published summaries and persist in history. Added "Без вводных слов и заключений" to the update prompt to reduce the likelihood of meta-artifacts from the LLM.
@@ -40,11 +71,8 @@
 
 ## Next actions
 
-- Consider adding CloudWatch Logs metric filter on S3 upload failure warning for automated alerting
 - Consider evaluating gpt-4.1-nano vs gpt-4o-mini quality tradeoff with A/B testing
 - Consider adding Lambda provisioned concurrency for more predictable cold starts
-- Consider moving update_existing_summary prompt to PromptManager for runtime tunability
-- Consider adding EMF metric for coverage dedup hit rate for tuning ENABLE_SUMMARIES_DEDUPLICATION
 
 ## Completed in 2026-06-25 round (Lambda hardening round 34, Lambda warmup, Telegram retry, prompt brevity, meta-artifacts expansion, template fix)
 

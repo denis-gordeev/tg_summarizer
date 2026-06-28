@@ -54,7 +54,7 @@ class ShouldRunGroupSummarizationParseErrorTests(unittest.TestCase):
         fake_models.SummaryInfo = type("FakeSummaryInfo", (), {"__init__": lambda self, **kw: None, "to_dict": lambda self: {}})
         fake_models.MessageInfo = type("MessageInfo", (), {})
         fake_prompts = types.ModuleType("prompts")
-        fake_prompts.prompts = types.SimpleNamespace()
+        fake_prompts.prompts = types.SimpleNamespace(UPDATE_SUMMARY_PROMPT="Вставь ссылку {new_link}")
         fake_utils = types.ModuleType("utils")
         fake_utils.call_openai = MagicMock()
         fake_utils.extract_links = lambda text: []
@@ -236,7 +236,7 @@ class RunAsyncWithLoopTests(unittest.TestCase):
         fake_models.SummaryInfo = type("FakeSummaryInfo", (), {"__init__": lambda self, **kw: None, "to_dict": lambda self: {}})
         fake_models.MessageInfo = type("MessageInfo", (), {})
         fake_prompts = types.ModuleType("prompts")
-        fake_prompts.prompts = types.SimpleNamespace()
+        fake_prompts.prompts = types.SimpleNamespace(UPDATE_SUMMARY_PROMPT="Вставь ссылку {new_link}")
         fake_utils = types.ModuleType("utils")
         fake_utils.call_openai = MagicMock()
         fake_utils.extract_links = lambda text: []
@@ -397,7 +397,7 @@ class UpdateExistingSummaryPreservesMessageIdTests(unittest.TestCase):
         fake_models.SummaryInfo = SummaryInfo
         fake_models.MessageInfo = MessageInfo
         fake_prompts = types.ModuleType("prompts")
-        fake_prompts.prompts = types.SimpleNamespace()
+        fake_prompts.prompts = types.SimpleNamespace(UPDATE_SUMMARY_PROMPT="Вставь ссылку {new_link}")
         fake_utils = types.ModuleType("utils")
         fake_utils.call_openai = MagicMock()
         fake_utils.extract_links = lambda text: []
@@ -479,7 +479,7 @@ class HistoryCacheTests(unittest.TestCase):
         fake_models.SummaryInfo = type("FakeSummaryInfo", (), {"__init__": lambda self, **kw: None, "to_dict": lambda self: {}})
         fake_models.MessageInfo = type("MessageInfo", (), {})
         fake_prompts = types.ModuleType("prompts")
-        fake_prompts.prompts = types.SimpleNamespace()
+        fake_prompts.prompts = types.SimpleNamespace(UPDATE_SUMMARY_PROMPT="Вставь ссылку {new_link}")
         fake_utils = types.ModuleType("utils")
         fake_utils.call_openai = MagicMock()
         fake_utils.extract_links = lambda text: []
@@ -585,7 +585,7 @@ class CacheInvalidationTests(unittest.TestCase):
             "to_dict": lambda self: {},
         })
         fake_prompts = types.ModuleType("prompts")
-        fake_prompts.prompts = types.SimpleNamespace()
+        fake_prompts.prompts = types.SimpleNamespace(UPDATE_SUMMARY_PROMPT="Вставь ссылку {new_link}")
         fake_utils = types.ModuleType("utils")
         fake_utils.call_openai = MagicMock()
         fake_utils.extract_links = lambda text: []
@@ -639,7 +639,7 @@ class CacheInvalidationTests(unittest.TestCase):
             "to_dict": lambda self: {},
         })
         fake_prompts = types.ModuleType("prompts")
-        fake_prompts.prompts = types.SimpleNamespace()
+        fake_prompts.prompts = types.SimpleNamespace(UPDATE_SUMMARY_PROMPT="Вставь ссылку {new_link}")
         fake_utils = types.ModuleType("utils")
         fake_utils.call_openai = MagicMock()
         fake_utils.extract_links = lambda text: []
@@ -706,7 +706,7 @@ class LoadSummariesHistoryRestoreTests(unittest.TestCase):
         fake_models.SummaryInfo = FakeSummaryInfo
         fake_models.MessageInfo = type("MessageInfo", (), {})
         fake_prompts = types.ModuleType("prompts")
-        fake_prompts.prompts = types.SimpleNamespace()
+        fake_prompts.prompts = types.SimpleNamespace(UPDATE_SUMMARY_PROMPT="Вставь ссылку {new_link}")
         fake_utils = types.ModuleType("utils")
         fake_utils.call_openai = MagicMock()
         fake_utils.extract_links = lambda text: []
@@ -791,7 +791,7 @@ class LoadGroupSummariesHistoryRestoreTests(unittest.TestCase):
         fake_models.SummaryInfo = FakeSummaryInfo
         fake_models.MessageInfo = type("MessageInfo", (), {})
         fake_prompts = types.ModuleType("prompts")
-        fake_prompts.prompts = types.SimpleNamespace()
+        fake_prompts.prompts = types.SimpleNamespace(UPDATE_SUMMARY_PROMPT="Вставь ссылку {new_link}")
         fake_utils = types.ModuleType("utils")
         fake_utils.call_openai = MagicMock()
         fake_utils.extract_links = lambda text: []
@@ -880,7 +880,7 @@ class SaveUpdatedSummaryNoMatchTests(unittest.TestCase):
         fake_models.SummaryInfo = FakeSummaryInfo
         fake_models.MessageInfo = type("MessageInfo", (), {})
         fake_prompts = types.ModuleType("prompts")
-        fake_prompts.prompts = types.SimpleNamespace()
+        fake_prompts.prompts = types.SimpleNamespace(UPDATE_SUMMARY_PROMPT="Вставь ссылку {new_link}")
         fake_utils = types.ModuleType("utils")
         fake_utils.call_openai = MagicMock()
         fake_utils.extract_links = lambda text: []
@@ -971,7 +971,7 @@ class UpdateExistingSummaryLLMTests(unittest.TestCase):
         fake_models.SummaryInfo = FakeSummaryInfo
         fake_models.MessageInfo = FakeMessageInfo
         fake_prompts = types.ModuleType("prompts")
-        fake_prompts.prompts = types.SimpleNamespace()
+        fake_prompts.prompts = types.SimpleNamespace(UPDATE_SUMMARY_PROMPT="Вставь ссылку {new_link}")
         fake_utils = types.ModuleType("utils")
         fake_utils.call_openai = AsyncMock(return_value="Updated summary with new link")
         fake_utils.extract_links = lambda text: ["https://example.com"]
@@ -1044,7 +1044,7 @@ class UpdateExistingSummaryLLMTests(unittest.TestCase):
         fake_models.SummaryInfo = FakeSummaryInfo
         fake_models.MessageInfo = FakeMessageInfo
         fake_prompts = types.ModuleType("prompts")
-        fake_prompts.prompts = types.SimpleNamespace()
+        fake_prompts.prompts = types.SimpleNamespace(UPDATE_SUMMARY_PROMPT="Вставь ссылку {new_link}")
         fake_utils = types.ModuleType("utils")
         fake_utils.call_openai = AsyncMock(return_value="Updated")
         fake_utils.extract_links = lambda text: []
@@ -1117,7 +1117,7 @@ class UpdateExistingSummaryLLMTests(unittest.TestCase):
         fake_models.SummaryInfo = FakeSummaryInfo
         fake_models.MessageInfo = FakeMessageInfo
         fake_prompts = types.ModuleType("prompts")
-        fake_prompts.prompts = types.SimpleNamespace()
+        fake_prompts.prompts = types.SimpleNamespace(UPDATE_SUMMARY_PROMPT="Вставь ссылку {new_link}")
         fake_utils = types.ModuleType("utils")
         fake_utils.call_openai = AsyncMock(side_effect=Exception("LLM error"))
         fake_utils.extract_links = lambda text: ["https://example.com"]
@@ -1190,7 +1190,7 @@ class UpdateExistingSummaryLLMTests(unittest.TestCase):
         fake_models.SummaryInfo = FakeSummaryInfo
         fake_models.MessageInfo = FakeMessageInfo
         fake_prompts = types.ModuleType("prompts")
-        fake_prompts.prompts = types.SimpleNamespace()
+        fake_prompts.prompts = types.SimpleNamespace(UPDATE_SUMMARY_PROMPT="Вставь ссылку {new_link}")
         fake_utils = types.ModuleType("utils")
         fake_utils.call_openai = AsyncMock(return_value="")
         fake_utils.extract_links = lambda text: ["https://example.com"]
@@ -1265,7 +1265,7 @@ class UpdateExistingSummaryTemperatureTests(unittest.TestCase):
         fake_models.SummaryInfo = FakeSummaryInfo
         fake_models.MessageInfo = FakeMessageInfo
         fake_prompts = types.ModuleType("prompts")
-        fake_prompts.prompts = types.SimpleNamespace()
+        fake_prompts.prompts = types.SimpleNamespace(UPDATE_SUMMARY_PROMPT="Вставь ссылку {new_link}")
         fake_utils = types.ModuleType("utils")
         fake_utils.call_openai = AsyncMock(return_value="Updated with link")
         fake_utils.extract_links = lambda text: []
@@ -1341,7 +1341,7 @@ class SharedLoadSaveHelperTests(unittest.TestCase):
         fake_models.SummaryInfo = type("FakeSummaryInfo", (), {"__init__": lambda self, **kw: None, "to_dict": lambda self: {}})
         fake_models.MessageInfo = FakeMessageInfo
         fake_prompts = types.ModuleType("prompts")
-        fake_prompts.prompts = types.SimpleNamespace()
+        fake_prompts.prompts = types.SimpleNamespace(UPDATE_SUMMARY_PROMPT="Вставь ссылку {new_link}")
         fake_utils = types.ModuleType("utils")
         fake_utils.call_openai = MagicMock()
         fake_utils.extract_links = lambda text: []
@@ -1462,7 +1462,7 @@ class GroupSummariesCacheEmptyTests(unittest.TestCase):
         fake_models.SummaryInfo = FakeSummaryInfo
         fake_models.MessageInfo = FakeMessageInfo
         fake_prompts = types.ModuleType("prompts")
-        fake_prompts.prompts = types.SimpleNamespace()
+        fake_prompts.prompts = types.SimpleNamespace(UPDATE_SUMMARY_PROMPT="Вставь ссылку {new_link}")
         fake_utils = types.ModuleType("utils")
         fake_utils.call_openai = MagicMock()
         fake_utils.extract_links = lambda text: []
@@ -1537,7 +1537,7 @@ class SharedSaveSummaryHelperTests(unittest.TestCase):
         fake_models.SummaryInfo = FakeSummaryInfo
         fake_models.MessageInfo = type("FakeMessageInfo", (), {"__init__": lambda self, **kw: None, "to_dict": lambda self: {}})
         fake_prompts = types.ModuleType("prompts")
-        fake_prompts.prompts = types.SimpleNamespace()
+        fake_prompts.prompts = types.SimpleNamespace(UPDATE_SUMMARY_PROMPT="Вставь ссылку {new_link}")
         fake_utils = types.ModuleType("utils")
         fake_utils.call_openai = MagicMock()
         fake_utils.extract_links = lambda text: []
@@ -1625,7 +1625,7 @@ class UpdateSummaryLengthGuardTests(unittest.TestCase):
         fake_models.SummaryInfo = FakeSummaryInfo
         fake_models.MessageInfo = FakeMessageInfo
         fake_prompts = types.ModuleType("prompts")
-        fake_prompts.prompts = types.SimpleNamespace()
+        fake_prompts.prompts = types.SimpleNamespace(UPDATE_SUMMARY_PROMPT="Вставь ссылку {new_link}")
         fake_utils = types.ModuleType("utils")
         fake_utils.extract_links = lambda text: []
         fake_utils.load_json_file = lambda *a, **kw: {"summaries": [], "last_updated": ""}
@@ -1885,7 +1885,7 @@ class UpdateSummaryEnforcesLengthTests(unittest.TestCase):
         fake_models.SummaryInfo = FakeSummaryInfo
         fake_models.MessageInfo = FakeMessageInfo
         fake_prompts = types.ModuleType("prompts")
-        fake_prompts.prompts = types.SimpleNamespace()
+        fake_prompts.prompts = types.SimpleNamespace(UPDATE_SUMMARY_PROMPT="Вставь ссылку {new_link}")
 
         oversized_response = "X" * 5000
         fake_utils = types.ModuleType("utils")
@@ -1965,7 +1965,7 @@ class UpdateSummaryFallbackUsesCountCharactersTests(unittest.TestCase):
         fake_models.SummaryInfo = FakeSummaryInfo
         fake_models.MessageInfo = FakeMessageInfo
         fake_prompts = types.ModuleType("prompts")
-        fake_prompts.prompts = types.SimpleNamespace()
+        fake_prompts.prompts = types.SimpleNamespace(UPDATE_SUMMARY_PROMPT="Вставь ссылку {new_link}")
 
         def count_characters_html(text):
             import re
@@ -2052,7 +2052,7 @@ class SaveUpdatedSummaryNoRedundantEnforceTests(unittest.TestCase):
         fake_models.SummaryInfo = FakeSummaryInfo
         fake_models.MessageInfo = type("MessageInfo", (), {})
         fake_prompts = types.ModuleType("prompts")
-        fake_prompts.prompts = types.SimpleNamespace()
+        fake_prompts.prompts = types.SimpleNamespace(UPDATE_SUMMARY_PROMPT="Вставь ссылку {new_link}")
         fake_utils = types.ModuleType("utils")
         fake_utils.call_openai = MagicMock()
         fake_utils.extract_links = lambda text: []
@@ -2211,7 +2211,7 @@ class FallbackDedupLinksTests(unittest.TestCase):
         fake_models.SummaryInfo = FakeSummaryInfo
         fake_models.MessageInfo = FakeMessageInfo
         fake_prompts = types.ModuleType("prompts")
-        fake_prompts.prompts = types.SimpleNamespace()
+        fake_prompts.prompts = types.SimpleNamespace(UPDATE_SUMMARY_PROMPT="Вставь ссылку {new_link}")
         fake_utils = types.ModuleType("utils")
         fake_utils.call_openai = AsyncMock(side_effect=Exception("LLM error"))
         fake_utils.extract_links = lambda text: []
@@ -2306,7 +2306,7 @@ class SaveUpdatedSummaryWithSummariesParamTests(unittest.TestCase):
         fake_models.SummaryInfo = FakeSummaryInfo
         fake_models.MessageInfo = type("MessageInfo", (), {})
         fake_prompts = types.ModuleType("prompts")
-        fake_prompts.prompts = types.SimpleNamespace()
+        fake_prompts.prompts = types.SimpleNamespace(UPDATE_SUMMARY_PROMPT="Вставь ссылку {new_link}")
         fake_utils = types.ModuleType("utils")
         fake_utils.call_openai = MagicMock()
         fake_utils.extract_links = lambda text: []
@@ -2355,9 +2355,7 @@ class UpdatePromptHtmlPreservationTests(unittest.TestCase):
 
     def test_update_prompt_mentions_html(self):
         """update_existing_summary prompt should instruct LLM to preserve HTML formatting."""
-        import ast
-
-        with open("history_manager.py") as f:
+        with open("prompts.py") as f:
             source = f.read()
 
         self.assertIn("HTML", source, "update prompt should mention HTML preservation")
@@ -2428,7 +2426,7 @@ class UpdateExistingSummaryStripMetaArtifactsTests(unittest.TestCase):
         fake_models.SummaryInfo = FakeSummaryInfo
         fake_models.MessageInfo = FakeMessageInfo
         fake_prompts = types.ModuleType("prompts")
-        fake_prompts.prompts = types.SimpleNamespace()
+        fake_prompts.prompts = types.SimpleNamespace(UPDATE_SUMMARY_PROMPT="Вставь ссылку {new_link}")
 
         fake_utils = types.ModuleType("utils")
         fake_utils.call_openai = AsyncMock(return_value="Updated summary with link")

@@ -906,5 +906,70 @@ class TemplateWarmupAlarmTests(unittest.TestCase):
         self.assertIn("Warmup Status", content)
 
 
+class S3UploadMetricTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.lambda_handler = _load_lambda_handler()
+
+    def test_emit_s3_upload_metric_writes_emf(self):
+        import io, json
+        fake_stdout = io.StringIO()
+        with patch.object(self.lambda_handler.sys, "stdout", fake_stdout):
+            self.lambda_handler._emit_s3_upload_metric({"uploaded": 3, "failed": 1, "skipped_empty": 0})
+        output = fake_stdout.getvalue()
+        data = json.loads(output.strip())
+        self.assertEqual(data["S3UploadFailures"], 1)
+        self.assertEqual(data["S3UploadedFiles"], 3)
+        self.assertIn("tg_summarizer/S3", json.dumps(data))
+
+    def test_handler_emits_s3_upload_metric_on_failure(self):
+        event = {"send_message": True, "save_changes": True}
+        async_mock = AsyncMock()
+
+        def _run_and_close(coro):
+            coro.close()
+
+        with patch.object(self.lambda_handler.os, "chdir"), \
+             patch.object(self.lambda_handler, "download_from_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 2, "failed": 1, "skipped_empty": 0}), \
+             patch.object(self.lambda_handler, "run_summarizer", async_mock), \
+             patch.object(self.lambda_handler.asyncio, "run", side_effect=_run_and_close), \
+             patch.object(self.lambda_handler, "_emit_s3_upload_metric") as mock_emit:
+            self.lambda_handler.handler(event, context=None)
+
+        mock_emit.assert_called_once()
+
+    def test_handler_skips_s3_upload_metric_on_success(self):
+        event = {"send_message": True, "save_changes": True}
+        async_mock = AsyncMock()
+
+        def _run_and_close(coro):
+            coro.close()
+
+        with patch.object(self.lambda_handler.os, "chdir"), \
+             patch.object(self.lambda_handler, "download_from_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 3, "failed": 0, "skipped_empty": 0}), \
+             patch.object(self.lambda_handler, "run_summarizer", async_mock), \
+             patch.object(self.lambda_handler.asyncio, "run", side_effect=_run_and_close), \
+             patch.object(self.lambda_handler, "_emit_s3_upload_metric") as mock_emit:
+            self.lambda_handler.handler(event, context=None)
+
+        mock_emit.assert_not_called()
+
+
+class TemplateS3UploadAlarmTests(unittest.TestCase):
+    def test_template_contains_s3_upload_failures_alarm(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        self.assertIn("S3UploadFailuresAlarm", content)
+        self.assertIn("tg_summarizer/S3", content)
+
+    def test_s3_upload_alarm_conditional_on_state_bucket(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        alarm_section = content[content.index("S3UploadFailuresAlarm"):]
+        self.assertIn("HasStateBucket", alarm_section[:200])
+
+
 if __name__ == "__main__":
     unittest.main()

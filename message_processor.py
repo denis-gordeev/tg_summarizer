@@ -1,6 +1,9 @@
 import asyncio
+import json as _json
 import logging
+import os
 import re
+import sys
 import time
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
@@ -48,6 +51,34 @@ from channel_manager import (
 )
 from prompts import prompts
 logger = logging.getLogger(__name__)
+
+
+def _emit_coverage_dedup_metric(covered: int, total: int, new: int, is_group: bool) -> None:
+    try:
+        import time as _time
+        emf = {
+            "_aws": {
+                "Timestamp": int(_time.time() * 1000),
+                "CloudWatchMetrics": [{
+                    "Namespace": "tg_summarizer/Coverage",
+                    "Dimensions": [["Function", "StreamType"]],
+                    "Metrics": [
+                        {"Name": "CoveredMessages", "Unit": "None"},
+                        {"Name": "TotalNlpMessages", "Unit": "None"},
+                        {"Name": "NewMessages", "Unit": "None"},
+                    ]
+                }]
+            },
+            "Function": os.getenv("AWS_LAMBDA_FUNCTION_NAME", "local"),
+            "StreamType": "group" if is_group else "channel",
+            "CoveredMessages": covered,
+            "TotalNlpMessages": total,
+            "NewMessages": new,
+        }
+        sys.stdout.write(_json.dumps(emf, separators=(",", ":")) + "\n")
+        sys.stdout.flush()
+    except Exception:
+        pass
 
 
 def _calculate_channel_summary_limit(total_original_length: int) -> int:
@@ -440,6 +471,7 @@ async def process_messages(
             "Coverage dedup (%s): %d covered, %d new (of %d deduped)",
             stream_label, covered_count, len(unique_messages), len(nlp_related_messages),
         )
+        _emit_coverage_dedup_metric(covered_count, len(nlp_related_messages), len(unique_messages), is_group)
 
     summary = None
     message_id = None
