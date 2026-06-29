@@ -948,13 +948,30 @@ class S3UploadMetricTests(unittest.TestCase):
 
         with patch.object(self.lambda_handler.os, "chdir"), \
              patch.object(self.lambda_handler, "download_from_s3"), \
-             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 3, "failed": 0, "skipped_empty": 0}), \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 0, "failed": 0, "skipped_empty": 0}), \
              patch.object(self.lambda_handler, "run_summarizer", async_mock), \
              patch.object(self.lambda_handler.asyncio, "run", side_effect=_run_and_close), \
              patch.object(self.lambda_handler, "_emit_s3_upload_metric") as mock_emit:
             self.lambda_handler.handler(event, context=None)
 
         mock_emit.assert_not_called()
+
+    def test_handler_emits_s3_upload_metric_on_success_with_uploads(self):
+        event = {"send_message": True, "save_changes": True}
+        async_mock = AsyncMock()
+
+        def _run_and_close(coro):
+            coro.close()
+
+        with patch.object(self.lambda_handler.os, "chdir"), \
+             patch.object(self.lambda_handler, "download_from_s3"), \
+             patch.object(self.lambda_handler, "upload_to_s3", return_value={"uploaded": 5, "failed": 0, "skipped_empty": 1}), \
+             patch.object(self.lambda_handler, "run_summarizer", async_mock), \
+             patch.object(self.lambda_handler.asyncio, "run", side_effect=_run_and_close), \
+             patch.object(self.lambda_handler, "_emit_s3_upload_metric") as mock_emit:
+            self.lambda_handler.handler(event, context=None)
+
+        mock_emit.assert_called_once()
 
 
 class TemplateS3UploadAlarmTests(unittest.TestCase):
@@ -969,6 +986,22 @@ class TemplateS3UploadAlarmTests(unittest.TestCase):
             content = f.read()
         alarm_section = content[content.index("S3UploadFailuresAlarm"):]
         self.assertIn("HasStateBucket", alarm_section[:200])
+
+
+class DashboardCoverageWidgetTests(unittest.TestCase):
+    def test_template_dashboard_contains_coverage_dedup_widget(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        self.assertIn("Coverage Dedup (Channel)", content)
+        self.assertIn("tg_summarizer/Coverage", content)
+        self.assertIn("CoveredMessages", content)
+        self.assertIn("NewMessages", content)
+
+    def test_template_dashboard_contains_s3_upload_widget(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        self.assertIn("S3 State Sync", content)
+        self.assertIn("S3UploadedFiles", content)
 
 
 if __name__ == "__main__":

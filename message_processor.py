@@ -55,10 +55,9 @@ logger = logging.getLogger(__name__)
 
 def _emit_coverage_dedup_metric(covered: int, total: int, new: int, is_group: bool) -> None:
     try:
-        import time as _time
         emf = {
             "_aws": {
-                "Timestamp": int(_time.time() * 1000),
+                "Timestamp": int(time.time() * 1000),
                 "CloudWatchMetrics": [{
                     "Namespace": "tg_summarizer/Coverage",
                     "Dimensions": [["Function", "StreamType"]],
@@ -356,11 +355,11 @@ async def _dedup_covered_messages(
     is_group: bool,
     sem: asyncio.Semaphore,
     _deadline: float,
-) -> List[MessageInfo]:
+) -> tuple[list[MessageInfo], list[SummaryInfo]]:
     """Run coverage dedup: check each message against existing summaries.
 
     Covered messages are updated in-place (is_covered_in_summaries flag)
-    and processed via process_covered_message. Returns messages not covered.
+    and processed via process_covered_message. Returns (uncovered_messages, summaries).
     """
     summaries = load_group_summaries_history() if is_group else load_summaries_history()
     if not summaries:

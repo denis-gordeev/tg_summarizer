@@ -2070,6 +2070,27 @@ class CoverageDedupMetricTests(unittest.TestCase):
         self.assertIn("_emit_coverage_dedup_metric", source)
         self.assertIn("covered_count", source)
 
+    def test_emit_coverage_dedup_metric_uses_module_level_time(self):
+        import ast
+        with open("message_processor.py") as f:
+            source = f.read()
+        self.assertNotIn("import time as _time", source)
+        self.assertNotIn("import time", source[source.index("_emit_coverage_dedup"):])
+
+    def test_dedup_covered_messages_return_type_is_tuple(self):
+        import ast
+        with open("message_processor.py") as f:
+            source = f.read()
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.AsyncFunctionDef) and node.name == "_dedup_covered_messages":
+                ret = node.returns
+                self.assertIsNotNone(ret, "_dedup_covered_messages should have a return type annotation")
+                self.assertIsInstance(ret, ast.Subscript)
+                self.assertEqual(ast.dump(ret.value), ast.dump(ast.Name(id="tuple")))
+                return
+        self.fail("_dedup_covered_messages not found")
+
 
 class UpdateSummaryPromptTests(unittest.TestCase):
     def test_update_summary_prompt_in_prompt_manager(self):

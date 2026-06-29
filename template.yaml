@@ -617,6 +617,37 @@ Resources:
                 "yAxis": { "left": { "label": "success (0/1)" }, "right": { "label": "seconds" } }
               },
               "width": 12, "height": 6
+            },
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
+                  ["tg_summarizer/Coverage", "CoveredMessages", "Function", "${SummarizerFunction}", "StreamType", "channel"],
+                  ["tg_summarizer/Coverage", "NewMessages", "Function", "${SummarizerFunction}", "StreamType", "channel"],
+                  ["tg_summarizer/Coverage", "TotalNlpMessages", "Function", "${SummarizerFunction}", "StreamType", "channel"]
+                ],
+                "period": 300,
+                "stat": "Sum",
+                "region": "${AWS::Region}",
+                "title": "Coverage Dedup (Channel)",
+                "yAxis": { "left": { "label": "messages" } }
+              },
+              "width": 12, "height": 6
+            },
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
+                  ["tg_summarizer/S3", "S3UploadedFiles", "Function", "${SummarizerFunction}"],
+                  ["tg_summarizer/S3", "S3UploadFailures", "Function", "${SummarizerFunction}"]
+                ],
+                "period": 300,
+                "stat": "Sum",
+                "region": "${AWS::Region}",
+                "title": "S3 State Sync",
+                "yAxis": { "left": { "label": "files" } }
+              },
+              "width": 12, "height": 6
             }
           ]
         }

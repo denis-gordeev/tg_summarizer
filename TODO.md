@@ -2,7 +2,28 @@
 
 Живой список задач для автоматических раундов.
 
-## Completed in 2026-06-28 round (Lambda hardening round 37, PromptManager refactor, S3 alarm, coverage dedup EMF, compact NLP prompt, code cleanup)
+## Completed in 2026-06-29 round (Lambda hardening round 38, dashboard widgets, S3 metric fix, code quality)
+
+- **Dashboard: Coverage dedup widget**: Added "Coverage Dedup (Channel)" widget to [`SummarizerDashboard`](template.yaml) showing `CoveredMessages`, `NewMessages`, `TotalNlpMessages` from `tg_summarizer/Coverage` namespace with `StreamType=channel` dimension. Enables visual monitoring of coverage dedup hit rate for tuning `ENABLE_SUMMARIES_DEDUPLICATION`. Directly addresses the TODO item "Consider adding coverage dedup dashboard widget for visual monitoring".
+- **Dashboard: S3 upload widget**: Added "S3 State Sync" widget to [`SummarizerDashboard`](template.yaml) showing `S3UploadedFiles` and `S3UploadFailures` from `tg_summarizer/S3` namespace. Enables visual monitoring of S3 sync health. Directly addresses the TODO item "Consider adding S3 upload dedup metric to CloudWatch dashboard".
+- **Observability: S3 upload metric emitted on all runs**: Changed [`_emit_s3_upload_metric()`](lambda_handler.py) call to emit when `uploaded > 0 or failed > 0` instead of only when `failed > 0`. Previously, successful S3 uploads had no EMF metric, meaning the `S3UploadedFiles` metric was only populated on failure runs. Now both metrics are available for dashboard visualization and trend analysis on every invocation with S3 sync.
+- **Bug fix: `_dedup_covered_messages` return type annotation**: Fixed return type from `List[MessageInfo]` to `tuple[list[MessageInfo], list[SummaryInfo]]` in [`_dedup_covered_messages()`](message_processor.py). The function has always returned a 2-tuple, but the annotation was wrong, potentially misleading type checkers.
+- **Code quality: removed unnecessary local import in `_emit_coverage_dedup_metric`**: Removed `import time as _time` inside [`_emit_coverage_dedup_metric()`](message_processor.py). The `time` module is already imported at module level (line 7). The local import was inconsistent with all other EMF emission functions in the codebase which use the module-level import.
+- **Tests added**: 5 new tests (total 414, up from 409):
+  - `test_template_dashboard_contains_coverage_dedup_widget`: verifies "Coverage Dedup (Channel)" widget and `tg_summarizer/Coverage` metrics in template.yaml
+  - `test_template_dashboard_contains_s3_upload_widget`: verifies "S3 State Sync" widget and `S3UploadedFiles` in template.yaml
+  - `test_handler_emits_s3_upload_metric_on_success_with_uploads`: verifies `_emit_s3_upload_metric` called when S3 upload succeeds with files
+  - `test_emit_coverage_dedup_metric_uses_module_level_time`: verifies no local `import time as _time` in message_processor.py
+  - `test_dedup_covered_messages_return_type_is_tuple`: verifies `_dedup_covered_messages` return annotation is `tuple[...]`
+- Updated `test_handler_skips_s3_upload_metric_on_success` — now verifies no metric emitted when `uploaded=0, failed=0` (S3 not configured).
+- All 414 tests pass without errors.
+
+## Next actions
+
+- Consider evaluating gpt-4.1-nano vs gpt-4o-mini quality tradeoff with A/B testing
+- Consider adding Lambda provisioned concurrency for more predictable cold starts
+- Consider adding coverage dedup group-stream widget to dashboard (currently only channel)
+- Consider tuning warmup schedule frequency for cost-effectiveness
 
 - **Runtime tunability — update_existing_summary prompt in PromptManager**: Moved the inline update prompt from [`update_existing_summary()`](history_manager.py) to [`UPDATE_SUMMARY_PROMPT`](prompts.py) in `PromptManager`. The prompt uses `{new_link}` placeholder via Python `str.format()`. Previously, the update prompt was hardcoded in `history_manager.py`, requiring a code change to tune it. Now it can be overridden at runtime via `prompts.json` without code changes, consistent with all other prompts (COVERAGE_AND_MATCH, NLP_RELEVANCE, CHANNEL_SUMMARY, GROUP_SUMMARY). Directly addresses the TODO item "Consider moving update_existing_summary prompt to PromptManager for runtime tunability".
 - **Observability — S3 upload failure EMF metric and CloudWatch alarm**: Added [`_emit_s3_upload_metric()`](lambda_handler.py) that emits `S3UploadFailures` and `S3UploadedFiles` EMF metrics under `tg_summarizer/S3` namespace when S3 upload failures are detected. Added `S3UploadFailuresAlarm` in [`template.yaml`](template.yaml) — alerts when `S3UploadFailures > 0` (Sum statistic, 5-minute period). The alarm is conditional on `HasStateBucket` since S3 sync is only relevant when a bucket is configured. Directly addresses the TODO item "Consider adding CloudWatch Logs metric filter on S3 upload failure warning for automated alerting" — the EMF metric approach is cleaner than a Logs metric filter.

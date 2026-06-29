@@ -253,6 +253,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             s3_upload_result["failed"],
             s3_upload_result["uploaded"] + s3_upload_result["failed"] + s3_upload_result.get("skipped_empty", 0),
         )
+    if s3_upload_result.get("uploaded", 0) > 0 or s3_upload_result.get("failed", 0) > 0:
         _emit_s3_upload_metric(s3_upload_result)
 
     elapsed = time.monotonic() - start_time
