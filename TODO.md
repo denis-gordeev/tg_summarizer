@@ -2,6 +2,26 @@
 
 Живой список задач для автоматических раундов.
 
+## Next actions
+
+- Consider evaluating gpt-4.1-nano vs gpt-4o-mini quality tradeoff with A/B testing
+- Consider adding Lambda provisioned concurrency for more predictable cold starts
+- Consider tuning warmup schedule frequency for cost-effectiveness
+
+## Completed in 2026-06-30 round (Lambda hardening round 39, group coverage widget, meta-artifacts expansion, TODO cleanup)
+
+- **Dashboard: Coverage Dedup (Group) widget**: Added "Coverage Dedup (Group)" widget to [`SummarizerDashboard`](template.yaml) showing `CoveredMessages`, `NewMessages`, `TotalNlpMessages` from `tg_summarizer/Coverage` namespace with `StreamType=group` dimension. Complements the existing channel widget, enabling visual monitoring of group-stream coverage dedup hit rate alongside channels. Directly addresses the TODO item "Consider adding coverage dedup group-stream widget to dashboard (currently only channel)".
+- **Quality — expanded `strip_meta_artifacts`**: Added "напоследок", "кратко говоря", "среди прочего" to the intro/outro patterns in [`_META_ARTIFACT_PATTERNS`](utils.py). Added "во-первых", "во-вторых", "в-третьих" to [`_META_ARTIFACT_INTRO_ONLY`](utils.py) — enumeration markers at the start of a summary are always meta-artifacts, but can appear legitimately in body text (e.g., "Во-первых, модель превосходит..."). "среди прочего" is added only to intro/outro since it's a qualifying filler.
+- **TODO.md cleanup**: Removed stale/duplicate "Next actions" sections from older rounds. Several items ("Consider adding coverage dedup dashboard widget", "Consider adding S3 upload dedup metric to CloudWatch dashboard") were already completed in prior rounds but still listed as next actions. Consolidated to a single current "Next actions" section.
+- **Tests added**: 6 new tests (total 420, up from 414):
+  - `test_template_dashboard_contains_coverage_dedup_group_widget`: verifies "Coverage Dedup (Group)" widget and `StreamType=group` in template.yaml
+  - `test_strips_напоследок_outro`: verifies "Напоследок" stripped from summary end
+  - `test_strips_кратко_говоря_outro`: verifies "Кратко говоря" stripped from summary end
+  - `test_strips_среди_прочего_intro`: verifies "Среди прочего" stripped from summary start
+  - `test_strips_во_первых_intro`: verifies "Во-первых" stripped from summary start
+  - `test_preserves_во_первых_in_body`: verifies "во-первых" in body preserved
+- All 420 tests pass without errors.
+
 ## Completed in 2026-06-29 round (Lambda hardening round 38, dashboard widgets, S3 metric fix, code quality)
 
 - **Dashboard: Coverage dedup widget**: Added "Coverage Dedup (Channel)" widget to [`SummarizerDashboard`](template.yaml) showing `CoveredMessages`, `NewMessages`, `TotalNlpMessages` from `tg_summarizer/Coverage` namespace with `StreamType=channel` dimension. Enables visual monitoring of coverage dedup hit rate for tuning `ENABLE_SUMMARIES_DEDUPLICATION`. Directly addresses the TODO item "Consider adding coverage dedup dashboard widget for visual monitoring".
@@ -47,13 +67,6 @@
 - Updated [`test_update_prompt_mentions_html`](tests/test_history_manager.py) — now checks `prompts.py` instead of `history_manager.py` for HTML preservation text.
 - All 409 tests pass without errors.
 
-## Next actions
-
-- Consider evaluating gpt-4.1-nano vs gpt-4o-mini quality tradeoff with A/B testing
-- Consider adding Lambda provisioned concurrency for more predictable cold starts
-- Consider adding coverage dedup dashboard widget for visual monitoring
-- Consider adding S3 upload dedup metric to CloudWatch dashboard
-
 ## Completed in 2026-06-26 round (Lambda hardening round 36, update meta-artifacts, circuit breaker NLP, prompt token savings, dead code removal, config sync)
 
 - **Quality — `strip_meta_artifacts` in `update_existing_summary`**: Added `strip_meta_artifacts()` call in [`update_existing_summary()`](history_manager.py) after the LLM response and fallback paths. Previously, only `summarize_text()` and `summarize_group_text()` applied meta-artifact stripping — the update path stored raw LLM output, allowing meta-artifacts like "Итак" or "В заключение" to leak into published summaries and persist in history. Added "Без вводных слов и заключений" to the update prompt to reduce the likelihood of meta-artifacts from the LLM.
@@ -90,11 +103,6 @@
 - Updated fallback phrase assertions in [`tests/test_history_manager.py`](tests/test_history_manager.py) — changed all "Другие ссылки:" assertions to "Доп. источники:".
 - All 397 tests pass without errors.
 
-## Next actions
-
-- Consider evaluating gpt-4.1-nano vs gpt-4o-mini quality tradeoff with A/B testing
-- Consider adding Lambda provisioned concurrency for more predictable cold starts
-
 ## Completed in 2026-06-25 round (Lambda hardening round 34, Lambda warmup, Telegram retry, prompt brevity, meta-artifacts expansion, template fix)
 
 - **Lambda warmup support**: Added `warmup` event flag handling in [`lambda_handler.handler()`](lambda_handler.py). When `warmup=true`, the handler downloads S3 state, starts and stops Telegram clients (via [`_warmup_telegram()`](lambda_handler.py)), uploads state, and returns `{'status': 'warmed'}` without running the summarizer. Added [`_warmup_telegram()`](lambda_handler.py) async function that connects and disconnects Telegram clients to refresh session files. Added `WarmupScheduleExpression` parameter (default: empty = disabled) and `HasWarmupSchedule` condition in [`template.yaml`](template.yaml). When enabled, a second EventBridge `WarmupRun` schedule triggers the Lambda with `{"warmup": true}`, keeping the execution environment warm and Telegram sessions fresh between daily runs. Directly addresses the "Consider adding Lambda warmer" TODO item.
@@ -122,10 +130,6 @@
   - `test_template_contains_warmup_schedule_parameter`: verifies `WarmupScheduleExpression` in template
   - `test_template_contains_warmup_event`: verifies `WarmupRun` and `HasWarmupSchedule` in template
 - All 363 tests pass without errors.
-
-## Next actions
-
-- Consider tuning warmup schedule frequency for cost-effectiveness
 
 - **Observability — per-invocation cumulative cost EMF metric**: Added [`_emit_invocation_summary()`](lambda_handler.py) that emits an EMF metric at the end of each Lambda invocation (both success and error paths) with `CumulativePromptTokens`, `CumulativeCompletionTokens`, `CumulativeCostUSD`, and `ElapsedSeconds` under the `tg_summarizer/Invocation` namespace with only the `Function` dimension (no `Model`). Unlike the per-call EMF in [`_emit_openai_latency()`](utils.py) (which has `Function+Model` dimensions), this metric aggregates across models, enabling CloudWatch Sum-based daily cost alerting. Skips emission when no tokens were used.
 - **Observability — daily cost alarm**: Added `OpenAIDailyCostAlarm` in [`template.yaml`](template.yaml) — alerts when cumulative `CumulativeCostUSD` (Sum statistic, 86400s period) exceeds $1.00 per day. Uses the new `tg_summarizer/Invocation` namespace. Complements the existing `OpenAICostAlarm` (per-invocation Maximum > $0.10). Directly addresses the TODO item "Consider adding CloudWatch metric filter on `token_usage` field for cost alerting" — the EMF metric approach is cleaner than a Logs metric filter and provides the same daily cost alerting capability.
@@ -171,8 +175,6 @@
   - `test_preserves_обратите_внимание_in_body`: verifies "обратить внимание" preserved in summary body (not at line start)
 - Updated test stub in [`tests/test_lambda_handler.py`](tests/test_lambda_handler.py) — added `OPENAI_MODEL` to `fake_config` stub to support the new import.
 - All 329 tests pass without errors.
-
-## Next actions
 
 - **Prompt quality — anti-list rule**: Added "Без нумерованных и маркированных списков — только сплошной текст с абзацами" and "Без подзаголовков внутри раздела — один заголовок на тему" rules to both [`CHANNEL_SUMMARY_PROMPT`](prompts.py) and [`GROUP_SUMMARY_PROMPT`](prompts.py). LLMs frequently produce verbose bullet/numbered lists and nested sub-headers in Telegram digests, which render poorly and waste tokens. Directly targets the AUTOWORK_INSTRUCTIONS goal of improving quality and conciseness.
 - **Cost monitoring — gpt-4.1-nano in cost table**: Added `"gpt-4.1-nano": (0.10, 0.40)` to [`_COST_PER_MILLION`](utils.py) cost lookup. gpt-4.1-nano is cheaper than gpt-4o-mini ($0.10/$0.40 vs $0.15/$0.60 per 1M tokens), making it a valid model per AUTOWORK_INSTRUCTIONS cost constraint. Without this entry, using gpt-4.1-nano would trigger a false cost-table warning.
@@ -262,11 +264,6 @@
 - Updated existing test `test_circuit_breaker_opens_after_consecutive_failures` to set `_CIRCUIT_BREAKER_OPEN_SINCE` for half-open logic compatibility.
 - Updated test stubs in [`tests/test_digest_post_processing.py`](tests/test_digest_post_processing.py), [`tests/test_summary_length_guardrails.py`](tests/test_summary_length_guardrails.py), [`tests/test_history_manager.py`](tests/test_history_manager.py) — added `CIRCUIT_BREAKER_THRESHOLD` and `CIRCUIT_BREAKER_RESET_SEC` to `fake_config` stubs.
 - All 284 tests pass without errors.
-
-## Next actions
-
-- Consider adding structured error response body for S3 upload failures (separate from Lambda status)
-- Consider adding CloudWatch dashboard for circuit breaker state (open/closed/half-open transitions)
 
 ## Completed in 2026-06-17 round (Lambda hardening round 26, HTML entities, fsync, cost guard, hash dedup, S3 empty-file guard)
 

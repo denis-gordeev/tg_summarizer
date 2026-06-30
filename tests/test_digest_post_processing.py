@@ -982,6 +982,40 @@ class NewMetaArtifactPatternsTests(unittest.TestCase):
         result = utils.strip_meta_artifacts(text)
         self.assertNotIn("Давайте рассмотрим", result)
 
+    def test_strips_напоследок_outro(self):
+        utils = self._import_utils()
+        text = "<b>AI news</b>\nНапоследок, упомянем GPT-5"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Напоследок", result)
+        self.assertIn("<b>AI news</b>", result)
+
+    def test_strips_кратко_говоря_outro(self):
+        utils = self._import_utils()
+        text = "<b>AI news</b>\nКратко говоря, прогресс налицо"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Кратко говоря", result)
+        self.assertIn("<b>AI news</b>", result)
+
+    def test_strips_среди_прочего_intro(self):
+        utils = self._import_utils()
+        text = "Среди прочего, модель обновлена\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Среди прочего", result)
+        self.assertIn("<b>AI</b>", result)
+
+    def test_strips_во_первых_intro(self):
+        utils = self._import_utils()
+        text = "Во-первых, GPT-5 вышел\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Во-первых", result)
+        self.assertIn("<b>AI</b>", result)
+
+    def test_preserves_во_первых_in_body(self):
+        utils = self._import_utils()
+        text = "<b>AI</b>\nМодель во-первых превосходит конкурентов [1]"
+        result = utils.strip_meta_artifacts(text)
+        self.assertIn("во-первых", result.lower())
+
 
 class IsCircuitBreakerOpenTests(unittest.TestCase):
     """Tests for is_circuit_breaker_open helper."""

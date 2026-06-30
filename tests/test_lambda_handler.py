@@ -997,6 +997,12 @@ class DashboardCoverageWidgetTests(unittest.TestCase):
         self.assertIn("CoveredMessages", content)
         self.assertIn("NewMessages", content)
 
+    def test_template_dashboard_contains_coverage_dedup_group_widget(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        self.assertIn("Coverage Dedup (Group)", content)
+        self.assertIn('"group"', content)
+
     def test_template_dashboard_contains_s3_upload_widget(self):
         with open("template.yaml") as f:
             content = f.read()

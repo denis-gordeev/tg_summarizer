@@ -638,6 +638,22 @@ Resources:
               "type": "metric",
               "properties": {
                 "metrics": [
+                  ["tg_summarizer/Coverage", "CoveredMessages", "Function", "${SummarizerFunction}", "StreamType", "group"],
+                  ["tg_summarizer/Coverage", "NewMessages", "Function", "${SummarizerFunction}", "StreamType", "group"],
+                  ["tg_summarizer/Coverage", "TotalNlpMessages", "Function", "${SummarizerFunction}", "StreamType", "group"]
+                ],
+                "period": 300,
+                "stat": "Sum",
+                "region": "${AWS::Region}",
+                "title": "Coverage Dedup (Group)",
+                "yAxis": { "left": { "label": "messages" } }
+              },
+              "width": 12, "height": 6
+            },
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
                   ["tg_summarizer/S3", "S3UploadedFiles", "Function", "${SummarizerFunction}"],
                   ["tg_summarizer/S3", "S3UploadFailures", "Function", "${SummarizerFunction}"]
                 ],
