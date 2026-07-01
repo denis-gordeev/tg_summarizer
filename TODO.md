@@ -7,6 +7,34 @@
 - Consider evaluating gpt-4.1-nano vs gpt-4o-mini quality tradeoff with A/B testing
 - Consider tuning warmup schedule frequency for cost-effectiveness
 - Consider adding Lambda provisioned concurrency for more predictable cold starts
+- Consider adding CloudWatch alarm on circuit breaker half-open transitions
+
+## Completed in 2026-07-01 round 2 (code quality, meta-artifacts expansion, circuit breaker refactor, S3 empty guard, prompt compaction)
+
+- **Code quality — consolidated fallback append in `update_existing_summary`**: Extracted [`_append_link()`](history_manager.py) local helper that returns the correct append format (inline vs new "Доп. источники:" section). Previously, the same 3-line append block was duplicated in both the short-response and exception fallback paths. Now each path calls `_append_link()`, eliminating the duplication.
+- **Quality — expanded `strip_meta_artifacts`**: Added "между прочим" to both intro and outro patterns in [`_META_ARTIFACT_PATTERNS`](utils.py). Added "в частности", "перейдём к", "перейдем к", "возвращаясь к", "как показано" to [`_META_ARTIFACT_INTRO_ONLY`](utils.py) — these are transition/filler phrases at the start of summaries but can appear legitimately in body text (e.g., "Модель превосходит конкурентов в частности благодаря архитектуре").
+- **Code quality — `call_openai` uses `get_circuit_breaker_state()`**: Replaced inline `_CIRCUIT_BREAKER_FAILURES >= CIRCUIT_BREAKER_THRESHOLD` check in [`call_openai()`](utils.py) with `cb_state = get_circuit_breaker_state()`. The circuit breaker state is now evaluated through the shared `get_circuit_breaker_state()` function, eliminating duplicated threshold/timeout logic. The inline check was the only place in the codebase that bypassed the shared state function.
+- **Robustness — S3 download rejects empty files**: Added 0-byte file size check in [`download_from_s3()`](s3_sync.py). Previously, an empty (0 bytes) file downloaded from S3 would overwrite local state with a corrupt/empty file. Now, empty downloads are removed and skipped, consistent with the upload path which already skips empty files. JSON validation runs after the size check.
+- **Cost optimization — compact UPDATE_SUMMARY_PROMPT**: Condensed [`UPDATE_SUMMARY_PROMPT`](prompts.py) from verbose to compact: "Скопируй саммари и добавь ссылку" → "Скопируй саммари, вставь ссылку", "Остальной текст не меняй" → "Остальное не меняй", "Если нет подходящего места" → "Нет подходящего места", "Ответь только обновлённое саммари" → "Только обновлённое саммари". Saves ~10 input tokens per summary update call.
+- **Tests added**: 17 new tests (total 452, up from 435):
+  - `test_strips_в_частности_intro`: verifies "В частности" stripped from summary start
+  - `test_strips_между_прочим_intro`: verifies "Между прочим" stripped from summary start
+  - `test_strips_между_прочим_outro`: verifies "Между прочим" stripped from summary end
+  - `test_strips_перейдём_к_intro`: verifies "Перейдём к" stripped from summary start
+  - `test_strips_перейдем_к_intro`: verifies "Перейдем к" stripped from summary start
+  - `test_strips_возвращаясь_к_intro`: verifies "Возвращаясь к" stripped from summary start
+  - `test_strips_как_показано_intro`: verifies "Как показано" stripped from summary start
+  - `test_preserves_в_частности_in_body`: verifies "в частности" in body preserved
+  - `test_call_openai_uses_get_circuit_breaker_state`: verifies `get_circuit_breaker_state()` used in utils.py
+  - `test_call_openai_no_inline_failure_threshold_check`: verifies inline threshold check removed
+  - `test_download_removes_empty_files`: verifies 0-byte S3 downloads removed and skipped
+  - `test_update_uses_append_link_helper`: verifies `_append_link()` helper in history_manager.py
+  - `test_no_duplicate_append_logic`: verifies append logic appears only once
+  - `test_update_prompt_is_compact`: verifies compact prompt wording
+  - `test_update_prompt_still_has_html_preservation`: verifies HTML preservation instruction retained
+  - `test_update_prompt_still_has_fallback_instruction`: verifies "Доп. источники:" instruction retained
+  - `test_update_prompt_has_no_если`: verifies verbose "Если нет" replaced with "Нет подходящего места"
+- All 452 tests pass without errors.
 
 ## Completed in 2026-07-01 round (EMF refactor, NLP cost savings, None-date guard, meta-artifacts expansion, TODO cleanup)
 

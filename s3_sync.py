@@ -99,6 +99,11 @@ def download_from_s3() -> None:
         local_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             client.download_file(bucket, key, str(local_path))
+            if local_path.stat().st_size == 0:
+                logger.warning("Downloaded file %s is empty (0 bytes) — removing", relative_name)
+                local_path.unlink(missing_ok=True)
+                skipped += 1
+                continue
             if _is_json_state_file(relative_name) and not _validate_json_file(local_path):
                 skipped += 1
                 continue

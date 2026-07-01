@@ -2478,5 +2478,48 @@ class UpdateExistingSummaryStripMetaArtifactsTests(unittest.TestCase):
                 fake_utils.strip_meta_artifacts.assert_called_once()
 
 
+class UpdateSummaryFallbackConsolidatedTests(unittest.TestCase):
+    """Tests that update_existing_summary uses a consolidated _append_link helper."""
+
+    def test_update_uses_append_link_helper(self):
+        with open("history_manager.py") as f:
+            source = f.read()
+        self.assertIn("def _append_link()", source)
+
+    def test_no_duplicate_append_logic(self):
+        with open("history_manager.py") as f:
+            source = f.read()
+        count = source.count('summary.content + f"\\n\\nДоп. источники: {new_link}"')
+        self.assertEqual(count, 1, "Append logic should appear only once (in _append_link)")
+
+
+class UpdateSummaryPromptCompactTests(unittest.TestCase):
+    """Tests for compact UPDATE_SUMMARY_PROMPT."""
+
+    def test_update_prompt_is_compact(self):
+        with open("prompts.py") as f:
+            source = f.read()
+        self.assertNotIn("Остальной текст не меняй", source)
+        self.assertIn("Остальное не меняй", source)
+
+    def test_update_prompt_still_has_html_preservation(self):
+        with open("prompts.py") as f:
+            source = f.read()
+        self.assertIn("Сохрани", source)
+        self.assertIn("HTML", source)
+
+    def test_update_prompt_still_has_fallback_instruction(self):
+        with open("prompts.py") as f:
+            source = f.read()
+        self.assertIn("Доп. источники:", source)
+
+    def test_update_prompt_has_no_если(self):
+        with open("prompts.py") as f:
+            source = f.read()
+        prompt_section = source[source.index("UPDATE_SUMMARY_PROMPT"):]
+        self.assertNotIn("Если нет", prompt_section)
+        self.assertIn("Нет подходящего места", prompt_section)
+
+
 if __name__ == '__main__':
     unittest.main()

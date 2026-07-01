@@ -1066,8 +1066,74 @@ class NewMetaArtifactPatternsTests(unittest.TestCase):
         self.assertNotIn("Подытоживая", result)
         self.assertIn("<b>AI</b>", result)
 
+    def test_strips_в_частности_intro(self):
+        utils = self._import_utils()
+        text = "В частности, модель обновлена\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("В частности", result)
+        self.assertIn("<b>AI</b>", result)
 
-class IsCircuitBreakerOpenTests(unittest.TestCase):
+    def test_strips_между_прочим_intro(self):
+        utils = self._import_utils()
+        text = "Между прочим, это важно\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Между прочим", result)
+        self.assertIn("<b>AI</b>", result)
+
+    def test_strips_между_прочим_outro(self):
+        utils = self._import_utils()
+        text = "<b>AI news</b>\nМежду прочим, модель обновлена"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Между прочим", result)
+        self.assertIn("<b>AI news</b>", result)
+
+    def test_strips_перейдём_к_intro(self):
+        utils = self._import_utils()
+        text = "Перейдём к результатам\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Перейдём к", result)
+        self.assertIn("<b>AI</b>", result)
+
+    def test_strips_перейдем_к_intro(self):
+        utils = self._import_utils()
+        text = "Перейдем к итогам\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Перейдем к", result)
+        self.assertIn("<b>AI</b>", result)
+
+    def test_strips_возвращаясь_к_intro(self):
+        utils = self._import_utils()
+        text = "Возвращаясь к теме моделей\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Возвращаясь к", result)
+        self.assertIn("<b>AI</b>", result)
+
+    def test_strips_как_показано_intro(self):
+        utils = self._import_utils()
+        text = "Как показано выше\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Как показано", result)
+        self.assertIn("<b>AI</b>", result)
+
+    def test_preserves_в_частности_in_body(self):
+        utils = self._import_utils()
+        text = "<b>AI</b>\nМодель превосходит конкурентов в частности благодаря архитектуре [1]"
+        result = utils.strip_meta_artifacts(text)
+        self.assertIn("в частности", result.lower())
+
+
+class CallOpenaiUsesCircuitBreakerStateTests(unittest.TestCase):
+    """Tests that call_openai uses get_circuit_breaker_state() instead of inline checks."""
+
+    def test_call_openai_uses_get_circuit_breaker_state(self):
+        with open("utils.py") as f:
+            source = f.read()
+        self.assertIn("cb_state = get_circuit_breaker_state()", source)
+
+    def test_call_openai_no_inline_failure_threshold_check(self):
+        with open("utils.py") as f:
+            source = f.read()
+        self.assertNotIn("_CIRCUIT_BREAKER_FAILURES >= CIRCUIT_BREAKER_THRESHOLD", source)
     """Tests for is_circuit_breaker_open helper."""
 
     def _import_utils(self):

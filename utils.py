@@ -248,18 +248,20 @@ async def call_openai(
         logger.warning("call_openai called with empty user_content — skipping")
         return ""
 
-    if _CIRCUIT_BREAKER_FAILURES >= CIRCUIT_BREAKER_THRESHOLD:
+    cb_state = get_circuit_breaker_state()
+    if cb_state["state"] == "open":
         elapsed_since_open = _time.monotonic() - _CIRCUIT_BREAKER_OPEN_SINCE
-        if elapsed_since_open < CIRCUIT_BREAKER_RESET_SEC:
-            logger.warning(
-                "OpenAI circuit breaker open (%d consecutive failures, %.0fs until reset) — skipping call",
-                _CIRCUIT_BREAKER_FAILURES,
-                CIRCUIT_BREAKER_RESET_SEC - elapsed_since_open,
-            )
-            return ""
+        logger.warning(
+            "OpenAI circuit breaker open (%d consecutive failures, %.0fs until reset) — skipping call",
+            cb_state["failures"],
+            CIRCUIT_BREAKER_RESET_SEC - elapsed_since_open,
+        )
+        return ""
+    if cb_state["state"] == "half_open":
         logger.info(
             "OpenAI circuit breaker half-open (%d failures, %.0fs elapsed) — probing",
-            _CIRCUIT_BREAKER_FAILURES, elapsed_since_open,
+            cb_state["failures"],
+            _time.monotonic() - _CIRCUIT_BREAKER_OPEN_SINCE,
         )
 
     if openai_client is None:
@@ -410,13 +412,13 @@ def _truncate_html_preserving_tags(text: str, max_visible_chars: int) -> str:
 
 
 _META_ARTIFACT_INTRO_ONLY = re.compile(
-    r"^[^<\n]*?(?:таким образом|отметим|заметим|в данном обзоре|в данной статье|ниже представлены|ниже приведены|давайте рассмотрим|во-первых|во-вторых|в-третьих|среди прочего|в первую очередь|короче говоря|подытоживая)[^\n]*\n*",
+    r"^[^<\n]*?(?:таким образом|отметим|заметим|в данном обзоре|в данной статье|ниже представлены|ниже приведены|давайте рассмотрим|во-первых|во-вторых|в-третьих|среди прочего|в первую очередь|короче говоря|подытоживая|в частности|перейдём к|перейдем к|возвращаясь к|как показано)[^\n]*\n*",
     re.IGNORECASE,
 )
 
 _META_ARTIFACT_PATTERNS = [
-    re.compile(r"^[^<\n]*?(?:в этом дайджесте|итого|в заключение|подведя итог|в итоге|в конечном итоге|итак|в общем|вкратце|как видно|обратите внимание|напомним|также стоит отметить|стоит отметить|следует отметить|важно отметить|подводя итог|резюмируя|ключевые выводы|в целом|как уже упоминалось|напоследок|кратко говоря|среди прочего|собственно говоря|к слову)[^\n]*\n*", re.IGNORECASE),
-    re.compile(r"\n[^<\n]*?(?:в этом дайджесте|итого|в заключение|подведя итог|в итоге|в конечном итоге|итак|в общем|вкратце|как видно|обратите внимание|напомним|также стоит отметить|подводя итог|резюмируя|ключевые выводы|в целом|как уже упоминалось|напоследок|кратко говоря|среди прочего|собственно говоря|к слову)[^\n]*$", re.IGNORECASE),
+    re.compile(r"^[^<\n]*?(?:в этом дайджесте|итого|в заключение|подведя итог|в итоге|в конечном итоге|итак|в общем|вкратце|как видно|обратите внимание|напомним|также стоит отметить|стоит отметить|следует отметить|важно отметить|подводя итог|резюмируя|ключевые выводы|в целом|как уже упоминалось|напоследок|кратко говоря|среди прочего|собственно говоря|к слову|между прочим)[^\n]*\n*", re.IGNORECASE),
+    re.compile(r"\n[^<\n]*?(?:в этом дайджесте|итого|в заключение|подведя итог|в итоге|в конечном итоге|итак|в общем|вкратце|как видно|обратите внимание|напомним|также стоит отметить|подводя итог|резюмируя|ключевые выводы|в целом|как уже упоминалось|напоследок|кратко говоря|среди прочего|собственно говоря|к слову|между прочим)[^\n]*$", re.IGNORECASE),
     _META_ARTIFACT_INTRO_ONLY,
     re.compile(r"\n[^<\n]*?другие ссылки:\s*[^\n]*$", re.IGNORECASE),
     re.compile(r"^[^<\n]*?(?:смотри также|подробнее)\s*:\s*[^\n]*\n*", re.IGNORECASE),

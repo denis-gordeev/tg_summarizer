@@ -363,20 +363,19 @@ async def update_existing_summary(
     truncated_msg = new_message.text[:UPDATE_SUMMARY_MAX_INPUT_CHARS]
     user_content = f"Саммари:\n{truncated_summary}\n\nНовое сообщение:\n{truncated_msg}"
 
+    def _append_link():
+        if "Доп. источники:" in summary.content:
+            return summary.content + f"\n{new_link}"
+        return summary.content + f"\n\nДоп. источники: {new_link}"
+
     try:
         updated_content = await call_openai(update_prompt, user_content, max_tokens=UPDATE_SUMMARY_MAX_TOKENS, temperature=0)
         if not updated_content or count_characters(updated_content) < count_characters(summary.content) * 0.8:
             logger.warning("LLM update response too short (%d < %d*0.8); falling back to append", count_characters(updated_content or ""), count_characters(summary.content))
-            if "Доп. источники:" in summary.content:
-                updated_content = summary.content + f"\n{new_link}"
-            else:
-                updated_content = summary.content + f"\n\nДоп. источники: {new_link}"
+            updated_content = _append_link()
     except Exception as e:
         logger.error("Error updating summary via LLM: %s; falling back to append", e)
-        if "Доп. источники:" in summary.content:
-            updated_content = summary.content + f"\n{new_link}"
-        else:
-            updated_content = summary.content + f"\n\nДоп. источники: {new_link}"
+        updated_content = _append_link()
 
     updated_content = strip_meta_artifacts(updated_content)
 

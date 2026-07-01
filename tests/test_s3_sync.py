@@ -403,6 +403,39 @@ class S3DownloadJSONValidationTests(unittest.TestCase):
             finally:
                 os.chdir(previous_cwd)
 
+    def test_download_removes_empty_files(self):
+        """Downloaded files that are 0 bytes should be removed and skipped."""
+        class EmptyS3Client:
+            def download_file(self, bucket, key, destination):
+                Path(destination).write_text("", encoding="utf-8")
+
+        client = EmptyS3Client()
+
+        with tempfile.TemporaryDirectory() as tmpdir, \
+             patch.dict(
+                 os.environ,
+                 {
+                     "STATE_S3_BUCKET": "bucket",
+                     "STATE_S3_PREFIX": "prefix",
+                     "STATE_SYNC_FILES": "state/empty.json",
+                 },
+                 clear=False,
+             ), \
+             patch.object(s3_sync, "_get_s3_client", return_value=client), \
+             patch.object(s3_sync.logger, "info") as mock_log:
+            previous_cwd = os.getcwd()
+            os.chdir(tmpdir)
+            try:
+                s3_sync.download_from_s3()
+                self.assertFalse(Path("state/empty.json").exists())
+                summary_logs = [call for call in mock_log.call_args_list
+                                if "S3 download" in str(call)]
+                self.assertTrue(len(summary_logs) > 0)
+                self.assertEqual(summary_logs[0][0][1], 0)
+                self.assertEqual(summary_logs[0][0][2], 1)
+            finally:
+                os.chdir(previous_cwd)
+
 
 if __name__ == "__main__":
     unittest.main()
