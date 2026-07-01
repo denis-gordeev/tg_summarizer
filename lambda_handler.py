@@ -1,13 +1,11 @@
-import json as _json
-import os
 import logging
+import os
 import asyncio
-import sys
 import time
 from typing import Any, Dict
 from s3_sync import download_from_s3, upload_to_s3
 from summarizer import run_summarizer, DeadlineExceededError
-from utils import get_circuit_breaker_state, reset_circuit_breaker, get_token_usage, reset_token_usage, _estimate_cost_usd
+from utils import get_circuit_breaker_state, reset_circuit_breaker, get_token_usage, reset_token_usage, _estimate_cost_usd, _emit_emf
 from config import OPENAI_MODEL
 
 SAFETY_MARGIN_SECONDS = 10
@@ -31,32 +29,23 @@ def _emit_invocation_summary(
     """
     if prompt_tokens == 0 and completion_tokens == 0:
         return
-    try:
-        cost_usd = _estimate_cost_usd(model, prompt_tokens, completion_tokens)
-        emf = {
-            "_aws": {
-                "Timestamp": int(time.time() * 1000),
-                "CloudWatchMetrics": [{
-                    "Namespace": "tg_summarizer/Invocation",
-                    "Dimensions": [["Function"]],
-                    "Metrics": [
-                        {"Name": "CumulativePromptTokens", "Unit": "None"},
-                        {"Name": "CumulativeCompletionTokens", "Unit": "None"},
-                        {"Name": "CumulativeCostUSD", "Unit": "None"},
-                        {"Name": "ElapsedSeconds", "Unit": "Seconds"},
-                    ]
-                }]
-            },
-            "Function": os.getenv("AWS_LAMBDA_FUNCTION_NAME", "local"),
+    cost_usd = _estimate_cost_usd(model, prompt_tokens, completion_tokens)
+    _emit_emf(
+        namespace="tg_summarizer/Invocation",
+        dimensions=[["Function"]],
+        metrics=[
+            {"Name": "CumulativePromptTokens", "Unit": "None"},
+            {"Name": "CumulativeCompletionTokens", "Unit": "None"},
+            {"Name": "CumulativeCostUSD", "Unit": "None"},
+            {"Name": "ElapsedSeconds", "Unit": "Seconds"},
+        ],
+        values={
             "CumulativePromptTokens": prompt_tokens,
             "CumulativeCompletionTokens": completion_tokens,
             "CumulativeCostUSD": round(cost_usd, 6),
             "ElapsedSeconds": round(elapsed_seconds, 1),
-        }
-        sys.stdout.write(_json.dumps(emf, separators=(",", ":")) + "\n")
-        sys.stdout.flush()
-    except Exception:
-        pass
+        },
+    )
 
 
 def _classify_error(exc: Exception) -> str:
@@ -93,51 +82,33 @@ async def _warmup_telegram():
 
 
 def _emit_warmup_metric(success: bool, elapsed_seconds: float) -> None:
-    try:
-        emf = {
-            "_aws": {
-                "Timestamp": int(time.time() * 1000),
-                "CloudWatchMetrics": [{
-                    "Namespace": "tg_summarizer/Warmup",
-                    "Dimensions": [["Function"]],
-                    "Metrics": [
-                        {"Name": "Success", "Unit": "None"},
-                        {"Name": "ElapsedSeconds", "Unit": "Seconds"},
-                    ]
-                }]
-            },
-            "Function": os.getenv("AWS_LAMBDA_FUNCTION_NAME", "local"),
+    _emit_emf(
+        namespace="tg_summarizer/Warmup",
+        dimensions=[["Function"]],
+        metrics=[
+            {"Name": "Success", "Unit": "None"},
+            {"Name": "ElapsedSeconds", "Unit": "Seconds"},
+        ],
+        values={
             "Success": 1 if success else 0,
             "ElapsedSeconds": round(elapsed_seconds, 1),
-        }
-        sys.stdout.write(_json.dumps(emf, separators=(",", ":")) + "\n")
-        sys.stdout.flush()
-    except Exception:
-        pass
+        },
+    )
 
 
 def _emit_s3_upload_metric(result: dict) -> None:
-    try:
-        emf = {
-            "_aws": {
-                "Timestamp": int(time.time() * 1000),
-                "CloudWatchMetrics": [{
-                    "Namespace": "tg_summarizer/S3",
-                    "Dimensions": [["Function"]],
-                    "Metrics": [
-                        {"Name": "S3UploadFailures", "Unit": "None"},
-                        {"Name": "S3UploadedFiles", "Unit": "None"},
-                    ]
-                }]
-            },
-            "Function": os.getenv("AWS_LAMBDA_FUNCTION_NAME", "local"),
+    _emit_emf(
+        namespace="tg_summarizer/S3",
+        dimensions=[["Function"]],
+        metrics=[
+            {"Name": "S3UploadFailures", "Unit": "None"},
+            {"Name": "S3UploadedFiles", "Unit": "None"},
+        ],
+        values={
             "S3UploadFailures": result.get("failed", 0),
             "S3UploadedFiles": result.get("uploaded", 0),
-        }
-        sys.stdout.write(_json.dumps(emf, separators=(",", ":")) + "\n")
-        sys.stdout.flush()
-    except Exception:
-        pass
+        },
+    )
 
 
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:

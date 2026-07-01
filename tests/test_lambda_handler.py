@@ -1,5 +1,6 @@
 import asyncio
 import importlib
+import os
 import sys
 import time
 import types
@@ -27,6 +28,24 @@ def _load_lambda_handler():
     fake_utils.get_token_usage = lambda: {"prompt_tokens": 0, "completion_tokens": 0}
     fake_utils.reset_token_usage = lambda: None
     fake_utils._estimate_cost_usd = lambda model, pt, ct: (pt * 0.10 + ct * 0.40) / 1_000_000
+
+    def _real_emit_emf(namespace, dimensions, metrics, values):
+        import json as _json
+        import os
+        import time as _time
+        values.setdefault("Function", os.getenv("AWS_LAMBDA_FUNCTION_NAME", "local"))
+        emf = {
+            "_aws": {
+                "Timestamp": int(_time.time() * 1000),
+                "CloudWatchMetrics": [{"Namespace": namespace, "Dimensions": dimensions, "Metrics": metrics}],
+            },
+            **values,
+        }
+        sys.stdout.write(_json.dumps(emf, separators=(",", ":")) + "\n")
+        sys.stdout.flush()
+
+    fake_utils._emit_emf = _real_emit_emf
+    fake_utils.os = os
     sys.modules["summarizer"] = fake_summarizer
     sys.modules["config"] = fake_config
     sys.modules["utils"] = fake_utils
@@ -673,7 +692,7 @@ class EmitInvocationSummaryTests(unittest.TestCase):
         """_emit_invocation_summary should write an EMF JSON line to stdout."""
         import io
         fake_stdout = io.StringIO()
-        with patch.object(self.lambda_handler.sys, "stdout", fake_stdout):
+        with patch("sys.stdout", fake_stdout):
             self.lambda_handler._emit_invocation_summary(100, 50, 5.2, "gpt-4.1-nano")
         output = fake_stdout.getvalue()
         self.assertIn("CumulativePromptTokens", output)
@@ -686,7 +705,7 @@ class EmitInvocationSummaryTests(unittest.TestCase):
         """_emit_invocation_summary should skip when no tokens used."""
         import io
         fake_stdout = io.StringIO()
-        with patch.object(self.lambda_handler.sys, "stdout", fake_stdout):
+        with patch("sys.stdout", fake_stdout):
             self.lambda_handler._emit_invocation_summary(0, 0, 5.2, "gpt-4.1-nano")
         output = fake_stdout.getvalue()
         self.assertEqual(output, "")
@@ -803,7 +822,7 @@ class WarmupMetricTests(unittest.TestCase):
     def test_emit_warmup_metric_writes_emf(self):
         import io
         fake_stdout = io.StringIO()
-        with patch.object(self.lambda_handler.sys, "stdout", fake_stdout):
+        with patch("sys.stdout", fake_stdout):
             self.lambda_handler._emit_warmup_metric(True, 3.2)
         output = fake_stdout.getvalue()
         self.assertIn("Success", output)
@@ -813,7 +832,7 @@ class WarmupMetricTests(unittest.TestCase):
     def test_emit_warmup_metric_success_is_1(self):
         import io, json
         fake_stdout = io.StringIO()
-        with patch.object(self.lambda_handler.sys, "stdout", fake_stdout):
+        with patch("sys.stdout", fake_stdout):
             self.lambda_handler._emit_warmup_metric(True, 3.2)
         data = json.loads(fake_stdout.getvalue().strip())
         self.assertEqual(data["Success"], 1)
@@ -821,7 +840,7 @@ class WarmupMetricTests(unittest.TestCase):
     def test_emit_warmup_metric_failure_is_0(self):
         import io, json
         fake_stdout = io.StringIO()
-        with patch.object(self.lambda_handler.sys, "stdout", fake_stdout):
+        with patch("sys.stdout", fake_stdout):
             self.lambda_handler._emit_warmup_metric(False, 3.2)
         data = json.loads(fake_stdout.getvalue().strip())
         self.assertEqual(data["Success"], 0)
@@ -914,7 +933,7 @@ class S3UploadMetricTests(unittest.TestCase):
     def test_emit_s3_upload_metric_writes_emf(self):
         import io, json
         fake_stdout = io.StringIO()
-        with patch.object(self.lambda_handler.sys, "stdout", fake_stdout):
+        with patch("sys.stdout", fake_stdout):
             self.lambda_handler._emit_s3_upload_metric({"uploaded": 3, "failed": 1, "skipped_empty": 0})
         output = fake_stdout.getvalue()
         data = json.loads(output.strip())
@@ -1008,6 +1027,55 @@ class DashboardCoverageWidgetTests(unittest.TestCase):
             content = f.read()
         self.assertIn("S3 State Sync", content)
         self.assertIn("S3UploadedFiles", content)
+
+
+class EmitEmfHelperTests(unittest.TestCase):
+    """Tests for the shared _emit_emf helper in utils."""
+
+    def test_emit_emf_exists_in_utils_source(self):
+        with open("utils.py") as f:
+            source = f.read()
+        self.assertIn("def _emit_emf(", source)
+
+    def test_lambda_handler_imports_emit_emf(self):
+        with open("lambda_handler.py") as f:
+            source = f.read()
+        self.assertIn("_emit_emf", source)
+
+    def test_message_processor_imports_emit_emf(self):
+        with open("message_processor.py") as f:
+            source = f.read()
+        self.assertIn("_emit_emf", source)
+
+    def test_emit_emf_auto_fills_function_dimension(self):
+        with open("utils.py") as f:
+            source = f.read()
+        self.assertIn('values.setdefault("Function"', source)
+
+    def test_emit_emf_does_not_raise_on_failure(self):
+        with open("utils.py") as f:
+            source = f.read()
+        self.assertIn("except Exception:", source)
+        self.assertIn("pass", source)
+
+
+class NlpMaxTokensTests(unittest.TestCase):
+    def test_nlp_check_uses_max_tokens_3_in_source(self):
+        with open("message_processor.py") as f:
+            source = f.read()
+        self.assertIn("max_tokens=3", source)
+
+    def test_nlp_check_does_not_use_max_tokens_10(self):
+        with open("message_processor.py") as f:
+            source = f.read()
+        self.assertNotIn("max_tokens=10", source)
+
+
+class TelegramClientNoneDateTests(unittest.TestCase):
+    def test_fetch_from_sources_guards_none_date(self):
+        with open("telegram_client.py") as f:
+            source = f.read()
+        self.assertIn("msg.date is None", source)
 
 
 if __name__ == "__main__":

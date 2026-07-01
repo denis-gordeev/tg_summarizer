@@ -1,15 +1,12 @@
 import asyncio
-import json as _json
 import logging
-import os
 import re
-import sys
 import time
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from typing import List, Optional, Set
 from models import MessageInfo, SummaryInfo
-from utils import call_openai, extract_links, count_characters, enforce_summary_length, strip_meta_artifacts, text_hash, is_circuit_breaker_open
+from utils import call_openai, extract_links, count_characters, enforce_summary_length, strip_meta_artifacts, text_hash, is_circuit_breaker_open, _emit_emf
 from config import (
     SIMILARITY_LLM_UPPER,
     ENABLE_SUMMARIES_DEDUPLICATION,
@@ -54,30 +51,21 @@ logger = logging.getLogger(__name__)
 
 
 def _emit_coverage_dedup_metric(covered: int, total: int, new: int, is_group: bool) -> None:
-    try:
-        emf = {
-            "_aws": {
-                "Timestamp": int(time.time() * 1000),
-                "CloudWatchMetrics": [{
-                    "Namespace": "tg_summarizer/Coverage",
-                    "Dimensions": [["Function", "StreamType"]],
-                    "Metrics": [
-                        {"Name": "CoveredMessages", "Unit": "None"},
-                        {"Name": "TotalNlpMessages", "Unit": "None"},
-                        {"Name": "NewMessages", "Unit": "None"},
-                    ]
-                }]
-            },
-            "Function": os.getenv("AWS_LAMBDA_FUNCTION_NAME", "local"),
+    _emit_emf(
+        namespace="tg_summarizer/Coverage",
+        dimensions=[["Function", "StreamType"]],
+        metrics=[
+            {"Name": "CoveredMessages", "Unit": "None"},
+            {"Name": "TotalNlpMessages", "Unit": "None"},
+            {"Name": "NewMessages", "Unit": "None"},
+        ],
+        values={
             "StreamType": "group" if is_group else "channel",
             "CoveredMessages": covered,
             "TotalNlpMessages": total,
             "NewMessages": new,
-        }
-        sys.stdout.write(_json.dumps(emf, separators=(",", ":")) + "\n")
-        sys.stdout.flush()
-    except Exception:
-        pass
+        },
+    )
 
 
 def _calculate_channel_summary_limit(total_original_length: int) -> int:
@@ -148,7 +136,7 @@ async def is_nlp_related(text: str) -> tuple[bool, str]:
     if is_circuit_breaker_open():
         return False, "circuit_breaker_open"
     truncated = text[:NLP_CHECK_MAX_INPUT_CHARS]
-    answer = await call_openai(prompts.NLP_RELEVANCE_PROMPT, truncated, max_tokens=10, temperature=0)
+    answer = await call_openai(prompts.NLP_RELEVANCE_PROMPT, truncated, max_tokens=3, temperature=0)
     return answer.lower().strip().startswith("да"), answer
 
 

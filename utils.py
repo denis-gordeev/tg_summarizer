@@ -137,40 +137,56 @@ def _estimate_cost_usd(model: str, prompt_tokens: int, completion_tokens: int) -
     return prompt_tokens * input_per_m / 1_000_000 + completion_tokens * output_per_m / 1_000_000
 
 
-def _emit_openai_latency(elapsed: float, model: str, total_tokens: int, prompt_tokens: int = 0, completion_tokens: int = 0) -> None:
-    """Emit OpenAI latency as a CloudWatch Embedded Metric Format (EMF) metric.
+def _emit_emf(namespace: str, dimensions: list[list[str]], metrics: list[dict], values: dict) -> None:
+    """Emit a CloudWatch Embedded Metric Format (EMF) JSON line to stdout.
 
-    Prints a JSON line to stdout that CloudWatch automatically processes into a metric.
-    No additional API calls or dependencies required.
+    Args:
+        namespace: CloudWatch namespace (e.g. "tg_summarizer/OpenAI").
+        dimensions: List of dimension groups, e.g. [["Function", "Model"]].
+        metrics: List of {"Name": ..., "Unit": ...} dicts.
+        values: Dict of dimension values + metric values to include in the EMF payload.
+                 Dimension values must include "Function" (auto-filled if missing).
     """
     try:
-        cost_usd = _estimate_cost_usd(model, prompt_tokens, completion_tokens)
+        values.setdefault("Function", os.getenv("AWS_LAMBDA_FUNCTION_NAME", "local"))
         emf = {
             "_aws": {
                 "Timestamp": int(_time.time() * 1000),
                 "CloudWatchMetrics": [{
-                    "Namespace": "tg_summarizer/OpenAI",
-                    "Dimensions": [["Function", "Model"]],
-                    "Metrics": [
-                        {"Name": "Latency", "Unit": "Seconds"},
-                        {"Name": "PromptTokens", "Unit": "None"},
-                        {"Name": "CompletionTokens", "Unit": "None"},
-                        {"Name": "EstimatedCostUSD", "Unit": "None"},
-                    ]
+                    "Namespace": namespace,
+                    "Dimensions": dimensions,
+                    "Metrics": metrics,
                 }]
             },
-            "Function": os.getenv("AWS_LAMBDA_FUNCTION_NAME", "local"),
+            **values,
+        }
+        sys.stdout.write(_json.dumps(emf, separators=(",", ":")) + "\n")
+        sys.stdout.flush()
+    except Exception:
+        pass
+
+
+def _emit_openai_latency(elapsed: float, model: str, total_tokens: int, prompt_tokens: int = 0, completion_tokens: int = 0) -> None:
+    """Emit OpenAI latency as a CloudWatch Embedded Metric Format (EMF) metric."""
+    cost_usd = _estimate_cost_usd(model, prompt_tokens, completion_tokens)
+    _emit_emf(
+        namespace="tg_summarizer/OpenAI",
+        dimensions=[["Function", "Model"]],
+        metrics=[
+            {"Name": "Latency", "Unit": "Seconds"},
+            {"Name": "PromptTokens", "Unit": "None"},
+            {"Name": "CompletionTokens", "Unit": "None"},
+            {"Name": "EstimatedCostUSD", "Unit": "None"},
+        ],
+        values={
             "Model": model,
             "Latency": round(elapsed, 2),
             "PromptTokens": prompt_tokens,
             "CompletionTokens": completion_tokens,
             "TotalTokens": total_tokens,
             "EstimatedCostUSD": round(cost_usd, 6),
-        }
-        sys.stdout.write(_json.dumps(emf, separators=(",", ":")) + "\n")
-        sys.stdout.flush()
-    except Exception:
-        pass
+        },
+    )
 
 
 def _cb_record_failure():
@@ -394,13 +410,13 @@ def _truncate_html_preserving_tags(text: str, max_visible_chars: int) -> str:
 
 
 _META_ARTIFACT_INTRO_ONLY = re.compile(
-    r"^[^<\n]*?(?:таким образом|отметим|заметим|в данном обзоре|в данной статье|ниже представлены|ниже приведены|давайте рассмотрим|во-первых|во-вторых|в-третьих|среди прочего)[^\n]*\n*",
+    r"^[^<\n]*?(?:таким образом|отметим|заметим|в данном обзоре|в данной статье|ниже представлены|ниже приведены|давайте рассмотрим|во-первых|во-вторых|в-третьих|среди прочего|в первую очередь|короче говоря|подытоживая)[^\n]*\n*",
     re.IGNORECASE,
 )
 
 _META_ARTIFACT_PATTERNS = [
-    re.compile(r"^[^<\n]*?(?:в этом дайджесте|итого|в заключение|подведя итог|в итоге|итак|в общем|вкратце|как видно|обратите внимание|напомним|также стоит отметить|стоит отметить|следует отметить|важно отметить|подводя итог|резюмируя|ключевые выводы|в целом|как уже упоминалось|напоследок|кратко говоря|среди прочего)[^\n]*\n*", re.IGNORECASE),
-    re.compile(r"\n[^<\n]*?(?:в этом дайджесте|итого|в заключение|подведя итог|в итоге|итак|в общем|вкратце|как видно|обратите внимание|напомним|также стоит отметить|подводя итог|резюмируя|ключевые выводы|в целом|как уже упоминалось|напоследок|кратко говоря|среди прочего)[^\n]*$", re.IGNORECASE),
+    re.compile(r"^[^<\n]*?(?:в этом дайджесте|итого|в заключение|подведя итог|в итоге|в конечном итоге|итак|в общем|вкратце|как видно|обратите внимание|напомним|также стоит отметить|стоит отметить|следует отметить|важно отметить|подводя итог|резюмируя|ключевые выводы|в целом|как уже упоминалось|напоследок|кратко говоря|среди прочего|собственно говоря|к слову)[^\n]*\n*", re.IGNORECASE),
+    re.compile(r"\n[^<\n]*?(?:в этом дайджесте|итого|в заключение|подведя итог|в итоге|в конечном итоге|итак|в общем|вкратце|как видно|обратите внимание|напомним|также стоит отметить|подводя итог|резюмируя|ключевые выводы|в целом|как уже упоминалось|напоследок|кратко говоря|среди прочего|собственно говоря|к слову)[^\n]*$", re.IGNORECASE),
     _META_ARTIFACT_INTRO_ONLY,
     re.compile(r"\n[^<\n]*?другие ссылки:\s*[^\n]*$", re.IGNORECASE),
     re.compile(r"^[^<\n]*?(?:смотри также|подробнее)\s*:\s*[^\n]*\n*", re.IGNORECASE),

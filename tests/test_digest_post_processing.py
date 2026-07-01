@@ -90,6 +90,7 @@ def _stub_dependencies(fake_openai_response: str = "[1] New AI breakthrough"):
     fake_utils.enforce_summary_length = _stub_enforce_summary_length
     fake_utils.strip_meta_artifacts = lambda text: text
     fake_utils.is_circuit_breaker_open = lambda: False
+    fake_utils._emit_emf = lambda *a, **kw: None
 
     async def fake_call_openai(system_prompt, user_content, max_tokens=None, **kwargs):
         return fake_openai_response
@@ -1016,6 +1017,55 @@ class NewMetaArtifactPatternsTests(unittest.TestCase):
         result = utils.strip_meta_artifacts(text)
         self.assertIn("во-первых", result.lower())
 
+    def test_strips_в_конечном_итоге_intro(self):
+        utils = self._import_utils()
+        text = "В конечном итоге, проект завершён\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("В конечном итоге", result)
+        self.assertIn("<b>AI</b>", result)
+
+    def test_strips_в_конечном_итоге_outro(self):
+        utils = self._import_utils()
+        text = "<b>AI news</b>\nВ конечном итоге, прогресс налицо"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("В конечном итоге", result)
+        self.assertIn("<b>AI news</b>", result)
+
+    def test_strips_собственно_говоря_intro(self):
+        utils = self._import_utils()
+        text = "Собственно говоря, ничего нового\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Собственно говоря", result)
+        self.assertIn("<b>AI</b>", result)
+
+    def test_strips_к_слову_outro(self):
+        utils = self._import_utils()
+        text = "<b>AI news</b>\nК слову, модель обновлена"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("К слову", result)
+        self.assertIn("<b>AI news</b>", result)
+
+    def test_strips_в_первую_очередь_intro(self):
+        utils = self._import_utils()
+        text = "В первую очередь, стоит отметить\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("В первую очередь", result)
+        self.assertIn("<b>AI</b>", result)
+
+    def test_strips_короче_говоря_intro(self):
+        utils = self._import_utils()
+        text = "Короче говоря, это важно\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Короче говоря", result)
+        self.assertIn("<b>AI</b>", result)
+
+    def test_strips_подытоживая_intro(self):
+        utils = self._import_utils()
+        text = "Подытоживая сказанное\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Подытоживая", result)
+        self.assertIn("<b>AI</b>", result)
+
 
 class IsCircuitBreakerOpenTests(unittest.TestCase):
     """Tests for is_circuit_breaker_open helper."""
@@ -1087,6 +1137,7 @@ class LambdaEventValidationTests(unittest.TestCase):
         fake_utils.get_token_usage = lambda: {"prompt_tokens": 0, "completion_tokens": 0}
         fake_utils.reset_token_usage = lambda: None
         fake_utils._estimate_cost_usd = lambda model, pt, ct: 0.0
+        fake_utils._emit_emf = lambda *a, **kw: None
         sys.modules["summarizer"] = fake_summarizer
         sys.modules["config"] = fake_config
         sys.modules["utils"] = fake_utils

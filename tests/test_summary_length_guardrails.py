@@ -91,6 +91,7 @@ def _stub_dependencies():
     fake_utils.strip_meta_artifacts = lambda text: text
     fake_utils.text_hash = lambda text: __import__('hashlib').sha256(text.encode()).hexdigest()[:16]
     fake_utils.is_circuit_breaker_open = lambda: False
+    fake_utils._emit_emf = lambda *a, **kw: None
 
     return {
         "dotenv": fake_dotenv,

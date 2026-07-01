@@ -5,8 +5,37 @@
 ## Next actions
 
 - Consider evaluating gpt-4.1-nano vs gpt-4o-mini quality tradeoff with A/B testing
-- Consider adding Lambda provisioned concurrency for more predictable cold starts
 - Consider tuning warmup schedule frequency for cost-effectiveness
+- Consider adding Lambda provisioned concurrency for more predictable cold starts
+
+## Completed in 2026-07-01 round (EMF refactor, NLP cost savings, None-date guard, meta-artifacts expansion, TODO cleanup)
+
+- **Code quality — extracted `_emit_emf` helper**: Added [`_emit_emf()`](utils.py) that encapsulates the CloudWatch Embedded Metric Format (EMF) JSON construction and stdout writing pattern. Refactored all 5 EMF emission functions to use the helper: [`_emit_openai_latency()`](utils.py), [`_emit_invocation_summary()`](lambda_handler.py), [`_emit_warmup_metric()`](lambda_handler.py), [`_emit_s3_upload_metric()`](lambda_handler.py), [`_emit_coverage_dedup_metric()`](message_processor.py). Eliminates ~80 lines of duplicated EMF boilerplate across 3 modules. The helper auto-fills the `Function` dimension and handles all errors with a single `try/except`.
+- **Cost optimization — NLP max_tokens reduced 10→3**: Changed `max_tokens` in [`is_nlp_related()`](message_processor.py) from 10 to 3. The NLP prompt asks for "да" or "нет" (1 token), so 3 is sufficient (1 token + potential whitespace). Saves ~7 completion tokens per NLP rejection (~50-80% of messages), reducing output cost per check.
+- **Robustness — None msg.date guard**: Added `msg.date is None` check before date comparison in [`_fetch_from_sources()`](telegram_client.py). Telethon can return messages with `None` date in edge cases (e.g., service messages), which would crash on `msg.date < since` with `TypeError`. Now skipped gracefully.
+- **Quality — expanded `strip_meta_artifacts`**: Added "в конечном итоге", "собственно говоря", "к слову" to both intro and outro patterns in [`_META_ARTIFACT_PATTERNS`](utils.py). Added "в первую очередь", "короче говоря", "подытоживая" to [`_META_ARTIFACT_INTRO_ONLY`](utils.py) — these are meta-structural at the start of a summary but can appear legitimately in body text. "в конечном итоге" complements the existing "в итоге" pattern by catching the longer form.
+- **TODO.md cleanup**: Removed duplicate "Next actions" section (contained stale item "Consider adding coverage dedup group-stream widget" completed in the 06-30 round). Consolidated to a single current "Next actions" section.
+- **Tests added**: 15 new tests (total 435, up from 420):
+  - `test_emit_emf_exists_in_utils_source`: verifies `_emit_emf` function defined in utils.py
+  - `test_lambda_handler_imports_emit_emf`: verifies lambda_handler.py imports `_emit_emf`
+  - `test_message_processor_imports_emit_emf`: verifies message_processor.py imports `_emit_emf`
+  - `test_emit_emf_auto_fills_function_dimension`: verifies `Function` auto-fill logic in `_emit_emf`
+  - `test_emit_emf_does_not_raise_on_failure`: verifies error handling in `_emit_emf`
+  - `test_nlp_check_uses_max_tokens_3`: verifies NLP max_tokens=3 in message_processor.py
+  - `test_nlp_check_does_not_use_max_tokens_10`: verifies old max_tokens=10 removed
+  - `test_fetch_from_sources_guards_none_date`: verifies `msg.date is None` guard in telegram_client.py
+  - `test_strips_в_конечном_итоге_intro`: verifies "В конечном итоге" stripped from summary start
+  - `test_strips_в_конечном_итоге_outro`: verifies "В конечном итоге" stripped from summary end
+  - `test_strips_собственно_говоря_intro`: verifies "Собственно говоря" stripped from summary start
+  - `test_strips_к_слову_outro`: verifies "К слову" stripped from summary end
+  - `test_strips_в_первую_очередь_intro`: verifies "В первую очередь" stripped from summary start
+  - `test_strips_короче_говоря_intro`: verifies "Короче говоря" stripped from summary start
+  - `test_strips_подытоживая_intro`: verifies "Подытоживая" stripped from summary start
+- Updated `test_nlp_check_uses_max_tokens_10` → `test_nlp_check_uses_max_tokens_3` (asserts `max_tokens=3`).
+- Updated `test_emit_coverage_dedup_metric_uses_module_level_time` → `test_emit_coverage_dedup_metric_uses_emit_emf` (verifies `_emit_emf` usage).
+- Updated all test stubs to include `fake_utils._emit_emf` where `message_processor` or `lambda_handler` is imported.
+- Updated EMF capture tests to use `patch("sys.stdout", ...)` instead of `patch.object(lambda_handler.sys, ...)` since `_emit_emf` writes to `sys.stdout` via `utils.sys`.
+- All 435 tests pass without errors.
 
 ## Completed in 2026-06-30 round (Lambda hardening round 39, group coverage widget, meta-artifacts expansion, TODO cleanup)
 
@@ -37,13 +66,6 @@
   - `test_dedup_covered_messages_return_type_is_tuple`: verifies `_dedup_covered_messages` return annotation is `tuple[...]`
 - Updated `test_handler_skips_s3_upload_metric_on_success` — now verifies no metric emitted when `uploaded=0, failed=0` (S3 not configured).
 - All 414 tests pass without errors.
-
-## Next actions
-
-- Consider evaluating gpt-4.1-nano vs gpt-4o-mini quality tradeoff with A/B testing
-- Consider adding Lambda provisioned concurrency for more predictable cold starts
-- Consider adding coverage dedup group-stream widget to dashboard (currently only channel)
-- Consider tuning warmup schedule frequency for cost-effectiveness
 
 - **Runtime tunability — update_existing_summary prompt in PromptManager**: Moved the inline update prompt from [`update_existing_summary()`](history_manager.py) to [`UPDATE_SUMMARY_PROMPT`](prompts.py) in `PromptManager`. The prompt uses `{new_link}` placeholder via Python `str.format()`. Previously, the update prompt was hardcoded in `history_manager.py`, requiring a code change to tune it. Now it can be overridden at runtime via `prompts.json` without code changes, consistent with all other prompts (COVERAGE_AND_MATCH, NLP_RELEVANCE, CHANNEL_SUMMARY, GROUP_SUMMARY). Directly addresses the TODO item "Consider moving update_existing_summary prompt to PromptManager for runtime tunability".
 - **Observability — S3 upload failure EMF metric and CloudWatch alarm**: Added [`_emit_s3_upload_metric()`](lambda_handler.py) that emits `S3UploadFailures` and `S3UploadedFiles` EMF metrics under `tg_summarizer/S3` namespace when S3 upload failures are detected. Added `S3UploadFailuresAlarm` in [`template.yaml`](template.yaml) — alerts when `S3UploadFailures > 0` (Sum statistic, 5-minute period). The alarm is conditional on `HasStateBucket` since S3 sync is only relevant when a bucket is configured. Directly addresses the TODO item "Consider adding CloudWatch Logs metric filter on S3 upload failure warning for automated alerting" — the EMF metric approach is cleaner than a Logs metric filter.

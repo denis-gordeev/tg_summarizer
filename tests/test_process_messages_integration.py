@@ -67,6 +67,7 @@ def _setup_stubs():
     fake_utils.enforce_summary_length = lambda text, max_chars: text[:max_chars]
     fake_utils.strip_meta_artifacts = lambda text: text
     fake_utils.is_circuit_breaker_open = lambda: False
+    fake_utils._emit_emf = lambda *a, **kw: None
     sys.modules["utils"] = fake_utils
 
     # --- Stub config ---
@@ -453,8 +454,8 @@ class NlpCheckTruncationTests(unittest.TestCase):
             user_content = call_args[0][1]
             self.assertEqual(len(user_content), 500)
 
-    def test_nlp_check_uses_max_tokens_10(self):
-        """is_nlp_related should use max_tokens=10 for cost optimization."""
+    def test_nlp_check_uses_max_tokens_3(self):
+        """is_nlp_related should use max_tokens=3 for cost optimization."""
         from unittest.mock import AsyncMock, patch
 
         long_enough_text = "A" * 200
@@ -463,7 +464,7 @@ class NlpCheckTruncationTests(unittest.TestCase):
             mock_openai.return_value = "да"
             asyncio.run(self.mp.is_nlp_related(long_enough_text))
             call_kwargs = mock_openai.call_args
-            self.assertEqual(call_kwargs.kwargs.get("max_tokens"), 10)
+            self.assertEqual(call_kwargs.kwargs.get("max_tokens"), 3)
 
 
 class SummaryFailureReturnsNoneTests(unittest.TestCase):
@@ -1989,6 +1990,7 @@ class DedupCoveredMessagesExtractionTests(unittest.TestCase):
         fake_utils.strip_meta_artifacts = lambda text: text
         fake_utils.text_hash = lambda text: hashlib.sha256(text.encode()).hexdigest()[:16]
         fake_utils.is_circuit_breaker_open = lambda: False
+        fake_utils._emit_emf = lambda *a, **kw: None
 
         fake_telegram_client = types.ModuleType("telegram_client")
         fake_telegram_client.send_message_to_target_channel_with_id = AsyncMock(return_value=42)
@@ -2070,12 +2072,11 @@ class CoverageDedupMetricTests(unittest.TestCase):
         self.assertIn("_emit_coverage_dedup_metric", source)
         self.assertIn("covered_count", source)
 
-    def test_emit_coverage_dedup_metric_uses_module_level_time(self):
-        import ast
+    def test_emit_coverage_dedup_metric_uses_emit_emf(self):
         with open("message_processor.py") as f:
             source = f.read()
-        self.assertNotIn("import time as _time", source)
-        self.assertNotIn("import time", source[source.index("_emit_coverage_dedup"):])
+        self.assertIn("_emit_emf", source)
+        self.assertIn("tg_summarizer/Coverage", source)
 
     def test_dedup_covered_messages_return_type_is_tuple(self):
         import ast

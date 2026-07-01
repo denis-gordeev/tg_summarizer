@@ -67,6 +67,7 @@ class ShouldRunGroupSummarizationParseErrorTests(unittest.TestCase):
         fake_utils.enforce_summary_length = lambda text, max_chars: text
         fake_utils.strip_meta_artifacts = lambda text: text
         fake_utils.extract_all_channels = lambda text: []
+        fake_utils._emit_emf = lambda *a, **kw: None
         fake_telegram_client = types.ModuleType("telegram_client")
         fake_telegram_client.user_client = None
         fake_telegram_client.clients_loop = None
@@ -249,6 +250,7 @@ class RunAsyncWithLoopTests(unittest.TestCase):
         fake_utils.enforce_summary_length = lambda text, max_chars: text
         fake_utils.strip_meta_artifacts = lambda text: text
         fake_utils.extract_all_channels = lambda text: []
+        fake_utils._emit_emf = lambda *a, **kw: None
         fake_telegram_client = types.ModuleType("telegram_client")
         fake_telegram_client.user_client = None
         fake_telegram_client.clients_loop = None
@@ -410,6 +412,7 @@ class UpdateExistingSummaryPreservesMessageIdTests(unittest.TestCase):
         fake_utils.enforce_summary_length = lambda text, max_chars: text
         fake_utils.strip_meta_artifacts = lambda text: text
         fake_utils.extract_all_channels = lambda text: []
+        fake_utils._emit_emf = lambda *a, **kw: None
         fake_telegram_client = types.ModuleType("telegram_client")
         fake_telegram_client.user_client = None
         fake_telegram_client.clients_loop = None
@@ -492,6 +495,7 @@ class HistoryCacheTests(unittest.TestCase):
         fake_utils.enforce_summary_length = lambda text, max_chars: text
         fake_utils.strip_meta_artifacts = lambda text: text
         fake_utils.extract_all_channels = lambda text: []
+        fake_utils._emit_emf = lambda *a, **kw: None
         fake_telegram_client = types.ModuleType("telegram_client")
         fake_telegram_client.user_client = None
         fake_telegram_client.clients_loop = None
@@ -598,6 +602,7 @@ class CacheInvalidationTests(unittest.TestCase):
         fake_utils.enforce_summary_length = lambda text, max_chars: text
         fake_utils.strip_meta_artifacts = lambda text: text
         fake_utils.extract_all_channels = lambda text: []
+        fake_utils._emit_emf = lambda *a, **kw: None
         fake_telegram_client = types.ModuleType("telegram_client")
         fake_telegram_client.user_client = None
         fake_telegram_client.clients_loop = None
@@ -652,6 +657,7 @@ class CacheInvalidationTests(unittest.TestCase):
         fake_utils.enforce_summary_length = lambda text, max_chars: text
         fake_utils.strip_meta_artifacts = lambda text: text
         fake_utils.extract_all_channels = lambda text: []
+        fake_utils._emit_emf = lambda *a, **kw: None
         fake_telegram_client = types.ModuleType("telegram_client")
         fake_telegram_client.user_client = None
         fake_telegram_client.clients_loop = None
@@ -719,6 +725,7 @@ class LoadSummariesHistoryRestoreTests(unittest.TestCase):
         fake_utils.enforce_summary_length = lambda text, max_chars: text
         fake_utils.strip_meta_artifacts = lambda text: text
         fake_utils.extract_all_channels = lambda text: []
+        fake_utils._emit_emf = lambda *a, **kw: None
         fake_telegram_client = types.ModuleType("telegram_client")
         fake_telegram_client.user_client = None
         fake_telegram_client.clients_loop = None
@@ -804,6 +811,7 @@ class LoadGroupSummariesHistoryRestoreTests(unittest.TestCase):
         fake_utils.enforce_summary_length = lambda text, max_chars: text
         fake_utils.strip_meta_artifacts = lambda text: text
         fake_utils.extract_all_channels = lambda text: []
+        fake_utils._emit_emf = lambda *a, **kw: None
         fake_telegram_client = types.ModuleType("telegram_client")
         fake_telegram_client.user_client = None
         fake_telegram_client.clients_loop = None
@@ -893,6 +901,7 @@ class SaveUpdatedSummaryNoMatchTests(unittest.TestCase):
         fake_utils.enforce_summary_length = lambda text, max_chars: text
         fake_utils.strip_meta_artifacts = lambda text: text
         fake_utils.extract_all_channels = lambda text: []
+        fake_utils._emit_emf = lambda *a, **kw: None
         fake_telegram_client = types.ModuleType("telegram_client")
         fake_telegram_client.user_client = None
         fake_telegram_client.clients_loop = None
@@ -1354,6 +1363,7 @@ class SharedLoadSaveHelperTests(unittest.TestCase):
         fake_utils.enforce_summary_length = lambda text, max_chars: text
         fake_utils.strip_meta_artifacts = lambda text: text
         fake_utils.extract_all_channels = lambda text: []
+        fake_utils._emit_emf = lambda *a, **kw: None
         fake_telegram_client = types.ModuleType("telegram_client")
         fake_telegram_client.user_client = None
         fake_telegram_client.clients_loop = None
@@ -1475,6 +1485,7 @@ class GroupSummariesCacheEmptyTests(unittest.TestCase):
         fake_utils.enforce_summary_length = lambda text, max_chars: text
         fake_utils.strip_meta_artifacts = lambda text: text
         fake_utils.extract_all_channels = lambda text: []
+        fake_utils._emit_emf = lambda *a, **kw: None
         fake_telegram_client = types.ModuleType("telegram_client")
         fake_telegram_client.user_client = None
         fake_telegram_client.clients_loop = None
@@ -1549,6 +1560,7 @@ class SharedSaveSummaryHelperTests(unittest.TestCase):
         fake_utils.enforce_summary_length = lambda text, max_chars: text
         fake_utils.strip_meta_artifacts = lambda text: text
         fake_utils.extract_all_channels = lambda text: []
+        fake_utils._emit_emf = lambda *a, **kw: None
         fake_telegram_client = types.ModuleType("telegram_client")
         fake_telegram_client.user_client = None
         fake_telegram_client.clients_loop = None
@@ -2068,6 +2080,7 @@ class SaveUpdatedSummaryNoRedundantEnforceTests(unittest.TestCase):
         fake_utils.enforce_summary_length = lambda text, max_chars: text
         fake_utils.strip_meta_artifacts = lambda text: text
         fake_utils.extract_all_channels = lambda text: []
+        fake_utils._emit_emf = lambda *a, **kw: None
         fake_telegram_client = types.ModuleType("telegram_client")
         fake_telegram_client.user_client = None
         fake_telegram_client.clients_loop = None
@@ -2318,6 +2331,7 @@ class SaveUpdatedSummaryWithSummariesParamTests(unittest.TestCase):
         fake_utils.enforce_summary_length = lambda text, max_chars: text
         fake_utils.strip_meta_artifacts = lambda text: text
         fake_utils.extract_all_channels = lambda text: []
+        fake_utils._emit_emf = lambda *a, **kw: None
         fake_telegram_client = types.ModuleType("telegram_client")
         fake_telegram_client.user_client = None
         fake_telegram_client.clients_loop = None

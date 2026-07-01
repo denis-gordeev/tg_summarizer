@@ -61,7 +61,7 @@ async def _fetch_from_sources(
                 if _deadline and time.monotonic() > _deadline:
                     logger.warning("Deadline exceeded during fetch from %s %s — returning %d messages fetched so far", source_label, source, len(all_msgs))
                     break
-                if msg.date < since:
+                if msg.date is None or msg.date < since:
                     break
                 total_examined += 1
                 if total_examined > MAX_MESSAGES_PER_SOURCE * FETCH_EXAMINED_MULTIPLIER:
