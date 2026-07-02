@@ -8,9 +8,35 @@
 - Consider tuning warmup schedule frequency for cost-effectiveness
 - Consider adding Lambda provisioned concurrency for more predictable cold starts
 - Consider adding CallType dimension to OpenAI EMF metrics for per-call-type latency breakdown
-- Consider reducing COVERAGE_CHECK_MAX_INPUT_CHARS from 2000 to 500 for cost savings
-- Consider adding EMF metric for NLP filter results (Accepted/Rejected/AdFiltered/ShortFiltered)
-- Consider adding dead man's switch alarm on Invocations = 0
+- Consider reducing NLP_CHECK_MAX_INPUT_CHARS from 2000 to 500-1000 for cost savings
+- Consider adding EMF metric for NLP circuit_breaker_open rejections count
+
+## Completed in 2026-07-02 round 2 (cost optimization, NLP filter metric, dead man's switch, dashboard widgets)
+
+- **Cost optimization — COVERAGE_CHECK_MAX_INPUT_CHARS reduced from 2000 to 500**: Changed default in [`config.py`](config.py), [`template.yaml`](template.yaml), and [`.env.example`](.env.example). The coverage+match check only needs enough text to determine if the topic matches an existing summary — 500 chars is sufficient for topic identification, saving ~1500 input tokens per coverage check. At `gpt-4.1-nano` pricing ($0.10/M input), this reduces coverage check input cost by ~75%. Directly addresses the TODO item "Consider reducing COVERAGE_CHECK_MAX_INPUT_CHARS from 2000 to 500 for cost savings".
+- **Observability — NLP filter EMF metric**: Added [`_emit_nlp_filter_metric()`](message_processor.py) that emits `Accepted`, `Rejected`, `AdFiltered`, `ShortFiltered` EMF metrics under `tg_summarizer/NLP` namespace with `StreamType` dimension (channel/group). Emitted in [`process_messages()`](message_processor.py) after NLP filter results are computed. Enables CloudWatch-based monitoring of NLP filter effectiveness and rejection reasons. Directly addresses the TODO item "Consider adding EMF metric for NLP filter results (Accepted/Rejected/AdFiltered/ShortFiltered)".
+- **Observability — dead man's switch alarm**: Added `DeadMansSwitchAlarm` in [`template.yaml`](template.yaml) — alerts when Lambda `Invocations < 1` (Sum statistic, 86400s period = 24 hours), meaning the summarizer has not run in a full day. Uses `TreatMissingData: breaching` so that a complete absence of invocations also triggers the alarm. Directly addresses the TODO item "Consider adding dead man's switch alarm on Invocations = 0".
+- **Dashboard — NLP Filter widgets**: Added "NLP Filter (Channel)" and "NLP Filter (Group)" widgets to [`SummarizerDashboard`](template.yaml) showing `Accepted`, `Rejected`, `AdFiltered`, `ShortFiltered` from `tg_summarizer/NLP` namespace with appropriate `StreamType` dimension. Enables visual monitoring of NLP filter acceptance/rejection rates per stream type.
+- **Tests added**: 15 new tests (total 497, up from 482):
+  - `test_emit_nlp_filter_metric_exists_in_source`: verifies `_emit_nlp_filter_metric` function defined
+  - `test_emit_nlp_filter_metric_uses_nlp_namespace`: verifies `tg_summarizer/NLP` namespace
+  - `test_emit_nlp_filter_metric_has_stream_type_dimension`: verifies `StreamType` dimension
+  - `test_emit_nlp_filter_metric_emits_accepted_rejected`: verifies all 4 metric names
+  - `test_process_messages_calls_emit_nlp_filter_metric`: verifies function is called
+  - `test_template_contains_dead_mans_switch_alarm`: verifies `DeadMansSwitchAlarm` in template
+  - `test_dead_mans_switch_alarm_uses_invocations_metric`: verifies `Invocations` metric and `AWS/Lambda` namespace
+  - `test_dead_mans_switch_alarm_period_is_86400`: verifies 24-hour period
+  - `test_dead_mans_switch_treats_missing_as_breaching`: verifies `breaching` missing data treatment
+  - `test_template_dashboard_contains_nlp_filter_channel_widget`: verifies "NLP Filter (Channel)" and `tg_summarizer/NLP`
+  - `test_template_dashboard_contains_nlp_filter_group_widget`: verifies "NLP Filter (Group)"
+  - `test_template_dashboard_nlp_widget_has_metrics`: verifies `AdFiltered` and `ShortFiltered` in dashboard
+  - `test_config_coverage_check_max_input_chars_default_is_500`: verifies config default
+  - `test_template_coverage_check_default_is_500`: verifies SAM template default
+  - `test_env_example_coverage_check_is_500`: verifies `.env.example` value
+- Updated `test_config_coverage_check_max_input_chars_default` — now asserts `500` (was `2000`).
+- Updated `test_coverage_match_truncates_long_message` — uses `500` truncation assertion.
+- Updated `test_coverage_match_uses_coverage_check_max_input_chars` — uses `300`/`500` test values.
+- All 497 tests pass without errors.
 
 ## Completed in 2026-07-02 round (prompt compaction, meta-artifacts expansion, circuit breaker alarm, DLQ alarm, EMF observability)
 

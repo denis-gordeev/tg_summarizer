@@ -164,7 +164,7 @@ Parameters:
   CoverageCheckMaxInputChars:
     Type: String
     Description: Max chars of message text sent to coverage+match check
-    Default: "2000"
+    Default: "500"
     
   NlpMinTextLength:
     Type: String
@@ -551,6 +551,23 @@ Resources:
           Value: !GetAtt SummarizerDLQ.QueueName
       TreatMissingData: notBreaching
 
+  DeadMansSwitchAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-dead-mans-switch"
+      AlarmDescription: "Alarm when Lambda has not been invoked in 24 hours (dead man's switch)"
+      ComparisonOperator: LessThanThreshold
+      EvaluationPeriods: 1
+      Threshold: 1
+      MetricName: Invocations
+      Namespace: AWS/Lambda
+      Period: 86400
+      Statistic: Sum
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref SummarizerFunction
+      TreatMissingData: breaching
+
   WarmupFailuresAlarm:
     Type: AWS::CloudWatch::Alarm
     Condition: HasWarmupSchedule
@@ -710,6 +727,40 @@ Resources:
                 "region": "${AWS::Region}",
                 "title": "S3 State Sync",
                 "yAxis": { "left": { "label": "files" } }
+              },
+              "width": 12, "height": 6
+            },
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
+                  ["tg_summarizer/NLP", "Accepted", "Function", "${SummarizerFunction}", "StreamType", "channel"],
+                  ["tg_summarizer/NLP", "Rejected", "Function", "${SummarizerFunction}", "StreamType", "channel"],
+                  ["tg_summarizer/NLP", "AdFiltered", "Function", "${SummarizerFunction}", "StreamType", "channel"],
+                  ["tg_summarizer/NLP", "ShortFiltered", "Function", "${SummarizerFunction}", "StreamType", "channel"]
+                ],
+                "period": 300,
+                "stat": "Sum",
+                "region": "${AWS::Region}",
+                "title": "NLP Filter (Channel)",
+                "yAxis": { "left": { "label": "messages" } }
+              },
+              "width": 12, "height": 6
+            },
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
+                  ["tg_summarizer/NLP", "Accepted", "Function", "${SummarizerFunction}", "StreamType", "group"],
+                  ["tg_summarizer/NLP", "Rejected", "Function", "${SummarizerFunction}", "StreamType", "group"],
+                  ["tg_summarizer/NLP", "AdFiltered", "Function", "${SummarizerFunction}", "StreamType", "group"],
+                  ["tg_summarizer/NLP", "ShortFiltered", "Function", "${SummarizerFunction}", "StreamType", "group"]
+                ],
+                "period": 300,
+                "stat": "Sum",
+                "region": "${AWS::Region}",
+                "title": "NLP Filter (Group)",
+                "yAxis": { "left": { "label": "messages" } }
               },
               "width": 12, "height": 6
             }

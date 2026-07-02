@@ -1081,6 +1081,116 @@ class EmitEmfHelperTests(unittest.TestCase):
         self.assertIn("logger.debug", source)
 
 
+class NlpFilterMetricTests(unittest.TestCase):
+    """Tests for _emit_nlp_filter_metric EMF metric in message_processor."""
+
+    def test_emit_nlp_filter_metric_exists_in_source(self):
+        with open("message_processor.py") as f:
+            source = f.read()
+        self.assertIn("def _emit_nlp_filter_metric(", source)
+
+    def test_emit_nlp_filter_metric_uses_nlp_namespace(self):
+        with open("message_processor.py") as f:
+            source = f.read()
+        self.assertIn("tg_summarizer/NLP", source)
+
+    def test_emit_nlp_filter_metric_has_stream_type_dimension(self):
+        with open("message_processor.py") as f:
+            source = f.read()
+        metric_start = source.index("_emit_nlp_filter_metric")
+        metric_section = source[metric_start:metric_start + 600]
+        self.assertIn("StreamType", metric_section)
+
+    def test_emit_nlp_filter_metric_emits_accepted_rejected(self):
+        with open("message_processor.py") as f:
+            source = f.read()
+        metric_start = source.index("_emit_nlp_filter_metric")
+        metric_section = source[metric_start:metric_start + 600]
+        self.assertIn("Accepted", metric_section)
+        self.assertIn("Rejected", metric_section)
+        self.assertIn("AdFiltered", metric_section)
+        self.assertIn("ShortFiltered", metric_section)
+
+    def test_process_messages_calls_emit_nlp_filter_metric(self):
+        with open("message_processor.py") as f:
+            source = f.read()
+        self.assertIn("_emit_nlp_filter_metric(", source)
+
+
+class DeadMansSwitchAlarmTests(unittest.TestCase):
+    """Tests for dead man's switch alarm in template.yaml."""
+
+    def test_template_contains_dead_mans_switch_alarm(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        self.assertIn("DeadMansSwitchAlarm", content)
+        self.assertIn("dead-mans-switch", content)
+
+    def test_dead_mans_switch_alarm_uses_invocations_metric(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        alarm_start = content.index("DeadMansSwitchAlarm")
+        alarm_section = content[alarm_start:alarm_start + 600]
+        self.assertIn("Invocations", alarm_section)
+        self.assertIn("AWS/Lambda", alarm_section)
+
+    def test_dead_mans_switch_alarm_period_is_86400(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        alarm_start = content.index("DeadMansSwitchAlarm")
+        alarm_section = content[alarm_start:alarm_start + 600]
+        self.assertIn("86400", alarm_section)
+
+    def test_dead_mans_switch_treats_missing_as_breaching(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        alarm_start = content.index("DeadMansSwitchAlarm")
+        alarm_section = content[alarm_start:alarm_start + 600]
+        self.assertIn("breaching", alarm_section)
+
+
+class DashboardNlpFilterWidgetTests(unittest.TestCase):
+    """Tests for NLP Filter dashboard widgets in template.yaml."""
+
+    def test_template_dashboard_contains_nlp_filter_channel_widget(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        self.assertIn("NLP Filter (Channel)", content)
+        self.assertIn("tg_summarizer/NLP", content)
+
+    def test_template_dashboard_contains_nlp_filter_group_widget(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        self.assertIn("NLP Filter (Group)", content)
+
+    def test_template_dashboard_nlp_widget_has_metrics(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        self.assertIn("AdFiltered", content)
+        self.assertIn("ShortFiltered", content)
+
+
+class CoverageCheckDefaultTests(unittest.TestCase):
+    """Tests for COVERAGE_CHECK_MAX_INPUT_CHARS default value change."""
+
+    def test_config_coverage_check_max_input_chars_default_is_500(self):
+        with open("config.py") as f:
+            source = f.read()
+        self.assertIn('COVERAGE_CHECK_MAX_INPUT_CHARS", 500', source)
+
+    def test_template_coverage_check_default_is_500(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        param_idx = content.index("  CoverageCheckMaxInputChars:")
+        param_section = content[param_idx:param_idx + 300]
+        self.assertIn('"500"', param_section)
+
+    def test_env_example_coverage_check_is_500(self):
+        with open(".env.example") as f:
+            content = f.read()
+        self.assertIn("COVERAGE_CHECK_MAX_INPUT_CHARS=500", content)
+
+
 class NlpMaxTokensTests(unittest.TestCase):
     def test_nlp_check_uses_max_tokens_3_in_source(self):
         with open("message_processor.py") as f:

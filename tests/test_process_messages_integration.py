@@ -802,15 +802,15 @@ class CoverageMatchTruncationTests(unittest.TestCase):
             ),
         ]
         long_text = "AI breakthrough " * 500
-        self._fake_config.COVERAGE_CHECK_MAX_INPUT_CHARS = 2000
+        self._fake_config.COVERAGE_CHECK_MAX_INPUT_CHARS = 500
         msg = _make_message(text=long_text, channel="@ai", message_id=1)
 
         with patch.object(self.mp, "call_openai", new_callable=AsyncMock) as mock_openai:
             mock_openai.return_value = "НЕТ"
             asyncio.run(self.mp._check_coverage_and_match(msg, summaries))
             user_content = mock_openai.call_args[0][1]
-            self.assertIn(long_text[:2000], user_content)
-            self.assertNotIn(long_text[2001:], user_content)
+            self.assertIn(long_text[:500], user_content)
+            self.assertNotIn(long_text[501:], user_content)
 
     def test_coverage_match_uses_coverage_check_max_input_chars(self):
         """_check_coverage_and_match should use COVERAGE_CHECK_MAX_INPUT_CHARS, not NLP_CHECK_MAX_INPUT_CHARS."""
@@ -824,15 +824,15 @@ class CoverageMatchTruncationTests(unittest.TestCase):
             ),
         ]
         long_text = "AI breakthrough " * 500
-        self._fake_config.COVERAGE_CHECK_MAX_INPUT_CHARS = 1500
-        self._fake_config.NLP_CHECK_MAX_INPUT_CHARS = 2000
+        self._fake_config.COVERAGE_CHECK_MAX_INPUT_CHARS = 300
+        self._fake_config.NLP_CHECK_MAX_INPUT_CHARS = 500
         msg = _make_message(text=long_text, channel="@ai", message_id=1)
 
         with patch.object(self.mp, "call_openai", new_callable=AsyncMock) as mock_openai:
             mock_openai.return_value = "НЕТ"
             asyncio.run(self.mp._check_coverage_and_match(msg, summaries))
             user_content = mock_openai.call_args[0][1]
-            self.assertNotIn(long_text[1501:], user_content)
+            self.assertNotIn(long_text[301:], user_content)
 
 
 class ReplaceSourceWithLinksPrecomputeTests(unittest.TestCase):
@@ -1939,7 +1939,7 @@ class DedupCoveredMessagesExtractionTests(unittest.TestCase):
         fake_config.GROUP_SUMMARY_MIN_LENGTH = 2000
         fake_config.GROUP_SUMMARY_MAX_LENGTH = 12000
         fake_config.NLP_CHECK_MAX_INPUT_CHARS = 2000
-        fake_config.COVERAGE_CHECK_MAX_INPUT_CHARS = 2000
+        fake_config.COVERAGE_CHECK_MAX_INPUT_CHARS = 500
         fake_config.NLP_MIN_TEXT_LENGTH = 100
         fake_config.SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE = 3000
         fake_config.NLP_CONCURRENT_CHECKS = 5

@@ -68,6 +68,26 @@ def _emit_coverage_dedup_metric(covered: int, total: int, new: int, is_group: bo
     )
 
 
+def _emit_nlp_filter_metric(accepted: int, rejected: int, ad_filtered: int, short_filtered: int, is_group: bool) -> None:
+    _emit_emf(
+        namespace="tg_summarizer/NLP",
+        dimensions=[["Function", "StreamType"]],
+        metrics=[
+            {"Name": "Accepted", "Unit": "None"},
+            {"Name": "Rejected", "Unit": "None"},
+            {"Name": "AdFiltered", "Unit": "None"},
+            {"Name": "ShortFiltered", "Unit": "None"},
+        ],
+        values={
+            "StreamType": "group" if is_group else "channel",
+            "Accepted": accepted,
+            "Rejected": rejected,
+            "AdFiltered": ad_filtered,
+            "ShortFiltered": short_filtered,
+        },
+    )
+
+
 def _calculate_channel_summary_limit(total_original_length: int) -> int:
     return min(max(total_original_length // SUMMARY_MIN_RATIO, SUMMARY_MIN_LENGTH), SUMMARY_MAX_LENGTH)
 
@@ -440,6 +460,7 @@ async def process_messages(
         stream_label, len(messages), len(nlp_related_messages), rejected,
         ad_filtered, short_filtered, rejected - ad_filtered - short_filtered,
     )
+    _emit_nlp_filter_metric(len(nlp_related_messages), rejected, ad_filtered, short_filtered, is_group)
 
     unique_messages = nlp_related_messages
     if unique_messages:

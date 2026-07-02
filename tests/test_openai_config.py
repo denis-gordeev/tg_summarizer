@@ -1018,7 +1018,7 @@ class CoverageCheckMaxInputCharsConfigTests(unittest.TestCase):
             with patch.dict(os.environ, REQUIRED_ENV, clear=True):
                 sys.modules.pop("config", None)
                 config = importlib.import_module("config")
-                self.assertEqual(config.COVERAGE_CHECK_MAX_INPUT_CHARS, 2000)
+                self.assertEqual(config.COVERAGE_CHECK_MAX_INPUT_CHARS, 500)
 
     def test_config_reads_coverage_check_max_input_chars_from_env(self):
         fake_dotenv = types.ModuleType("dotenv")
