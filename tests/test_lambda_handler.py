@@ -693,22 +693,44 @@ class EmitInvocationSummaryTests(unittest.TestCase):
         import io
         fake_stdout = io.StringIO()
         with patch("sys.stdout", fake_stdout):
-            self.lambda_handler._emit_invocation_summary(100, 50, 5.2, "gpt-4.1-nano")
+            self.lambda_handler._emit_invocation_summary(100, 50, 5.2, "gpt-4.1-nano", {"state": "closed", "failures": 0})
         output = fake_stdout.getvalue()
         self.assertIn("CumulativePromptTokens", output)
         self.assertIn("CumulativeCompletionTokens", output)
         self.assertIn("CumulativeCostUSD", output)
         self.assertIn("ElapsedSeconds", output)
         self.assertIn("tg_summarizer/Invocation", output)
+        self.assertIn("CircuitBreakerState", output)
 
-    def test_emit_invocation_summary_skips_zero_tokens(self):
-        """_emit_invocation_summary should skip when no tokens used."""
+    def test_emit_invocation_summary_skips_zero_tokens_closed(self):
+        """_emit_invocation_summary should skip when no tokens used and breaker closed."""
         import io
         fake_stdout = io.StringIO()
         with patch("sys.stdout", fake_stdout):
-            self.lambda_handler._emit_invocation_summary(0, 0, 5.2, "gpt-4.1-nano")
+            self.lambda_handler._emit_invocation_summary(0, 0, 5.2, "gpt-4.1-nano", {"state": "closed", "failures": 0})
         output = fake_stdout.getvalue()
         self.assertEqual(output, "")
+
+    def test_emit_invocation_summary_emits_on_half_open_even_zero_tokens(self):
+        """_emit_invocation_summary should emit when circuit breaker is not closed, even with zero tokens."""
+        import io, json
+        fake_stdout = io.StringIO()
+        with patch("sys.stdout", fake_stdout):
+            self.lambda_handler._emit_invocation_summary(0, 0, 5.2, "gpt-4.1-nano", {"state": "half_open", "failures": 3})
+        output = fake_stdout.getvalue().strip()
+        self.assertNotEqual(output, "")
+        data = json.loads(output)
+        self.assertEqual(data["CircuitBreakerState"], 1)
+
+    def test_emit_invocation_summary_cb_state_values(self):
+        """_emit_invocation_summary should map cb states correctly: closed=0, half_open=1, open=2."""
+        import io, json
+        for state_name, expected_val in [("closed", 0), ("half_open", 1), ("open", 2)]:
+            fake_stdout = io.StringIO()
+            with patch("sys.stdout", fake_stdout):
+                self.lambda_handler._emit_invocation_summary(10, 5, 1.0, "gpt-4.1-nano", {"state": state_name, "failures": 3})
+            data = json.loads(fake_stdout.getvalue().strip())
+            self.assertEqual(data["CircuitBreakerState"], expected_val, f"Expected {expected_val} for {state_name}")
 
     def test_handler_emits_invocation_summary_on_success(self):
         """Handler should call _emit_invocation_summary on success path."""
@@ -1055,8 +1077,8 @@ class EmitEmfHelperTests(unittest.TestCase):
     def test_emit_emf_does_not_raise_on_failure(self):
         with open("utils.py") as f:
             source = f.read()
-        self.assertIn("except Exception:", source)
-        self.assertIn("pass", source)
+        self.assertIn("except Exception as e:", source)
+        self.assertIn("logger.debug", source)
 
 
 class NlpMaxTokensTests(unittest.TestCase):

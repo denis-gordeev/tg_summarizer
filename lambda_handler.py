@@ -19,7 +19,8 @@ logger = logging.getLogger(__name__)
 
 
 def _emit_invocation_summary(
-    prompt_tokens: int, completion_tokens: int, elapsed_seconds: float, model: str
+    prompt_tokens: int, completion_tokens: int, elapsed_seconds: float, model: str,
+    cb_state: dict | None = None,
 ) -> None:
     """Emit a per-invocation EMF metric with cumulative cost/tokens (no Model dimension).
 
@@ -27,24 +28,31 @@ def _emit_invocation_summary(
     dimensions), this metric uses only the Function dimension, enabling CloudWatch
     aggregation across models for daily cost alerting.
     """
-    if prompt_tokens == 0 and completion_tokens == 0:
+    if prompt_tokens == 0 and completion_tokens == 0 and (cb_state is None or cb_state.get("state") == "closed"):
         return
     cost_usd = _estimate_cost_usd(model, prompt_tokens, completion_tokens)
+    values = {
+        "CumulativePromptTokens": prompt_tokens,
+        "CumulativeCompletionTokens": completion_tokens,
+        "CumulativeCostUSD": round(cost_usd, 6),
+        "ElapsedSeconds": round(elapsed_seconds, 1),
+    }
+    if cb_state is not None:
+        state_map = {"closed": 0, "half_open": 1, "open": 2}
+        values["CircuitBreakerState"] = state_map.get(cb_state["state"], 0)
+    metrics = [
+        {"Name": "CumulativePromptTokens", "Unit": "None"},
+        {"Name": "CumulativeCompletionTokens", "Unit": "None"},
+        {"Name": "CumulativeCostUSD", "Unit": "None"},
+        {"Name": "ElapsedSeconds", "Unit": "Seconds"},
+    ]
+    if cb_state is not None:
+        metrics.append({"Name": "CircuitBreakerState", "Unit": "None"})
     _emit_emf(
         namespace="tg_summarizer/Invocation",
         dimensions=[["Function"]],
-        metrics=[
-            {"Name": "CumulativePromptTokens", "Unit": "None"},
-            {"Name": "CumulativeCompletionTokens", "Unit": "None"},
-            {"Name": "CumulativeCostUSD", "Unit": "None"},
-            {"Name": "ElapsedSeconds", "Unit": "Seconds"},
-        ],
-        values={
-            "CumulativePromptTokens": prompt_tokens,
-            "CumulativeCompletionTokens": completion_tokens,
-            "CumulativeCostUSD": round(cost_usd, 6),
-            "ElapsedSeconds": round(elapsed_seconds, 1),
-        },
+        metrics=metrics,
+        values=values,
     )
 
 
@@ -196,7 +204,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         cb_state = get_circuit_breaker_state()
         token_usage = get_token_usage()
         _emit_invocation_summary(
-            token_usage["prompt_tokens"], token_usage["completion_tokens"], elapsed, OPENAI_MODEL
+            token_usage["prompt_tokens"], token_usage["completion_tokens"], elapsed, OPENAI_MODEL, cb_state
         )
         return {
             'status': 'error',
@@ -231,7 +239,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     cb_state = get_circuit_breaker_state()
     token_usage = get_token_usage()
     _emit_invocation_summary(
-        token_usage["prompt_tokens"], token_usage["completion_tokens"], elapsed, OPENAI_MODEL
+        token_usage["prompt_tokens"], token_usage["completion_tokens"], elapsed, OPENAI_MODEL, cb_state
     )
     logger.info(
         "Lambda completed in %.1fs (download=%.1fs, summarizer=%.1fs, upload=%.1fs) "

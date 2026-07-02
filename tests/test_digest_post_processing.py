@@ -823,24 +823,24 @@ class PromptBrevityTests(unittest.TestCase):
     def test_channel_summary_prompt_has_brevity_rule(self):
         with open("prompts.py") as f:
             source = f.read()
-        self.assertIn("без вводных слов", source)
+        self.assertIn("вводных слов", source)
 
     def test_group_summary_prompt_has_brevity_rule(self):
         with open("prompts.py") as f:
             source = f.read()
-        count = source.count("без вводных слов")
+        count = source.count("вводных слов")
         self.assertGreaterEqual(count, 2, "Both prompts should have brevity rule")
 
-    def test_channel_summary_prompt_has_one_sentence_per_fact_rule(self):
+    def test_channel_summary_prompt_has_one_fact_per_sentence_rule(self):
         with open("prompts.py") as f:
             source = f.read()
-        self.assertIn("Одно предложение на факт", source)
+        self.assertIn("Один факт на предложение", source)
 
-    def test_group_summary_prompt_has_one_sentence_per_fact_rule(self):
+    def test_group_summary_prompt_has_one_fact_per_sentence_rule(self):
         with open("prompts.py") as f:
             source = f.read()
-        count = source.count("Одно предложение на факт")
-        self.assertGreaterEqual(count, 2, "Both prompts should have one-sentence-per-fact rule")
+        count = source.count("Один факт на предложение")
+        self.assertGreaterEqual(count, 2, "Both prompts should have one-fact-per-sentence rule")
 
 
 class TemplateDashboardTests(unittest.TestCase):
@@ -1299,6 +1299,215 @@ class TemplateConfigSyncTests(unittest.TestCase):
         with open("template.yaml") as f:
             content = f.read()
         self.assertIn("GroupSummarizationIntervalSeconds", content)
+
+
+class NewMetaArtifactTests(unittest.TestCase):
+    """Tests for newly added meta-artifact patterns."""
+
+    def _import_utils(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_openai = types.ModuleType("openai")
+
+        class FakeOpenAI:
+            def __init__(self, api_key, **kwargs):
+                pass
+
+        class FakeOpenAIError(Exception):
+            pass
+
+        fake_openai.OpenAI = FakeOpenAI
+        fake_openai.AsyncOpenAI = FakeOpenAI
+        fake_openai.APIError = FakeOpenAIError
+        fake_openai.RateLimitError = type("RateLimitError", (FakeOpenAIError,), {"status_code": None})
+        fake_openai.APIConnectionError = type("APIConnectionError", (FakeOpenAIError,), {})
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv, "openai": fake_openai}):
+            with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+                sys.modules.pop("config", None)
+                sys.modules.pop("utils", None)
+                import importlib
+                return importlib.import_module("utils")
+
+    def test_strips_как_мы_видим_intro(self):
+        utils = self._import_utils()
+        text = "Как мы видим, модели улучшаются\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Как мы видим", result)
+        self.assertIn("<b>AI</b>", result)
+
+    def test_strips_как_можно_заметить_intro(self):
+        utils = self._import_utils()
+        text = "Как можно заметить, прогресс очевиден\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Как можно заметить", result)
+
+    def test_strips_рассмотрим_intro(self):
+        utils = self._import_utils()
+        text = "Рассмотрим новые модели\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Рассмотрим", result)
+
+    def test_strips_остановимся_на_intro(self):
+        utils = self._import_utils()
+        text = "Остановимся на архитектуре\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Остановимся на", result)
+
+    def test_strips_исходя_из_вышесказанного_intro(self):
+        utils = self._import_utils()
+        text = "Исходя из вышесказанного, модели развиваются\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Исходя из вышесказанного", result)
+
+    def test_strips_необходимо_отметить_intro(self):
+        utils = self._import_utils()
+        text = "Необходимо отметить рост качества\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Необходимо отметить", result)
+
+    def test_strips_важно_подчеркнуть_intro(self):
+        utils = self._import_utils()
+        text = "Важно подчеркнуть результат\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Важно подчеркнуть", result)
+
+    def test_strips_не_стоит_забывать_intro(self):
+        utils = self._import_utils()
+        text = "Не стоит забывать про GPU\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Не стоит забывать", result)
+
+    def test_strips_суммируя_вышесказанное_outro(self):
+        utils = self._import_utils()
+        text = "<b>AI</b>\nСуммируя вышесказанное, прогресс налицо"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Суммируя вышесказанное", result)
+
+    def test_strips_в_конечном_счёте_outro(self):
+        utils = self._import_utils()
+        text = "<b>AI</b>\nВ конечном счёте, это важно"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("В конечном счёте", result)
+
+    def test_strips_в_конечном_счете_outro(self):
+        utils = self._import_utils()
+        text = "<b>AI</b>\nВ конечном счете, это важно"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("В конечном счете", result)
+
+    def test_strips_очевидно_intro(self):
+        utils = self._import_utils()
+        text = "Очевидно, модель улучшилась\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Очевидно", result)
+
+    def test_strips_подведём_итог_intro(self):
+        utils = self._import_utils()
+        text = "Подведём итог обсуждения\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Подведём итог", result)
+
+    def test_strips_главное_colon_intro(self):
+        utils = self._import_utils()
+        text = "Главное: модель GPT-5 вышла\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Главное:", result)
+
+    def test_strips_резюме_colon_intro(self):
+        utils = self._import_utils()
+        text = "Резюме: модель GPT-5 вышла\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Резюме:", result)
+
+    def test_preserves_необходимо_в_body(self):
+        utils = self._import_utils()
+        text = "<b>AI</b>\nДля обучения необходимо 100 GPU"
+        result = utils.strip_meta_artifacts(text)
+        self.assertIn("необходимо", result.lower())
+
+    def test_preserves_рассмотрим_в_body(self):
+        utils = self._import_utils()
+        text = "<b>AI</b>\nМодель, которую рассмотрим ниже — GPT-5"
+        result = utils.strip_meta_artifacts(text)
+        self.assertIn("рассмотрим", result.lower())
+
+
+class PromptCompactnessTests(unittest.TestCase):
+    """Tests that prompt rules are merged and compact."""
+
+    def test_channel_prompt_has_merged_intro_rule(self):
+        with open("prompts.py") as f:
+            source = f.read()
+        self.assertIn("Без введения, заключения, мета-комментариев и вводных слов", source)
+        self.assertNotIn("Без введения, заключения и мета-комментариев", source)
+
+    def test_channel_prompt_has_merged_fact_rule(self):
+        with open("prompts.py") as f:
+            source = f.read()
+        self.assertIn("Один факт на предложение, одна мысль на абзац", source)
+        self.assertNotIn("Одно предложение на факт, без пояснений", source)
+
+    def test_channel_prompt_has_merged_style_rule(self):
+        with open("prompts.py") as f:
+            source = f.read()
+        self.assertIn("Конкретные факты и результаты, нейтральный стиль без мнений", source)
+        self.assertNotIn("Конкретные результаты и факты, не общие описания", source)
+
+    def test_group_prompt_has_merged_intro_rule(self):
+        with open("prompts.py") as f:
+            source = f.read()
+        self.assertIn("Без введения, заключения, мета-комментариев и вводных слов", source)
+
+    def test_group_prompt_still_has_question_rule(self):
+        with open("prompts.py") as f:
+            source = f.read()
+        self.assertIn("Не добавляй вопросы пользователей", source)
+
+    def test_prompts_no_leading_newline(self):
+        with open("prompts.py") as f:
+            source = f.read()
+        self.assertNotIn('"COVERAGE_AND_MATCH_PROMPT": """\n', source)
+        self.assertNotIn('"NLP_RELEVANCE_PROMPT": """\n', source)
+        self.assertNotIn('"CHANNEL_SUMMARY_PROMPT": """\n', source)
+        self.assertNotIn('"GROUP_SUMMARY_PROMPT": """\n', source)
+
+
+class EmitEmfDebugLogTests(unittest.TestCase):
+    """Tests that _emit_emf logs debug on exception."""
+
+    def test_emit_emf_has_debug_log_on_exception(self):
+        with open("utils.py") as f:
+            source = f.read()
+        self.assertIn("logger.debug", source)
+        self.assertIn("_emit_emf failed", source)
+
+
+class CircuitBreakerAlarmTests(unittest.TestCase):
+    """Tests for circuit breaker half-open alarm and DLQ alarm in template."""
+
+    def test_template_contains_circuit_breaker_alarm(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        self.assertIn("CircuitBreakerHalfOpenAlarm", content)
+        self.assertIn("CircuitBreakerState", content)
+
+    def test_circuit_breaker_alarm_threshold_is_1(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        alarm_section = content[content.index("CircuitBreakerHalfOpenAlarm"):]
+        self.assertIn("Threshold: 1", alarm_section[:500])
+
+    def test_template_contains_dlq_depth_alarm(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        self.assertIn("DLQDepthAlarm", content)
+        self.assertIn("ApproximateNumberOfMessagesVisible", content)
+
+    def test_template_dashboard_contains_circuit_breaker_widget(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        self.assertIn("Circuit Breaker State", content)
 
 
 if __name__ == "__main__":

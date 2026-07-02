@@ -7,7 +7,56 @@
 - Consider evaluating gpt-4.1-nano vs gpt-4o-mini quality tradeoff with A/B testing
 - Consider tuning warmup schedule frequency for cost-effectiveness
 - Consider adding Lambda provisioned concurrency for more predictable cold starts
-- Consider adding CloudWatch alarm on circuit breaker half-open transitions
+- Consider adding CallType dimension to OpenAI EMF metrics for per-call-type latency breakdown
+- Consider reducing COVERAGE_CHECK_MAX_INPUT_CHARS from 2000 to 500 for cost savings
+- Consider adding EMF metric for NLP filter results (Accepted/Rejected/AdFiltered/ShortFiltered)
+- Consider adding dead man's switch alarm on Invocations = 0
+
+## Completed in 2026-07-02 round (prompt compaction, meta-artifacts expansion, circuit breaker alarm, DLQ alarm, EMF observability)
+
+- **Quality — expanded `strip_meta_artifacts`**: Added "как мы видим", "как можно заметить", "рассмотрим", "остановимся на", "исходя из вышесказанного", "исходя из этого", "нужно отметить", "необходимо отметить", "хочется отметить", "хочется подчеркнуть", "важно подчеркнуть", "не стоит забывать", "особо следует", "отдельно стоит", "в этой связи", "подведём итог", "подведем итоги", "по итогам" to [`_META_ARTIFACT_INTRO_ONLY`](utils.py) — these are meta-structural at the start of a summary but can appear legitimately in body text. Added "суммируя вышесказанное", "суммируя вышеизложенное", "в конечном счёте", "в конечном счете", "очевидно", "безусловно", "несомненно" to both intro and outro patterns in [`_META_ARTIFACT_PATTERNS`](utils.py). Added "главное", "основное", "резюме", "сводка" to the colon-terminated section header patterns (e.g., "Главное: ..."). These are common LLM filler/transition phrases and section headers that violate the "Без введения, заключения и мета-комментариев" prompt rule.
+- **Quality — merged overlapping prompt rules**: Consolidated 3 overlapping rule pairs in both [`CHANNEL_SUMMARY_PROMPT`](prompts.py) and [`GROUP_SUMMARY_PROMPT`](prompts.py): (1) "Без введения, заключения и мета-комментариев" + "Пиши максимально кратко, без вводных слов и оборотов" → "Без введения, заключения, мета-комментариев и вводных слов". (2) "Одно предложение на факт, без пояснений" + "Каждый абзац — одна мысль. Без воды и пояснений очевидного" → "Один факт на предложение, одна мысль на абзац. Без воды и пояснений". (3) "Конкретные результаты и факты, не общие описания" + "Нейтральный стиль: факты, не мнения" → "Конкретные факты и результаты, нейтральный стиль без мнений". Saves ~20-30 input tokens per summary call with clearer, more compact rules.
+- **Cost optimization — stripped leading `\n` from prompt strings**: Removed leading newline from [`COVERAGE_AND_MATCH_PROMPT`](prompts.py), [`NLP_RELEVANCE_PROMPT`](prompts.py), [`CHANNEL_SUMMARY_PROMPT`](prompts.py), and [`GROUP_SUMMARY_PROMPT`](prompts.py). The `"""\n...` pattern added 1 unnecessary input token per prompt call. Saves ~4 tokens per invocation across all prompt types.
+- **Observability — `_emit_emf` debug logging on exception**: Changed bare `pass` to `logger.debug("_emit_emf failed: %s", e)` in [`_emit_emf()`](utils.py). Previously, EMF emission failures were completely silent — if stdout encoding broke or JSON serialization failed, all CloudWatch metrics would disappear with no diagnostic signal. Now failures are logged at DEBUG level for troubleshooting without spamming production logs.
+- **Observability — circuit breaker state EMF metric + alarm**: Added `CircuitBreakerState` metric (0=closed, 1=half_open, 2=open) to [`_emit_invocation_summary()`](lambda_handler.py). Emitted in both success and error paths via the `cb_state` parameter. When the circuit breaker is not closed, the metric is emitted even with zero token usage to ensure visibility. Added `CircuitBreakerHalfOpenAlarm` in [`template.yaml`](template.yaml) — alerts when `CircuitBreakerState >= 1` (Maximum statistic, 5-minute period), i.e., when the breaker enters half-open or open state. Directly addresses the TODO item "Consider adding CloudWatch alarm on circuit breaker half-open transitions". Added "Circuit Breaker State" widget to [`SummarizerDashboard`](template.yaml).
+- **Observability — DLQ depth alarm**: Added `DLQDepthAlarm` in [`template.yaml`](template.yaml) — alerts when `ApproximateNumberOfMessagesVisible > 0` on the dead-letter queue (Sum statistic, 5-minute period). Previously, if the Lambda failed and messages piled up in the DLQ, nobody would know. The DLQ was created but had no alarm on its depth.
+- **Tests added**: 30 new tests (total 482, up from 452):
+  - `test_strips_как_мы_видим_intro`: verifies "Как мы видим" stripped from summary start
+  - `test_strips_как_можно_заметить_intro`: verifies "Как можно заметить" stripped
+  - `test_strips_рассмотрим_intro`: verifies "Рассмотрим" stripped
+  - `test_strips_остановимся_на_intro`: verifies "Остановимся на" stripped
+  - `test_strips_исходя_из_вышесказанного_intro`: verifies "Исходя из вышесказанного" stripped
+  - `test_strips_необходимо_отметить_intro`: verifies "Необходимо отметить" stripped
+  - `test_strips_важно_подчеркнуть_intro`: verifies "Важно подчеркнуть" stripped
+  - `test_strips_не_стоит_забывать_intro`: verifies "Не стоит забывать" stripped
+  - `test_strips_суммируя_вышесказанное_outro`: verifies "Суммируя вышесказанное" stripped from end
+  - `test_strips_в_конечном_счёте_outro`: verifies "В конечном счёте" stripped from end
+  - `test_strips_в_конечном_счете_outro`: verifies "В конечном счете" stripped from end (ё/е variant)
+  - `test_strips_очевидно_intro`: verifies "Очевидно" stripped from start
+  - `test_strips_подведём_итог_intro`: verifies "Подведём итог" stripped
+  - `test_strips_главное_colon_intro`: verifies "Главное:" section header stripped
+  - `test_strips_резюме_colon_intro`: verifies "Резюме:" section header stripped
+  - `test_preserves_необходимо_в_body`: verifies "необходимо" in body preserved
+  - `test_preserves_рассмотрим_в_body`: verifies "рассмотрим" in body preserved
+  - `test_channel_prompt_has_merged_intro_rule`: verifies merged intro/brevity rule
+  - `test_channel_prompt_has_merged_fact_rule`: verifies merged fact/sentence rule
+  - `test_channel_prompt_has_merged_style_rule`: verifies merged style/concrete rule
+  - `test_group_prompt_has_merged_intro_rule`: verifies group prompt has merged rule
+  - `test_group_prompt_still_has_question_rule`: verifies group-specific question rule preserved
+  - `test_prompts_no_leading_newline`: verifies no `"""\n` pattern in prompts
+  - `test_emit_emf_has_debug_log_on_exception`: verifies `_emit_emf` logs debug
+  - `test_template_contains_circuit_breaker_alarm`: verifies `CircuitBreakerHalfOpenAlarm` in template
+  - `test_circuit_breaker_alarm_threshold_is_1`: verifies alarm threshold
+  - `test_template_contains_dlq_depth_alarm`: verifies `DLQDepthAlarm` in template
+  - `test_template_dashboard_contains_circuit_breaker_widget`: verifies dashboard widget
+  - `test_emit_invocation_summary_writes_emf`: updated to verify `CircuitBreakerState` in EMF
+  - `test_emit_invocation_summary_skips_zero_tokens_closed`: updated skip condition
+  - `test_emit_invocation_summary_emits_on_half_open_even_zero_tokens`: verifies non-closed CB emits
+  - `test_emit_invocation_summary_cb_state_values`: verifies CB state mapping (closed=0, half_open=1, open=2)
+- Updated `test_emit_emf_does_not_raise_on_failure` — now checks for `logger.debug` instead of `pass`.
+- Updated `test_channel_summary_prompt_has_brevity_rule` / `test_group_summary_prompt_has_brevity_rule` — now checks for "вводных слов" (merged rule wording).
+- Updated `test_channel_summary_prompt_has_one_sentence_per_fact_rule` / `test_group_summary_prompt_has_one_sentence_per_fact_rule` — now checks for "Один факт на предложение" (merged rule wording).
+- All 482 tests pass without errors.
 
 ## Completed in 2026-07-01 round 2 (code quality, meta-artifacts expansion, circuit breaker refactor, S3 empty guard, prompt compaction)
 

@@ -517,6 +517,40 @@ Resources:
           Value: !Ref SummarizerFunction
       TreatMissingData: notBreaching
 
+  CircuitBreakerHalfOpenAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-circuit-breaker-half-open"
+      AlarmDescription: "Alarm for circuit breaker entering half-open state (EMF metric CircuitBreakerState >= 1)"
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      Threshold: 1
+      MetricName: CircuitBreakerState
+      Namespace: tg_summarizer/Invocation
+      Period: 300
+      Statistic: Maximum
+      Dimensions:
+        - Name: Function
+          Value: !Ref SummarizerFunction
+      TreatMissingData: notBreaching
+
+  DLQDepthAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-dlq-depth"
+      AlarmDescription: "Alarm for messages piling up in the dead-letter queue"
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 1
+      Threshold: 0
+      MetricName: ApproximateNumberOfMessagesVisible
+      Namespace: AWS/SQS
+      Period: 300
+      Statistic: Sum
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt SummarizerDLQ.QueueName
+      TreatMissingData: notBreaching
+
   WarmupFailuresAlarm:
     Type: AWS::CloudWatch::Alarm
     Condition: HasWarmupSchedule
@@ -647,6 +681,20 @@ Resources:
                 "region": "${AWS::Region}",
                 "title": "Coverage Dedup (Group)",
                 "yAxis": { "left": { "label": "messages" } }
+              },
+              "width": 12, "height": 6
+            },
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
+                  ["tg_summarizer/Invocation", "CircuitBreakerState", "Function", "${SummarizerFunction}"]
+                ],
+                "period": 300,
+                "stat": "Maximum",
+                "region": "${AWS::Region}",
+                "title": "Circuit Breaker State",
+                "yAxis": { "left": { "label": "state (0=closed, 1=half_open, 2=open)" } }
               },
               "width": 12, "height": 6
             },
