@@ -369,7 +369,7 @@ async def update_existing_summary(
         return summary.content + f"\n\nДоп. источники: {new_link}"
 
     try:
-        updated_content = await call_openai(update_prompt, user_content, max_tokens=UPDATE_SUMMARY_MAX_TOKENS, temperature=0)
+        updated_content = await call_openai(update_prompt, user_content, max_tokens=UPDATE_SUMMARY_MAX_TOKENS, temperature=0, call_type="update")
         if not updated_content or count_characters(updated_content) < count_characters(summary.content) * 0.8:
             logger.warning("LLM update response too short (%d < %d*0.8); falling back to append", count_characters(updated_content or ""), count_characters(summary.content))
             updated_content = _append_link()

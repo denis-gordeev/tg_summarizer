@@ -85,7 +85,7 @@ def _setup_stubs():
     fake_config.SUMMARY_MAX_LENGTH = 4000
     fake_config.GROUP_SUMMARY_MIN_LENGTH = 2000
     fake_config.GROUP_SUMMARY_MAX_LENGTH = 12000
-    fake_config.NLP_CHECK_MAX_INPUT_CHARS = 2000
+    fake_config.NLP_CHECK_MAX_INPUT_CHARS = 500
     fake_config.COVERAGE_CHECK_MAX_INPUT_CHARS = 2000
     fake_config.NLP_MIN_TEXT_LENGTH = 100
     fake_config.SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE = 3000
@@ -431,28 +431,28 @@ class NlpCheckTruncationTests(unittest.TestCase):
         from unittest.mock import AsyncMock, patch
 
         long_text = "x" * 5000
-        self._fake_config.NLP_CHECK_MAX_INPUT_CHARS = 2000
+        self._fake_config.NLP_CHECK_MAX_INPUT_CHARS = 500
 
         with patch.object(self.mp, "call_openai", new_callable=AsyncMock) as mock_openai:
             mock_openai.return_value = "да"
             asyncio.run(self.mp.is_nlp_related(long_text))
             call_args = mock_openai.call_args
             user_content = call_args[0][1]
-            self.assertLessEqual(len(user_content), 2000)
+            self.assertLessEqual(len(user_content), 500)
 
     def test_nlp_check_keeps_short_input(self):
         """is_nlp_related should not truncate short text."""
         from unittest.mock import AsyncMock, patch
 
-        short_text = "A" * 500
-        self._fake_config.NLP_CHECK_MAX_INPUT_CHARS = 2000
+        short_text = "A" * 300
+        self._fake_config.NLP_CHECK_MAX_INPUT_CHARS = 500
 
         with patch.object(self.mp, "call_openai", new_callable=AsyncMock) as mock_openai:
             mock_openai.return_value = "да"
             asyncio.run(self.mp.is_nlp_related(short_text))
             call_args = mock_openai.call_args
             user_content = call_args[0][1]
-            self.assertEqual(len(user_content), 500)
+            self.assertEqual(len(user_content), 300)
 
     def test_nlp_check_uses_max_tokens_3(self):
         """is_nlp_related should use max_tokens=3 for cost optimization."""
@@ -1938,7 +1938,7 @@ class DedupCoveredMessagesExtractionTests(unittest.TestCase):
         fake_config.SUMMARY_MAX_LENGTH = 4000
         fake_config.GROUP_SUMMARY_MIN_LENGTH = 2000
         fake_config.GROUP_SUMMARY_MAX_LENGTH = 12000
-        fake_config.NLP_CHECK_MAX_INPUT_CHARS = 2000
+        fake_config.NLP_CHECK_MAX_INPUT_CHARS = 500
         fake_config.COVERAGE_CHECK_MAX_INPUT_CHARS = 500
         fake_config.NLP_MIN_TEXT_LENGTH = 100
         fake_config.SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE = 3000

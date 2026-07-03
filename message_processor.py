@@ -68,7 +68,7 @@ def _emit_coverage_dedup_metric(covered: int, total: int, new: int, is_group: bo
     )
 
 
-def _emit_nlp_filter_metric(accepted: int, rejected: int, ad_filtered: int, short_filtered: int, is_group: bool) -> None:
+def _emit_nlp_filter_metric(accepted: int, rejected: int, ad_filtered: int, short_filtered: int, cb_filtered: int, is_group: bool) -> None:
     _emit_emf(
         namespace="tg_summarizer/NLP",
         dimensions=[["Function", "StreamType"]],
@@ -77,6 +77,7 @@ def _emit_nlp_filter_metric(accepted: int, rejected: int, ad_filtered: int, shor
             {"Name": "Rejected", "Unit": "None"},
             {"Name": "AdFiltered", "Unit": "None"},
             {"Name": "ShortFiltered", "Unit": "None"},
+            {"Name": "CbFiltered", "Unit": "None"},
         ],
         values={
             "StreamType": "group" if is_group else "channel",
@@ -84,6 +85,7 @@ def _emit_nlp_filter_metric(accepted: int, rejected: int, ad_filtered: int, shor
             "Rejected": rejected,
             "AdFiltered": ad_filtered,
             "ShortFiltered": short_filtered,
+            "CbFiltered": cb_filtered,
         },
     )
 
@@ -126,6 +128,7 @@ async def _check_coverage_and_match(
     try:
         result = await call_openai(
             prompts.COVERAGE_AND_MATCH_PROMPT, user_content, max_tokens=3, temperature=0,
+            call_type="coverage",
         )
         result = result.strip().upper()
         digits = re.match(r"^(\d+)", result)
@@ -156,7 +159,7 @@ async def is_nlp_related(text: str) -> tuple[bool, str]:
     if is_circuit_breaker_open():
         return False, "circuit_breaker_open"
     truncated = text[:NLP_CHECK_MAX_INPUT_CHARS]
-    answer = await call_openai(prompts.NLP_RELEVANCE_PROMPT, truncated, max_tokens=3, temperature=0)
+    answer = await call_openai(prompts.NLP_RELEVANCE_PROMPT, truncated, max_tokens=3, temperature=0, call_type="nlp")
     return answer.lower().strip().startswith("да"), answer
 
 
@@ -266,6 +269,7 @@ async def summarize_text(messages: List[MessageInfo]) -> str:
         messages_text,
         max_tokens=OPENAI_CHANNEL_SUMMARY_MAX_TOKENS,
         temperature=OPENAI_SUMMARY_TEMPERATURE,
+        call_type="channel_summary",
     )
     if not result:
         logger.error("Failed to generate channel summary for %d messages", len(messages))
@@ -294,6 +298,7 @@ async def summarize_group_text(messages: List[MessageInfo]) -> str:
         messages_text,
         max_tokens=OPENAI_GROUP_SUMMARY_MAX_TOKENS,
         temperature=OPENAI_SUMMARY_TEMPERATURE,
+        call_type="group_summary",
     )
     if not result:
         logger.error("Failed to generate group summary for %d messages", len(messages))
@@ -454,13 +459,14 @@ async def process_messages(
 
     ad_filtered = sum(1 for m in all_checked_messages if getattr(m, 'is_nlp_related_reason', '') == "ad_keyword")
     short_filtered = sum(1 for m in all_checked_messages if getattr(m, 'is_nlp_related_reason', '') == "too_short")
+    cb_filtered = sum(1 for m in all_checked_messages if getattr(m, 'is_nlp_related_reason', '') == "circuit_breaker_open")
     rejected = len(all_checked_messages) - len(nlp_related_messages)
     logger.info(
-        "NLP filter (%s): %d total, %d accepted, %d rejected (ad=%d, short=%d, other=%d)",
+        "NLP filter (%s): %d total, %d accepted, %d rejected (ad=%d, short=%d, cb=%d, other=%d)",
         stream_label, len(messages), len(nlp_related_messages), rejected,
-        ad_filtered, short_filtered, rejected - ad_filtered - short_filtered,
+        ad_filtered, short_filtered, cb_filtered, rejected - ad_filtered - short_filtered - cb_filtered,
     )
-    _emit_nlp_filter_metric(len(nlp_related_messages), rejected, ad_filtered, short_filtered, is_group)
+    _emit_nlp_filter_metric(len(nlp_related_messages), rejected, ad_filtered, short_filtered, cb_filtered, is_group)
 
     unique_messages = nlp_related_messages
     if unique_messages:

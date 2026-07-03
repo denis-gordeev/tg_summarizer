@@ -1210,5 +1210,111 @@ class TelegramClientNoneDateTests(unittest.TestCase):
         self.assertIn("msg.date is None", source)
 
 
+class NlpCheckDefaultTests(unittest.TestCase):
+    """Tests for NLP_CHECK_MAX_INPUT_CHARS default value change."""
+
+    def test_config_nlp_check_max_input_chars_default_is_500(self):
+        with open("config.py") as f:
+            source = f.read()
+        self.assertIn('NLP_CHECK_MAX_INPUT_CHARS", 500', source)
+
+    def test_template_nlp_check_default_is_500(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        param_idx = content.index("  NlpCheckMaxInputChars:")
+        param_section = content[param_idx:param_idx + 300]
+        self.assertIn('"500"', param_section)
+
+    def test_env_example_nlp_check_is_500(self):
+        with open(".env.example") as f:
+            content = f.read()
+        self.assertIn("NLP_CHECK_MAX_INPUT_CHARS=500", content)
+
+
+class OpenAiCallTypeDimensionTests(unittest.TestCase):
+    """Tests for CallType dimension on OpenAI EMF metrics."""
+
+    def test_emit_openai_latency_accepts_call_type(self):
+        with open("utils.py") as f:
+            source = f.read()
+        self.assertIn("call_type", source)
+
+    def test_emit_openai_latency_has_call_type_dimension(self):
+        with open("utils.py") as f:
+            source = f.read()
+        self.assertIn("CallType", source)
+
+    def test_call_openai_accepts_call_type(self):
+        with open("utils.py") as f:
+            source = f.read()
+        fn_start = source.index("async def call_openai(")
+        fn_sig = source[fn_start:source.index(")", fn_start) + 1]
+        self.assertIn("call_type", fn_sig)
+
+    def test_call_openai_passes_call_type_to_emit(self):
+        with open("utils.py") as f:
+            source = f.read()
+        self.assertIn("_emit_openai_latency(elapsed, OPENAI_MODEL, total_tokens, prompt_tokens, completion_tokens, call_type)", source)
+
+    def test_nlp_related_passes_call_type(self):
+        with open("message_processor.py") as f:
+            source = f.read()
+        self.assertIn('call_type="nlp"', source)
+
+    def test_coverage_check_passes_call_type(self):
+        with open("message_processor.py") as f:
+            source = f.read()
+        self.assertIn('call_type="coverage"', source)
+
+    def test_channel_summary_passes_call_type(self):
+        with open("message_processor.py") as f:
+            source = f.read()
+        self.assertIn('call_type="channel_summary"', source)
+
+    def test_group_summary_passes_call_type(self):
+        with open("message_processor.py") as f:
+            source = f.read()
+        self.assertIn('call_type="group_summary"', source)
+
+    def test_update_summary_passes_call_type(self):
+        with open("history_manager.py") as f:
+            source = f.read()
+        self.assertIn('call_type="update"', source)
+
+    def test_emit_openai_latency_uses_call_type_dimension(self):
+        with open("utils.py") as f:
+            source = f.read()
+        fn_start = source.index("def _emit_openai_latency(")
+        fn_section = source[fn_start:fn_start + 800]
+        self.assertIn('"CallType"', fn_section)
+
+    def test_dashboard_openai_widgets_include_calltype(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        self.assertIn('"CallType"', content)
+
+
+class NlpCbFilteredMetricTests(unittest.TestCase):
+    """Tests for CbFiltered metric in NLP filter EMF."""
+
+    def test_emit_nlp_filter_metric_includes_cb_filtered(self):
+        with open("message_processor.py") as f:
+            source = f.read()
+        metric_start = source.index("_emit_nlp_filter_metric")
+        metric_section = source[metric_start:metric_start + 800]
+        self.assertIn("CbFiltered", metric_section)
+
+    def test_process_messages_counts_cb_filtered(self):
+        with open("message_processor.py") as f:
+            source = f.read()
+        self.assertIn('circuit_breaker_open', source)
+        self.assertIn("cb_filtered", source)
+
+    def test_dashboard_nlp_widgets_include_cb_filtered(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        self.assertIn("CbFiltered", content)
+
+
 if __name__ == "__main__":
     unittest.main()

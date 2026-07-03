@@ -166,26 +166,31 @@ def _emit_emf(namespace: str, dimensions: list[list[str]], metrics: list[dict], 
         logger.debug("_emit_emf failed: %s", e)
 
 
-def _emit_openai_latency(elapsed: float, model: str, total_tokens: int, prompt_tokens: int = 0, completion_tokens: int = 0) -> None:
+def _emit_openai_latency(elapsed: float, model: str, total_tokens: int, prompt_tokens: int = 0, completion_tokens: int = 0, call_type: str = "") -> None:
     """Emit OpenAI latency as a CloudWatch Embedded Metric Format (EMF) metric."""
     cost_usd = _estimate_cost_usd(model, prompt_tokens, completion_tokens)
+    dimensions = [["Function", "Model", "CallType"]] if call_type else [["Function", "Model"]]
+    metrics = [
+        {"Name": "Latency", "Unit": "Seconds"},
+        {"Name": "PromptTokens", "Unit": "None"},
+        {"Name": "CompletionTokens", "Unit": "None"},
+        {"Name": "EstimatedCostUSD", "Unit": "None"},
+    ]
+    values = {
+        "Model": model,
+        "Latency": round(elapsed, 2),
+        "PromptTokens": prompt_tokens,
+        "CompletionTokens": completion_tokens,
+        "TotalTokens": total_tokens,
+        "EstimatedCostUSD": round(cost_usd, 6),
+    }
+    if call_type:
+        values["CallType"] = call_type
     _emit_emf(
         namespace="tg_summarizer/OpenAI",
-        dimensions=[["Function", "Model"]],
-        metrics=[
-            {"Name": "Latency", "Unit": "Seconds"},
-            {"Name": "PromptTokens", "Unit": "None"},
-            {"Name": "CompletionTokens", "Unit": "None"},
-            {"Name": "EstimatedCostUSD", "Unit": "None"},
-        ],
-        values={
-            "Model": model,
-            "Latency": round(elapsed, 2),
-            "PromptTokens": prompt_tokens,
-            "CompletionTokens": completion_tokens,
-            "TotalTokens": total_tokens,
-            "EstimatedCostUSD": round(cost_usd, 6),
-        },
+        dimensions=dimensions,
+        metrics=metrics,
+        values=values,
     )
 
 
@@ -237,6 +242,7 @@ async def call_openai(
     max_retries: int = 3,
     base_delay: float = 1.0,
     temperature: float | None = None,
+    call_type: str = "",
 ) -> str:
     """Универсальная функция для вызова OpenAI API с retry и exponential backoff."""
     global openai_client, _CIRCUIT_BREAKER_FAILURES, _CIRCUIT_BREAKER_OPEN_SINCE, _cumulative_prompt_tokens, _cumulative_completion_tokens
@@ -317,7 +323,7 @@ async def call_openai(
                 )
             else:
                 logger.info("OpenAI call: model=%s latency=%.1fs", OPENAI_MODEL, elapsed)
-            _emit_openai_latency(elapsed, OPENAI_MODEL, total_tokens, prompt_tokens, completion_tokens)
+            _emit_openai_latency(elapsed, OPENAI_MODEL, total_tokens, prompt_tokens, completion_tokens, call_type)
             return result.strip()
         except (RateLimitError, APIConnectionError) as e:
             if attempt < max_retries:

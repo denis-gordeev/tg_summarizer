@@ -7,9 +7,36 @@
 - Consider evaluating gpt-4.1-nano vs gpt-4o-mini quality tradeoff with A/B testing
 - Consider tuning warmup schedule frequency for cost-effectiveness
 - Consider adding Lambda provisioned concurrency for more predictable cold starts
-- Consider adding CallType dimension to OpenAI EMF metrics for per-call-type latency breakdown
-- Consider reducing NLP_CHECK_MAX_INPUT_CHARS from 2000 to 500-1000 for cost savings
-- Consider adding EMF metric for NLP circuit_breaker_open rejections count
+- Consider adding per-call-type cost alarm (e.g. if nlp_check cost exceeds threshold)
+- Consider adding UPDATE_SUMMARY_MAX_INPUT_CHARS reduction from 2000 to 1000 for cost savings
+
+## Completed in 2026-07-03 round (NLP cost optimization, CallType EMF dimension, CbFiltered metric)
+
+- **Cost optimization — NLP_CHECK_MAX_INPUT_CHARS reduced from 2000 to 500**: Changed default in [`config.py`](config.py), [`template.yaml`](template.yaml), and [`.env.example`](.env.example). The NLP relevance check only needs enough text to determine if a message is about NLP/ML/AI — 500 chars is sufficient for topic identification, saving ~1500 input tokens per NLP check. At `gpt-4.1-nano` pricing ($0.10/M input), this reduces NLP check input cost by ~75%. Directly addresses the TODO item "Consider reducing NLP_CHECK_MAX_INPUT_CHARS from 2000 to 500-1000 for cost savings".
+- **Observability — CallType dimension on OpenAI EMF metrics**: Added `call_type` parameter to [`call_openai()`](utils.py) and [`_emit_openai_latency()`](utils.py). When provided, the `CallType` dimension is included in the EMF payload alongside `Function` and `Model`. All callers now pass a call type: `is_nlp_related()` passes `"nlp"`, `_check_coverage_and_match()` passes `"coverage"`, `summarize_text()` passes `"channel_summary"`, `summarize_group_text()` passes `"group_summary"`, and `update_existing_summary()` passes `"update"`. Enables CloudWatch-based per-call-type latency and cost breakdown (e.g., comparing NLP check latency vs summary generation latency). Updated OpenAI dashboard widgets to include `CallType` dimension. Directly addresses the TODO item "Consider adding CallType dimension to OpenAI EMF metrics for per-call-type latency breakdown".
+- **Observability — CbFiltered metric in NLP filter EMF**: Added `CbFiltered` count and metric to [`_emit_nlp_filter_metric()`](message_processor.py) and the `process_messages()` NLP filter logging. Messages rejected due to `circuit_breaker_open` are now tracked separately from other rejections, enabling CloudWatch-based monitoring of how often the circuit breaker is blocking NLP checks. Updated NLP Filter dashboard widgets in [`template.yaml`](template.yaml) to display `CbFiltered`. Directly addresses the TODO item "Consider adding EMF metric for NLP circuit_breaker_open rejections count".
+- **Tests added**: 17 new tests (total 514, up from 497):
+  - `test_config_nlp_check_max_input_chars_default_is_500`: verifies config default
+  - `test_template_nlp_check_default_is_500`: verifies SAM template default
+  - `test_env_example_nlp_check_is_500`: verifies `.env.example` value
+  - `test_emit_openai_latency_accepts_call_type`: verifies `call_type` parameter in source
+  - `test_emit_openai_latency_has_call_type_dimension`: verifies `CallType` in EMF
+  - `test_call_openai_accepts_call_type`: verifies `call_type` in function signature
+  - `test_call_openai_passes_call_type_to_emit`: verifies `call_type` propagated to EMF
+  - `test_nlp_related_passes_call_type`: verifies `call_type="nlp"` in message_processor.py
+  - `test_coverage_check_passes_call_type`: verifies `call_type="coverage"` in message_processor.py
+  - `test_channel_summary_passes_call_type`: verifies `call_type="channel_summary"` in message_processor.py
+  - `test_group_summary_passes_call_type`: verifies `call_type="group_summary"` in message_processor.py
+  - `test_update_summary_passes_call_type`: verifies `call_type="update"` in history_manager.py
+  - `test_emit_openai_latency_uses_call_type_dimension`: verifies dimension in EMF JSON
+  - `test_dashboard_openai_widgets_include_calltype`: verifies `CallType` in template.yaml
+  - `test_emit_nlp_filter_metric_includes_cb_filtered`: verifies `CbFiltered` in metric
+  - `test_process_messages_counts_cb_filtered`: verifies `cb_filtered` counting in process_messages
+  - `test_dashboard_nlp_widgets_include_cb_filtered`: verifies `CbFiltered` in dashboard widgets
+- Updated `test_nlp_check_truncates_long_input` — now asserts `500` truncation (was `2000`).
+- Updated `test_nlp_check_keeps_short_input` — now uses 300-char input (was 500) to stay below 500-char limit.
+- Updated test stub `NLP_CHECK_MAX_INPUT_CHARS` from `2000` to `500` in integration test stubs.
+- All 514 tests pass without errors.
 
 ## Completed in 2026-07-02 round 2 (cost optimization, NLP filter metric, dead man's switch, dashboard widgets)
 

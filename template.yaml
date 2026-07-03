@@ -159,7 +159,7 @@ Parameters:
   NlpCheckMaxInputChars:
     Type: String
     Description: Max chars of message text sent to NLP relevance check
-    Default: "2000"
+    Default: "500"
   
   CoverageCheckMaxInputChars:
     Type: String
@@ -613,8 +613,8 @@ Resources:
               "type": "metric",
               "properties": {
                 "metrics": [
-                  ["tg_summarizer/OpenAI", "Latency", "Function", "${SummarizerFunction}", "Model", "*"],
-                  ["tg_summarizer/OpenAI", "EstimatedCostUSD", "Function", "${SummarizerFunction}", "Model", "*"]
+                  ["tg_summarizer/OpenAI", "Latency", "Function", "${SummarizerFunction}", "Model", "*", "CallType", "*"],
+                  ["tg_summarizer/OpenAI", "EstimatedCostUSD", "Function", "${SummarizerFunction}", "Model", "*", "CallType", "*"]
                 ],
                 "period": 300,
                 "stat": "Average",
@@ -628,8 +628,8 @@ Resources:
               "type": "metric",
               "properties": {
                 "metrics": [
-                  ["tg_summarizer/OpenAI", "PromptTokens", "Function", "${SummarizerFunction}", "Model", "*"],
-                  ["tg_summarizer/OpenAI", "CompletionTokens", "Function", "${SummarizerFunction}", "Model", "*"]
+                  ["tg_summarizer/OpenAI", "PromptTokens", "Function", "${SummarizerFunction}", "Model", "*", "CallType", "*"],
+                  ["tg_summarizer/OpenAI", "CompletionTokens", "Function", "${SummarizerFunction}", "Model", "*", "CallType", "*"]
                 ],
                 "period": 300,
                 "stat": "Sum",
@@ -737,7 +737,8 @@ Resources:
                   ["tg_summarizer/NLP", "Accepted", "Function", "${SummarizerFunction}", "StreamType", "channel"],
                   ["tg_summarizer/NLP", "Rejected", "Function", "${SummarizerFunction}", "StreamType", "channel"],
                   ["tg_summarizer/NLP", "AdFiltered", "Function", "${SummarizerFunction}", "StreamType", "channel"],
-                  ["tg_summarizer/NLP", "ShortFiltered", "Function", "${SummarizerFunction}", "StreamType", "channel"]
+                  ["tg_summarizer/NLP", "ShortFiltered", "Function", "${SummarizerFunction}", "StreamType", "channel"],
+                  ["tg_summarizer/NLP", "CbFiltered", "Function", "${SummarizerFunction}", "StreamType", "channel"]
                 ],
                 "period": 300,
                 "stat": "Sum",
@@ -754,7 +755,8 @@ Resources:
                   ["tg_summarizer/NLP", "Accepted", "Function", "${SummarizerFunction}", "StreamType", "group"],
                   ["tg_summarizer/NLP", "Rejected", "Function", "${SummarizerFunction}", "StreamType", "group"],
                   ["tg_summarizer/NLP", "AdFiltered", "Function", "${SummarizerFunction}", "StreamType", "group"],
-                  ["tg_summarizer/NLP", "ShortFiltered", "Function", "${SummarizerFunction}", "StreamType", "group"]
+                  ["tg_summarizer/NLP", "ShortFiltered", "Function", "${SummarizerFunction}", "StreamType", "group"],
+                  ["tg_summarizer/NLP", "CbFiltered", "Function", "${SummarizerFunction}", "StreamType", "group"]
                 ],
                 "period": 300,
                 "stat": "Sum",
