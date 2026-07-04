@@ -2088,7 +2088,7 @@ class CoverageDedupMetricTests(unittest.TestCase):
                 ret = node.returns
                 self.assertIsNotNone(ret, "_dedup_covered_messages should have a return type annotation")
                 self.assertIsInstance(ret, ast.Subscript)
-                self.assertEqual(ast.dump(ret.value), ast.dump(ast.Name(id="tuple")))
+                self.assertEqual(ret.value.id, "tuple")
                 return
         self.fail("_dedup_covered_messages not found")
 

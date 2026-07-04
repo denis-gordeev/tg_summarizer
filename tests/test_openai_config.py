@@ -659,7 +659,7 @@ class UpdateSummaryMaxInputCharsTests(unittest.TestCase):
             with patch.dict(os.environ, REQUIRED_ENV, clear=True):
                 sys.modules.pop("config", None)
                 config = importlib.import_module("config")
-                self.assertEqual(config.UPDATE_SUMMARY_MAX_INPUT_CHARS, 2000)
+                self.assertEqual(config.UPDATE_SUMMARY_MAX_INPUT_CHARS, 1000)
 
 
 class NlpAdKeywordsConfigTests(unittest.TestCase):

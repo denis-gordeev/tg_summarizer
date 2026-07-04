@@ -8,7 +8,36 @@
 - Consider tuning warmup schedule frequency for cost-effectiveness
 - Consider adding Lambda provisioned concurrency for more predictable cold starts
 - Consider adding per-call-type cost alarm (e.g. if nlp_check cost exceeds threshold)
-- Consider adding UPDATE_SUMMARY_MAX_INPUT_CHARS reduction from 2000 to 1000 for cost savings
+
+## Completed in 2026-07-04 round (UPDATE_SUMMARY cost optimization, meta-artifacts expansion, cost-by-call-type widget, AST test fix)
+
+- **Cost optimization — UPDATE_SUMMARY_MAX_INPUT_CHARS reduced from 2000 to 1000**: Changed default in [`config.py`](config.py), [`template.yaml`](template.yaml), and [`.env.example`](.env.example). The update prompt only needs enough context to insert a link in the right place — 1000 chars of summary + 1000 chars of new message is sufficient for the LLM to identify the relevant section. Saves ~2000 input tokens per update call. At `gpt-4.1-nano` pricing ($0.10/M input), this reduces update check input cost by ~50%. Directly addresses the TODO item "Consider adding UPDATE_SUMMARY_MAX_INPUT_CHARS reduction from 2000 to 1000 for cost savings".
+- **Quality — expanded `strip_meta_artifacts`**: Added "проще говоря", "иными словами", "иначе говоря", "кстати" to both intro and outro patterns in [`_META_ARTIFACT_PATTERNS`](utils.py). Added "по сути", "впрочем", "помимо прочего" to [`_META_ARTIFACT_INTRO_ONLY`](utils.py) — these are meta-structural at the start of a summary but can appear legitimately in body text (e.g., "Модель по сути использует attention").
+- **Observability — per-call-type cost breakdown dashboard widget**: Added "Cost by Call Type" widget to [`SummarizerDashboard`](template.yaml) showing `EstimatedCostUSD` from `tg_summarizer/OpenAI` namespace broken down by `CallType` dimension (nlp, coverage, channel_summary, group_summary, update). Enables visual comparison of cost contribution per call type — e.g., confirming that NLP checks dominate cost or identifying expensive summary generation.
+- **Bug fix — AST test compatibility**: Fixed [`test_dedup_covered_messages_return_type_is_tuple`](tests/test_process_messages_integration.py) — `ast.dump()` comparison failed on Python 3.12+ because `ast.Name` requires `ctx=Load()`. Changed to compare `ret.value.id` directly instead of full AST dump.
+- **Tests added**: 18 new tests (total 533, up from 514):
+  - `test_config_update_summary_max_input_chars_default_is_1000`: verifies config default
+  - `test_template_update_summary_max_input_chars_default_is_1000`: verifies SAM template default
+  - `test_env_example_update_summary_max_input_chars_is_1000`: verifies `.env.example` value
+  - `test_strips_проще_говоря_intro`: verifies "Проще говоря" stripped from summary start
+  - `test_strips_проще_говоря_outro`: verifies "Проще говоря" stripped from summary end
+  - `test_strips_иными_словами_intro`: verifies "Иными словами" stripped from summary start
+  - `test_strips_иными_словами_outro`: verifies "Иными словами" stripped from summary end
+  - `test_strips_иначе_говоря_intro`: verifies "Иначе говоря" stripped from summary start
+  - `test_strips_кстати_intro`: verifies "Кстати" stripped from summary start
+  - `test_strips_кстати_outro`: verifies "Кстати" stripped from summary end
+  - `test_strips_по_сути_intro`: verifies "По сути" stripped from summary start
+  - `test_preserves_по_сути_in_body`: verifies "по сути" in body preserved
+  - `test_strips_впрочем_intro`: verifies "Впрочем" stripped from summary start
+  - `test_strips_помимо_прочего_intro`: verifies "Помимо прочего" stripped from summary start
+  - `test_template_dashboard_contains_cost_by_call_type_widget`: verifies "Cost by Call Type" in template
+  - `test_template_dashboard_cost_widget_has_call_type_nlp`: verifies nlp CallType in widget
+  - `test_template_dashboard_cost_widget_has_call_type_coverage`: verifies coverage CallType in widget
+  - `test_template_dashboard_cost_widget_has_call_type_summary`: verifies summary/update CallTypes in widget
+  - `test_template_dashboard_cost_widget_uses_estimated_cost`: verifies EstimatedCostUSD in widget
+- Updated `test_config_update_summary_max_input_chars_default` — now asserts `1000` (was `2000`).
+- Fixed `test_dedup_covered_messages_return_type_is_tuple` — uses `ret.value.id` comparison instead of `ast.dump()`.
+- All 533 tests pass without errors.
 
 ## Completed in 2026-07-03 round (NLP cost optimization, CallType EMF dimension, CbFiltered metric)
 

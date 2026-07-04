@@ -144,7 +144,7 @@ Parameters:
   UpdateSummaryMaxInputChars:
     Type: String
     Description: Max chars of summary content sent to update LLM call
-    Default: "2000"
+    Default: "1000"
   
   UpdateMatchMaxSummaries:
     Type: String
@@ -763,6 +763,24 @@ Resources:
                 "region": "${AWS::Region}",
                 "title": "NLP Filter (Group)",
                 "yAxis": { "left": { "label": "messages" } }
+              },
+              "width": 12, "height": 6
+            },
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
+                  ["tg_summarizer/OpenAI", "EstimatedCostUSD", "Function", "${SummarizerFunction}", "Model", "*", "CallType", "nlp"],
+                  ["tg_summarizer/OpenAI", "EstimatedCostUSD", "Function", "${SummarizerFunction}", "Model", "*", "CallType", "coverage"],
+                  ["tg_summarizer/OpenAI", "EstimatedCostUSD", "Function", "${SummarizerFunction}", "Model", "*", "CallType", "channel_summary"],
+                  ["tg_summarizer/OpenAI", "EstimatedCostUSD", "Function", "${SummarizerFunction}", "Model", "*", "CallType", "group_summary"],
+                  ["tg_summarizer/OpenAI", "EstimatedCostUSD", "Function", "${SummarizerFunction}", "Model", "*", "CallType", "update"]
+                ],
+                "period": 300,
+                "stat": "Sum",
+                "region": "${AWS::Region}",
+                "title": "Cost by Call Type",
+                "yAxis": { "left": { "label": "USD" } }
               },
               "width": 12, "height": 6
             }

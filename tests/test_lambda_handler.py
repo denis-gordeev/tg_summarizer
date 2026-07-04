@@ -1316,5 +1316,65 @@ class NlpCbFilteredMetricTests(unittest.TestCase):
         self.assertIn("CbFiltered", content)
 
 
+class UpdateSummaryMaxInputCharsDefaultTests(unittest.TestCase):
+    """Tests for UPDATE_SUMMARY_MAX_INPUT_CHARS default value change to 1000."""
+
+    def test_config_update_summary_max_input_chars_default_is_1000(self):
+        with open("config.py") as f:
+            source = f.read()
+        self.assertIn('UPDATE_SUMMARY_MAX_INPUT_CHARS", 1000', source)
+
+    def test_template_update_summary_max_input_chars_default_is_1000(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        param_idx = content.index("  UpdateSummaryMaxInputChars:")
+        param_section = content[param_idx:param_idx + 300]
+        self.assertIn('"1000"', param_section)
+
+    def test_env_example_update_summary_max_input_chars_is_1000(self):
+        with open(".env.example") as f:
+            content = f.read()
+        self.assertIn("UPDATE_SUMMARY_MAX_INPUT_CHARS=1000", content)
+
+
+class DashboardCostByCallTypeWidgetTests(unittest.TestCase):
+    """Tests for per-call-type cost breakdown dashboard widget."""
+
+    def test_template_dashboard_contains_cost_by_call_type_widget(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        self.assertIn("Cost by Call Type", content)
+
+    def test_template_dashboard_cost_widget_has_call_type_nlp(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        widget_idx = content.index("Cost by Call Type")
+        widget_section = content[max(0, widget_idx - 3000):widget_idx + 300]
+        self.assertIn('"nlp"', widget_section)
+
+    def test_template_dashboard_cost_widget_has_call_type_coverage(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        widget_idx = content.index("Cost by Call Type")
+        widget_section = content[max(0, widget_idx - 3000):widget_idx + 300]
+        self.assertIn('"coverage"', widget_section)
+
+    def test_template_dashboard_cost_widget_has_call_type_summary(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        widget_idx = content.index("Cost by Call Type")
+        widget_section = content[max(0, widget_idx - 3000):widget_idx + 300]
+        self.assertIn('"channel_summary"', widget_section)
+        self.assertIn('"group_summary"', widget_section)
+        self.assertIn('"update"', widget_section)
+
+    def test_template_dashboard_cost_widget_uses_estimated_cost(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        widget_idx = content.index("Cost by Call Type")
+        widget_section = content[max(0, widget_idx - 3000):widget_idx + 300]
+        self.assertIn("EstimatedCostUSD", widget_section)
+
+
 if __name__ == "__main__":
     unittest.main()

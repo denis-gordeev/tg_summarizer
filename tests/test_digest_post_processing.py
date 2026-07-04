@@ -1432,6 +1432,76 @@ class NewMetaArtifactTests(unittest.TestCase):
         result = utils.strip_meta_artifacts(text)
         self.assertIn("рассмотрим", result.lower())
 
+    def test_strips_проще_говоря_intro(self):
+        utils = self._import_utils()
+        text = "Проще говоря, модель работает лучше\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Проще говоря", result)
+        self.assertIn("<b>AI</b>", result)
+
+    def test_strips_проще_говоря_outro(self):
+        utils = self._import_utils()
+        text = "<b>AI</b>\nПроще говоря, это улучшение"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Проще говоря", result)
+
+    def test_strips_иными_словами_intro(self):
+        utils = self._import_utils()
+        text = "Иными словами, архитектура изменилась\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Иными словами", result)
+
+    def test_strips_иными_словами_outro(self):
+        utils = self._import_utils()
+        text = "<b>AI</b>\nИными словами, результат тот же"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Иными словами", result)
+
+    def test_strips_иначе_говоря_intro(self):
+        utils = self._import_utils()
+        text = "Иначе говоря, подход другой\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Иначе говоря", result)
+
+    def test_strips_кстати_intro(self):
+        utils = self._import_utils()
+        text = "Кстати, вышла новая модель\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Кстати", result)
+        self.assertIn("<b>AI</b>", result)
+
+    def test_strips_кстати_outro(self):
+        utils = self._import_utils()
+        text = "<b>AI</b>\nКстати, модель обновлена"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Кстати", result)
+
+    def test_strips_по_сути_intro(self):
+        utils = self._import_utils()
+        text = "По сути, это тот же подход\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("По сути", result)
+        self.assertIn("<b>AI</b>", result)
+
+    def test_preserves_по_сути_in_body(self):
+        utils = self._import_utils()
+        text = "<b>AI</b>\nМодель по сути использует attention [1]"
+        result = utils.strip_meta_artifacts(text)
+        self.assertIn("по сути", result.lower())
+
+    def test_strips_впрочем_intro(self):
+        utils = self._import_utils()
+        text = "Впрочем, это не важно\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Впрочем", result)
+
+    def test_strips_помимо_прочего_intro(self):
+        utils = self._import_utils()
+        text = "Помимо прочего, вышла GPT-5\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Помимо прочего", result)
+        self.assertIn("<b>AI</b>", result)
+
 
 class PromptCompactnessTests(unittest.TestCase):
     """Tests that prompt rules are merged and compact."""
