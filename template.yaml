@@ -499,6 +499,25 @@ Resources:
           Value: !Ref SummarizerFunction
       TreatMissingData: notBreaching
 
+  NlpCheckCostAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-nlp-check-cost"
+      AlarmDescription: "Alarm for high NLP check estimated cost (EMF metric EstimatedCostUSD with CallType=nlp, 24h sum)"
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 1
+      Threshold: 0.05
+      MetricName: EstimatedCostUSD
+      Namespace: tg_summarizer/OpenAI
+      Period: 86400
+      Statistic: Sum
+      Dimensions:
+        - Name: Function
+          Value: !Ref SummarizerFunction
+        - Name: CallType
+          Value: nlp
+      TreatMissingData: notBreaching
+
   S3UploadFailuresAlarm:
     Type: AWS::CloudWatch::Alarm
     Condition: HasStateBucket

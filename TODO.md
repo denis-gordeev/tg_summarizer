@@ -7,7 +7,39 @@
 - Consider evaluating gpt-4.1-nano vs gpt-4o-mini quality tradeoff with A/B testing
 - Consider tuning warmup schedule frequency for cost-effectiveness
 - Consider adding Lambda provisioned concurrency for more predictable cold starts
-- Consider adding per-call-type cost alarm (e.g. if nlp_check cost exceeds threshold)
+- Consider adding per-call-type cost alarm for summary/update calls (currently only NLP check has one)
+
+## Completed in 2026-07-05 round (prompt compaction, meta-artifacts expansion, NLP cost alarm)
+
+- **Cost optimization — compact CHANNEL_SUMMARY_PROMPT and GROUP_SUMMARY_PROMPT**: Replaced verbose prompt rules with compact equivalents in [`prompts.py`](prompts.py): "Структура: группируй по темам, указывай [1], [2]; при совпадении темы — все номера.\nОбъединяй близкие подтемы под один заголовок." → "Группируй по темам с [1], [2]; совпадающие темы — все номера. Близкие подтемы — под один заголовок.", "Без нумерованных и маркированных списков — только сплошной текст с абзацами" → "Без списков — сплошной текст с абзацами", "Без подзаголовков внутри раздела — один заголовок на тему" → "Один заголовок на тему, без подзаголовков", "Только HTML: <b>текст</b>, не Markdown" → "HTML: <b>текст</b>, не Markdown", "Только номера источников [1], [2], без собственных ссылок" → "Источники: [1], [2], без своих ссылок", "Максимум {max_summary_length} символов" → "≤{max_summary_length} символов". Saves ~22 input tokens per channel/group summary call.
+- **Cost optimization — compact UPDATE_SUMMARY_PROMPT**: Merged first two lines of [`UPDATE_SUMMARY_PROMPT`](prompts.py): "Вставь ссылку {new_link} в подходящее место саммари.\nСкопируй саммари, вставь ссылку рядом с релевантным абзацем. Остальное не меняй." → "Вставь {new_link} в подходящее место саммари рядом с релевантным абзацем. Остальное не меняй." Removed "Сохрани HTML-форматирование: <b>, <a href>, теги и сущности." → "Сохрани HTML-форматирование." Saves ~10 input tokens per update call.
+- **Quality — expanded `strip_meta_artifacts`**: Added "кроме того", "более того" to both intro and outro patterns in [`_META_ARTIFACT_PATTERNS`](utils.py). Added "помимо этого", "что касается", "переходя к" to [`_META_ARTIFACT_INTRO_ONLY`](utils.py) — these are transition/filler phrases at the start of summaries but can appear legitimately in body text.
+- **Observability — NLP check cost alarm**: Added `NlpCheckCostAlarm` in [`template.yaml`](template.yaml) — alerts when `EstimatedCostUSD` (Sum, 24h) with `CallType=nlp` dimension exceeds $0.05, enabling detection of runaway NLP check costs. Directly addresses the TODO item "Consider adding per-call-type cost alarm (e.g. if nlp_check cost exceeds threshold)".
+- **Tests added**: 21 new tests (total 554, up from 533):
+  - `test_strips_кроме_того_intro`: verifies "Кроме того" stripped from summary start
+  - `test_strips_кроме_того_outro`: verifies "Кроме того" stripped from summary end
+  - `test_strips_более_того_intro`: verifies "Более того" stripped from summary start
+  - `test_strips_более_того_outro`: verifies "Более того" stripped from summary end
+  - `test_strips_помимо_этого_intro`: verifies "Помимо этого" stripped from summary start
+  - `test_strips_что_касается_intro`: verifies "Что касается" stripped from summary start
+  - `test_strips_переходя_к_intro`: verifies "Переходя к" stripped from summary start
+  - `test_channel_prompt_has_compact_structure_instruction`: verifies compact structure wording
+  - `test_channel_prompt_has_compact_list_rule`: verifies "Без списков" compact rule
+  - `test_channel_prompt_has_compact_subheading_rule`: verifies compact subheading rule
+  - `test_channel_prompt_has_compact_html_rule`: verifies "HTML:" compact rule
+  - `test_channel_prompt_has_compact_source_rule`: verifies "Источники:" compact rule
+  - `test_channel_prompt_has_compact_length_rule`: verifies "≤" compact length rule
+  - `test_group_prompt_has_compact_structure_instruction`: verifies group prompt compact structure
+  - `test_update_prompt_is_compact_merged`: verifies merged first two lines
+  - `test_update_prompt_still_has_html_preservation`: verifies HTML instruction retained
+  - `test_update_prompt_still_has_fallback_instruction`: verifies fallback instruction retained
+  - `test_template_contains_nlp_check_cost_alarm`: verifies `NlpCheckCostAlarm` in template
+  - `test_nlp_check_cost_alarm_uses_estimated_cost_metric`: verifies `EstimatedCostUSD` metric
+  - `test_nlp_check_cost_alarm_has_call_type_nlp_dimension`: verifies `CallType=nlp` dimension
+  - `test_nlp_check_cost_alarm_period_is_86400`: verifies 24-hour period
+- Updated `test_channel_summary_prompt_prohibits_lists` — now asserts compact wording.
+- Updated `test_channel_summary_prompt_prohibits_subheaders` — now asserts compact wording.
+- All 554 tests pass without errors.
 
 ## Completed in 2026-07-04 round (UPDATE_SUMMARY cost optimization, meta-artifacts expansion, cost-by-call-type widget, AST test fix)
 

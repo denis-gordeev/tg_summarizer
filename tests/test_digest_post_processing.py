@@ -808,13 +808,13 @@ class PromptAntiListTests(unittest.TestCase):
 
         with open("prompts.py") as f:
             source = f.read()
-        self.assertIn("Без нумерованных и маркированных списков", source)
+        self.assertIn("Без списков — сплошной текст с абзацами", source)
 
     def test_channel_summary_prompt_prohibits_subheaders(self):
         """CHANNEL_SUMMARY_PROMPT should contain anti-subheader rule."""
         with open("prompts.py") as f:
             source = f.read()
-        self.assertIn("Без подзаголовков внутри раздела", source)
+        self.assertIn("Один заголовок на тему, без подзаголовков", source)
 
 
 class PromptBrevityTests(unittest.TestCase):
@@ -1502,6 +1502,53 @@ class NewMetaArtifactTests(unittest.TestCase):
         self.assertNotIn("Помимо прочего", result)
         self.assertIn("<b>AI</b>", result)
 
+    def test_strips_кроме_того_intro(self):
+        utils = self._import_utils()
+        text = "Кроме того, модель обновлена\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Кроме того", result)
+        self.assertIn("<b>AI</b>", result)
+
+    def test_strips_кроме_того_outro(self):
+        utils = self._import_utils()
+        text = "<b>AI</b>\nКроме того, модель обновлена"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Кроме того", result)
+
+    def test_strips_более_того_intro(self):
+        utils = self._import_utils()
+        text = "Более того, результаты улучшились\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Более того", result)
+        self.assertIn("<b>AI</b>", result)
+
+    def test_strips_более_того_outro(self):
+        utils = self._import_utils()
+        text = "<b>AI</b>\nБолее того, результаты улучшились"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Более того", result)
+
+    def test_strips_помимо_этого_intro(self):
+        utils = self._import_utils()
+        text = "Помимо этого, вышла GPT-5\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Помимо этого", result)
+        self.assertIn("<b>AI</b>", result)
+
+    def test_strips_что_касается_intro(self):
+        utils = self._import_utils()
+        text = "Что касается архитектуры, она изменилась\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Что касается", result)
+        self.assertIn("<b>AI</b>", result)
+
+    def test_strips_переходя_к_intro(self):
+        utils = self._import_utils()
+        text = "Переходя к результатам, модель лучше\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Переходя к", result)
+        self.assertIn("<b>AI</b>", result)
+
 
 class PromptCompactnessTests(unittest.TestCase):
     """Tests that prompt rules are merged and compact."""
@@ -1542,6 +1589,63 @@ class PromptCompactnessTests(unittest.TestCase):
         self.assertNotIn('"CHANNEL_SUMMARY_PROMPT": """\n', source)
         self.assertNotIn('"GROUP_SUMMARY_PROMPT": """\n', source)
 
+    def test_channel_prompt_has_compact_structure_instruction(self):
+        with open("prompts.py") as f:
+            source = f.read()
+        self.assertIn("Группируй по темам с [1], [2]", source)
+        self.assertNotIn("Структура: группируй по темам, указывай", source)
+
+    def test_channel_prompt_has_compact_list_rule(self):
+        with open("prompts.py") as f:
+            source = f.read()
+        self.assertIn("Без списков — сплошной текст с абзацами", source)
+        self.assertNotIn("Без нумерованных и маркированных списков", source)
+
+    def test_channel_prompt_has_compact_subheading_rule(self):
+        with open("prompts.py") as f:
+            source = f.read()
+        self.assertIn("Один заголовок на тему, без подзаголовков", source)
+        self.assertNotIn("Без подзаголовков внутри раздела", source)
+
+    def test_channel_prompt_has_compact_html_rule(self):
+        with open("prompts.py") as f:
+            source = f.read()
+        self.assertIn("HTML: <b>текст</b>, не Markdown", source)
+        self.assertNotIn("Только HTML:", source)
+
+    def test_channel_prompt_has_compact_source_rule(self):
+        with open("prompts.py") as f:
+            source = f.read()
+        self.assertIn("Источники: [1], [2], без своих ссылок", source)
+        self.assertNotIn("Только номера источников", source)
+
+    def test_channel_prompt_has_compact_length_rule(self):
+        with open("prompts.py") as f:
+            source = f.read()
+        self.assertIn("≤{max_summary_length} символов", source)
+        self.assertNotIn("Максимум {max_summary_length} символов", source)
+
+    def test_group_prompt_has_compact_structure_instruction(self):
+        with open("prompts.py") as f:
+            source = f.read()
+        self.assertIn("Группируй по темам с [1], [2]", source)
+
+    def test_update_prompt_is_compact_merged(self):
+        with open("prompts.py") as f:
+            source = f.read()
+        self.assertIn("Вставь {new_link} в подходящее место саммари рядом с релевантным абзацем", source)
+        self.assertNotIn("Скопируй саммари, вставь ссылку", source)
+
+    def test_update_prompt_still_has_html_preservation(self):
+        with open("prompts.py") as f:
+            source = f.read()
+        self.assertIn("Сохрани HTML-форматирование", source)
+
+    def test_update_prompt_still_has_fallback_instruction(self):
+        with open("prompts.py") as f:
+            source = f.read()
+        self.assertIn("Доп. источники:", source)
+
 
 class EmitEmfDebugLogTests(unittest.TestCase):
     """Tests that _emit_emf logs debug on exception."""
@@ -1578,6 +1682,34 @@ class CircuitBreakerAlarmTests(unittest.TestCase):
         with open("template.yaml") as f:
             content = f.read()
         self.assertIn("Circuit Breaker State", content)
+
+
+class NlpCheckCostAlarmTests(unittest.TestCase):
+    """Tests for NLP check cost alarm in template."""
+
+    def test_template_contains_nlp_check_cost_alarm(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        self.assertIn("NlpCheckCostAlarm", content)
+
+    def test_nlp_check_cost_alarm_uses_estimated_cost_metric(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        alarm_section = content[content.index("NlpCheckCostAlarm"):]
+        self.assertIn("EstimatedCostUSD", alarm_section[:500])
+
+    def test_nlp_check_cost_alarm_has_call_type_nlp_dimension(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        alarm_section = content[content.index("NlpCheckCostAlarm"):]
+        self.assertIn("CallType", alarm_section[:1000])
+        self.assertIn("Value: nlp", alarm_section[:1000])
+
+    def test_nlp_check_cost_alarm_period_is_86400(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        alarm_section = content[content.index("NlpCheckCostAlarm"):]
+        self.assertIn("Period: 86400", alarm_section[:1000])
 
 
 if __name__ == "__main__":
