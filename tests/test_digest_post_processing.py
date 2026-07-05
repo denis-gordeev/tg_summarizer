@@ -1549,6 +1549,71 @@ class NewMetaArtifactTests(unittest.TestCase):
         self.assertNotIn("Переходя к", result)
         self.assertIn("<b>AI</b>", result)
 
+    def test_strips_в_связи_с_этим_intro(self):
+        utils = self._import_utils()
+        text = "В связи с этим, модель обновлена\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("В связи с этим", result)
+        self.assertIn("<b>AI</b>", result)
+
+    def test_strips_что_важно_intro(self):
+        utils = self._import_utils()
+        text = "Что важно, модель быстрее\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Что важно", result)
+        self.assertIn("<b>AI</b>", result)
+
+    def test_strips_стоит_понимать_intro(self):
+        utils = self._import_utils()
+        text = "Стоит понимать, что архитектура другая\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Стоит понимать", result)
+        self.assertIn("<b>AI</b>", result)
+
+    def test_strips_как_известно_intro(self):
+        utils = self._import_utils()
+        text = "Как известно, GPT-5 вышел\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Как известно", result)
+        self.assertIn("<b>AI</b>", result)
+
+    def test_strips_естественно_intro(self):
+        utils = self._import_utils()
+        text = "Естественно, результаты улучшились\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Естественно", result)
+        self.assertIn("<b>AI</b>", result)
+
+    def test_strips_разумеется_outro(self):
+        utils = self._import_utils()
+        text = "<b>AI</b>\nРазумеется, модель лучше"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Разумеется", result)
+
+    def test_strips_само_собой_outro(self):
+        utils = self._import_utils()
+        text = "<b>AI</b>\nСамо собой, результат ожидаемый"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Само собой", result)
+
+    def test_strips_понятно_outro(self):
+        utils = self._import_utils()
+        text = "<b>AI</b>\nПонятно, что модель лучше"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Понятно", result)
+
+    def test_preserves_естественно_in_body(self):
+        utils = self._import_utils()
+        text = "<b>AI</b>\nМодель естественно обрабатывает текст"
+        result = utils.strip_meta_artifacts(text)
+        self.assertIn("естественно", result.lower())
+
+    def test_preserves_как_известно_in_body(self):
+        utils = self._import_utils()
+        text = "<b>AI</b>\nМодели как известно давно существуют"
+        result = utils.strip_meta_artifacts(text)
+        self.assertIn("как известно", result.lower())
+
 
 class PromptCompactnessTests(unittest.TestCase):
     """Tests that prompt rules are merged and compact."""
@@ -1709,6 +1774,73 @@ class NlpCheckCostAlarmTests(unittest.TestCase):
         with open("template.yaml") as f:
             content = f.read()
         alarm_section = content[content.index("NlpCheckCostAlarm"):]
+        self.assertIn("Period: 86400", alarm_section[:1000])
+
+
+class SummaryCostAlarmTests(unittest.TestCase):
+    """Tests for summary generation cost alarm in template."""
+
+    def test_template_contains_summary_cost_alarm(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        self.assertIn("SummaryCostAlarm", content)
+
+    def test_summary_cost_alarm_uses_estimated_cost_metric(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        alarm_section = content[content.index("SummaryCostAlarm"):]
+        self.assertIn("EstimatedCostUSD", alarm_section[:2000])
+
+    def test_summary_cost_alarm_includes_channel_summary(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        alarm_section = content[content.index("SummaryCostAlarm"):]
+        self.assertIn("channel_summary", alarm_section[:2000])
+
+    def test_summary_cost_alarm_includes_group_summary(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        alarm_section = content[content.index("SummaryCostAlarm"):]
+        self.assertIn("group_summary", alarm_section[:2000])
+
+    def test_summary_cost_alarm_uses_metric_math(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        alarm_section = content[content.index("SummaryCostAlarm"):]
+        self.assertIn("m1 + m2", alarm_section[:2000])
+
+    def test_summary_cost_alarm_period_is_86400(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        alarm_section = content[content.index("SummaryCostAlarm"):]
+        self.assertIn("Period: 86400", alarm_section[:2000])
+
+
+class UpdateCostAlarmTests(unittest.TestCase):
+    """Tests for summary update cost alarm in template."""
+
+    def test_template_contains_update_cost_alarm(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        self.assertIn("UpdateCostAlarm", content)
+
+    def test_update_cost_alarm_uses_estimated_cost_metric(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        alarm_section = content[content.index("UpdateCostAlarm"):]
+        self.assertIn("EstimatedCostUSD", alarm_section[:500])
+
+    def test_update_cost_alarm_has_call_type_update_dimension(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        alarm_section = content[content.index("UpdateCostAlarm"):]
+        self.assertIn("CallType", alarm_section[:1000])
+        self.assertIn("Value: update", alarm_section[:1000])
+
+    def test_update_cost_alarm_period_is_86400(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        alarm_section = content[content.index("UpdateCostAlarm"):]
         self.assertIn("Period: 86400", alarm_section[:1000])
 
 

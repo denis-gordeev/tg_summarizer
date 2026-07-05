@@ -518,6 +518,66 @@ Resources:
           Value: nlp
       TreatMissingData: notBreaching
 
+  SummaryCostAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-summary-cost"
+      AlarmDescription: "Alarm for high summary generation estimated cost (channel_summary + group_summary, 24h sum)"
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 1
+      Threshold: 0.50
+      Metrics:
+        - Id: m1
+          MetricStat:
+            Metric:
+              Namespace: tg_summarizer/OpenAI
+              MetricName: EstimatedCostUSD
+              Dimensions:
+                - Name: Function
+                  Value: !Ref SummarizerFunction
+                - Name: CallType
+                  Value: channel_summary
+            Period: 86400
+            Stat: Sum
+          ReturnData: false
+        - Id: m2
+          MetricStat:
+            Metric:
+              Namespace: tg_summarizer/OpenAI
+              MetricName: EstimatedCostUSD
+              Dimensions:
+                - Name: Function
+                  Value: !Ref SummarizerFunction
+                - Name: CallType
+                  Value: group_summary
+            Period: 86400
+            Stat: Sum
+          ReturnData: false
+        - Id: e1
+          Expression: "m1 + m2"
+          Label: "Summary Cost (24h)"
+          ReturnData: true
+      TreatMissingData: notBreaching
+
+  UpdateCostAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-update-cost"
+      AlarmDescription: "Alarm for high summary update estimated cost (EMF metric EstimatedCostUSD with CallType=update, 24h sum)"
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 1
+      Threshold: 0.10
+      MetricName: EstimatedCostUSD
+      Namespace: tg_summarizer/OpenAI
+      Period: 86400
+      Statistic: Sum
+      Dimensions:
+        - Name: Function
+          Value: !Ref SummarizerFunction
+        - Name: CallType
+          Value: update
+      TreatMissingData: notBreaching
+
   S3UploadFailuresAlarm:
     Type: AWS::CloudWatch::Alarm
     Condition: HasStateBucket

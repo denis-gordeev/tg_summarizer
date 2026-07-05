@@ -7,7 +7,34 @@
 - Consider evaluating gpt-4.1-nano vs gpt-4o-mini quality tradeoff with A/B testing
 - Consider tuning warmup schedule frequency for cost-effectiveness
 - Consider adding Lambda provisioned concurrency for more predictable cold starts
-- Consider adding per-call-type cost alarm for summary/update calls (currently only NLP check has one)
+
+## Completed in 2026-07-05 round 2 (per-call-type cost alarms, meta-artifacts expansion)
+
+- **Observability — per-call-type cost alarm for summary generation**: Added `SummaryCostAlarm` in [`template.yaml`](template.yaml) — uses CloudWatch Metric Math (`m1 + m2`) to sum `EstimatedCostUSD` for `CallType=channel_summary` and `CallType=group_summary` over 24 hours. Alerts when combined summary generation cost exceeds $0.50/day. Uses CloudWatch Metric Math expression `m1 + m2` because summary generation spans two call types (channel + group). Directly addresses the TODO item "Consider adding per-call-type cost alarm for summary/update calls (currently only NLP check has one)".
+- **Observability — per-call-type cost alarm for summary updates**: Added `UpdateCostAlarm` in [`template.yaml`](template.yaml) — alerts when `EstimatedCostUSD` (Sum, 24h) with `CallType=update` dimension exceeds $0.10. Complements the existing `NlpCheckCostAlarm` and new `SummaryCostAlarm`, completing per-call-type cost alarm coverage for all significant OpenAI call types. Directly addresses the TODO item "Consider adding per-call-type cost alarm for summary/update calls (currently only NLP check has one)".
+- **Quality — expanded `strip_meta_artifacts`**: Added "разумеется", "само собой", "понятно" to both intro and outro patterns in [`_META_ARTIFACT_PATTERNS`](utils.py). Added "в связи с этим", "что важно", "стоит понимать", "как известно", "естественно" to [`_META_ARTIFACT_INTRO_ONLY`](utils.py) — these are filler/hedging phrases at the start of summaries but can appear legitimately in body text (e.g., "Модель естественно обрабатывает текст", "Модели как известно давно существуют").
+- **Tests added**: 20 new tests (total 574, up from 554):
+  - `test_strips_в_связи_с_этим_intro`: verifies "В связи с этим" stripped from summary start
+  - `test_strips_что_важно_intro`: verifies "Что важно" stripped from summary start
+  - `test_strips_стоит_понимать_intro`: verifies "Стоит понимать" stripped from summary start
+  - `test_strips_как_известно_intro`: verifies "Как известно" stripped from summary start
+  - `test_strips_естественно_intro`: verifies "Естественно" stripped from summary start
+  - `test_strips_разумеется_outro`: verifies "Разумеется" stripped from summary end
+  - `test_strips_само_собой_outro`: verifies "Само собой" stripped from summary end
+  - `test_strips_понятно_outro`: verifies "Понятно" stripped from summary end
+  - `test_preserves_естественно_in_body`: verifies "естественно" in body preserved
+  - `test_preserves_как_известно_in_body`: verifies "как известно" in body preserved
+  - `test_template_contains_summary_cost_alarm`: verifies `SummaryCostAlarm` in template
+  - `test_summary_cost_alarm_uses_estimated_cost_metric`: verifies `EstimatedCostUSD` in alarm
+  - `test_summary_cost_alarm_includes_channel_summary`: verifies `channel_summary` CallType
+  - `test_summary_cost_alarm_includes_group_summary`: verifies `group_summary` CallType
+  - `test_summary_cost_alarm_uses_metric_math`: verifies `m1 + m2` expression
+  - `test_summary_cost_alarm_period_is_86400`: verifies 24-hour period
+  - `test_template_contains_update_cost_alarm`: verifies `UpdateCostAlarm` in template
+  - `test_update_cost_alarm_uses_estimated_cost_metric`: verifies `EstimatedCostUSD` in alarm
+  - `test_update_cost_alarm_has_call_type_update_dimension`: verifies `CallType=update` dimension
+  - `test_update_cost_alarm_period_is_86400`: verifies 24-hour period
+- All 574 tests pass without errors.
 
 ## Completed in 2026-07-05 round (prompt compaction, meta-artifacts expansion, NLP cost alarm)
 
