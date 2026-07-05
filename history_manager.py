@@ -139,7 +139,7 @@ async def _restore_summaries_from_channel(
         async for msg in tg.user_client.iter_messages(
             TARGET_CHANNEL, offset_date=None, min_id=0, reverse=False
         ):
-            if msg.date < since:
+            if msg.date is None or msg.date < since:
                 break
             logger.debug("Processing message: id=%d, date=%s", msg.id, msg.date)
             if msg.text and msg.text.strip():

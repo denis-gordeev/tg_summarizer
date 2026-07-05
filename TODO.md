@@ -8,6 +8,34 @@
 - Consider tuning warmup schedule frequency for cost-effectiveness
 - Consider adding Lambda provisioned concurrency for more predictable cold starts
 
+## Completed in 2026-07-05 round 3 (meta-artifacts expansion, None-date guard, coverage prompt compaction)
+
+- **Quality — expanded `strip_meta_artifacts`**: Added "одним словом", "в общем и целом", "к слову сказать" to both intro and outro patterns in [`_META_ARTIFACT_PATTERNS`](utils.py). Added "строго говоря", "честно говоря", "откровенно говоря", "по существу", "в сущности" to [`_META_ARTIFACT_INTRO_ONLY`](utils.py) — these are hedging/meta-structural phrases at the start of summaries but can appear legitimately in body text (e.g., "Модель строго говоря не является новой", "Метод по существу делает следующее").
+- **Robustness — None-date guard in `_restore_summaries_from_channel`**: Added `msg.date is None` check before `msg.date < since` in [`_restore_summaries_from_channel()`](history_manager.py). Telethon can return messages with `None` date in edge cases (e.g., service messages), which would crash on `msg.date < since` with `TypeError`. Already guarded in [`_fetch_from_sources()`](telegram_client.py); now also guarded in the restore path.
+- **Cost optimization — compact COVERAGE_AND_MATCH_PROMPT**: Condensed from 4-line verbose format to compact single-line format in [`prompts.py`](prompts.py): "Сравни ТЕМУ нового сообщения с дайджестами.\n- Та же тема → номер дайджеста\n- Новая тема или существенные новые детали → "НЕТ"\n- Разные модели/версии = разные темы\nОтветь только номером или "НЕТ"." → "Сравни тему сообщения с дайджестами. Та же тема → номер, новая/детали → "НЕТ", разные модели = разные темы. Ответь: номер или "НЕТ"." Saves ~15 input tokens per coverage check call.
+- **Tests added**: 20 new tests (total 594, up from 574):
+  - `test_strips_одним_словом_intro`: verifies "Одним словом" stripped from summary start
+  - `test_strips_одним_словом_outro`: verifies "Одним словом" stripped from summary end
+  - `test_strips_в_общем_и_целом_intro`: verifies "В общем и целом" stripped from summary start
+  - `test_strips_в_общем_и_целом_outro`: verifies "В общем и целом" stripped from summary end
+  - `test_strips_к_слову_сказать_intro`: verifies "К слову сказать" stripped from summary start
+  - `test_strips_к_слову_сказать_outro`: verifies "К слову сказать" stripped from summary end
+  - `test_strips_строго_говоря_intro`: verifies "Строго говоря" stripped from summary start
+  - `test_strips_честно_говоря_intro`: verifies "Честно говоря" stripped from summary start
+  - `test_strips_откровенно_говоря_intro`: verifies "Откровенно говоря" stripped from summary start
+  - `test_strips_по_существу_intro`: verifies "По существу" stripped from summary start
+  - `test_strips_в_сущности_intro`: verifies "В сущности" stripped from summary start
+  - `test_preserves_строго_говоря_in_body`: verifies "строго говоря" in body preserved
+  - `test_preserves_честно_говоря_in_body`: verifies "честно говоря" in body preserved
+  - `test_preserves_по_существу_in_body`: verifies "по существу" in body preserved
+  - `test_preserves_в_сущности_in_body`: verifies "в сущности" in body preserved
+  - `test_coverage_prompt_is_compact`: verifies compact format in prompts.py
+  - `test_coverage_prompt_no_verbose_bullets`: verifies old verbose bullets removed
+  - `test_coverage_prompt_has_model_rule`: verifies "разные модели = разные темы" retained
+  - `test_coverage_prompt_still_has_response_instruction`: verifies "Ответь: номер или НЕТ" retained
+  - `test_restore_guards_none_date`: verifies `msg.date is None` guard in history_manager.py
+- All 594 tests pass without errors.
+
 ## Completed in 2026-07-05 round 2 (per-call-type cost alarms, meta-artifacts expansion)
 
 - **Observability — per-call-type cost alarm for summary generation**: Added `SummaryCostAlarm` in [`template.yaml`](template.yaml) — uses CloudWatch Metric Math (`m1 + m2`) to sum `EstimatedCostUSD` for `CallType=channel_summary` and `CallType=group_summary` over 24 hours. Alerts when combined summary generation cost exceeds $0.50/day. Uses CloudWatch Metric Math expression `m1 + m2` because summary generation spans two call types (channel + group). Directly addresses the TODO item "Consider adding per-call-type cost alarm for summary/update calls (currently only NLP check has one)".

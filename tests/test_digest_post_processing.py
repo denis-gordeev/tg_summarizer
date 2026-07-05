@@ -1614,6 +1614,96 @@ class NewMetaArtifactTests(unittest.TestCase):
         result = utils.strip_meta_artifacts(text)
         self.assertIn("как известно", result.lower())
 
+    def test_strips_одним_словом_intro(self):
+        utils = self._import_utils()
+        text = "Одним словом, модель обновлена\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Одним словом", result)
+
+    def test_strips_одним_словом_outro(self):
+        utils = self._import_utils()
+        text = "<b>AI</b>\nОдним словом, всё понятно"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Одним словом", result)
+
+    def test_strips_в_общем_и_целом_intro(self):
+        utils = self._import_utils()
+        text = "В общем и целом, прогресс есть\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("В общем и целом", result)
+
+    def test_strips_в_общем_и_целом_outro(self):
+        utils = self._import_utils()
+        text = "<b>AI</b>\nВ общем и целом, результат положительный"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("В общем и целом", result)
+
+    def test_strips_к_слову_сказать_intro(self):
+        utils = self._import_utils()
+        text = "К слову сказать, модель лучше\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("К слову сказать", result)
+
+    def test_strips_к_слову_сказать_outro(self):
+        utils = self._import_utils()
+        text = "<b>AI</b>\nК слову сказать, это важно"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("К слову сказать", result)
+
+    def test_strips_строго_говоря_intro(self):
+        utils = self._import_utils()
+        text = "Строго говоря, это не совсем так\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Строго говоря", result)
+
+    def test_strips_честно_говоря_intro(self):
+        utils = self._import_utils()
+        text = "Честно говоря, модель не справилась\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Честно говоря", result)
+
+    def test_strips_откровенно_говоря_intro(self):
+        utils = self._import_utils()
+        text = "Откровенно говоря, результат слабый\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Откровенно говоря", result)
+
+    def test_strips_по_существу_intro(self):
+        utils = self._import_utils()
+        text = "По существу, алгоритм работает\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("По существу", result)
+
+    def test_strips_в_сущности_intro(self):
+        utils = self._import_utils()
+        text = "В сущности, метод не нов\n<b>AI</b>"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("В сущности", result)
+
+    def test_preserves_строго_говоря_in_body(self):
+        utils = self._import_utils()
+        text = "<b>AI</b>\nМодель строго говоря не является новой"
+        result = utils.strip_meta_artifacts(text)
+        self.assertIn("строго говоря", result.lower())
+
+    def test_preserves_честно_говоря_in_body(self):
+        utils = self._import_utils()
+        text = "<b>AI</b>\nМодель честно говоря не справилась с задачей"
+        result = utils.strip_meta_artifacts(text)
+        self.assertIn("честно говоря", result.lower())
+
+    def test_preserves_по_существу_in_body(self):
+        utils = self._import_utils()
+        text = "<b>AI</b>\nМетод по существу делает следующее"
+        result = utils.strip_meta_artifacts(text)
+        self.assertIn("по существу", result.lower())
+
+    def test_preserves_в_сущности_in_body(self):
+        utils = self._import_utils()
+        text = "<b>AI</b>\nПодход в сущности эквивалентен"
+        result = utils.strip_meta_artifacts(text)
+        self.assertIn("в сущности", result.lower())
+
 
 class PromptCompactnessTests(unittest.TestCase):
     """Tests that prompt rules are merged and compact."""
@@ -1842,6 +1932,41 @@ class UpdateCostAlarmTests(unittest.TestCase):
             content = f.read()
         alarm_section = content[content.index("UpdateCostAlarm"):]
         self.assertIn("Period: 86400", alarm_section[:1000])
+
+
+class CoveragePromptCompactTests(unittest.TestCase):
+    """Tests for compact COVERAGE_AND_MATCH_PROMPT."""
+
+    def test_coverage_prompt_is_compact(self):
+        with open("prompts.py") as f:
+            source = f.read()
+        self.assertIn("Та же тема → номер", source)
+        self.assertNotIn("Та же тема → номер дайджеста", source)
+
+    def test_coverage_prompt_no_verbose_bullets(self):
+        with open("prompts.py") as f:
+            source = f.read()
+        prompt_section = source[source.index("COVERAGE_AND_MATCH_PROMPT"):]
+        self.assertNotIn("Новая тема или существенные новые детали", prompt_section)
+
+    def test_coverage_prompt_has_model_rule(self):
+        with open("prompts.py") as f:
+            source = f.read()
+        self.assertIn("разные модели = разные темы", source)
+
+    def test_coverage_prompt_still_has_response_instruction(self):
+        with open("prompts.py") as f:
+            source = f.read()
+        self.assertIn('Ответь: номер или "НЕТ"', source)
+
+
+class RestoreNoneDateGuardTests(unittest.TestCase):
+    """Tests for None-date guard in _restore_summaries_from_channel."""
+
+    def test_restore_guards_none_date(self):
+        with open("history_manager.py") as f:
+            source = f.read()
+        self.assertIn("msg.date is None", source)
 
 
 if __name__ == "__main__":
