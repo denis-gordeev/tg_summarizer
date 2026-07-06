@@ -7,6 +7,43 @@
 - Consider evaluating gpt-4.1-nano vs gpt-4o-mini quality tradeoff with A/B testing
 - Consider tuning warmup schedule frequency for cost-effectiveness
 - Consider adding Lambda provisioned concurrency for more predictable cold starts
+- Consider reducing SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE from 3000 to 2000 for cost savings
+- Consider adding CloudWatch alarm on Lambda IteratorAge for DLQ monitoring
+
+## Completed in 2026-07-06 round (UPDATE_SUMMARY_MAX_TOKENS reduction, meta-artifacts expansion)
+
+- **Cost optimization — UPDATE_SUMMARY_MAX_TOKENS reduced from 2000 to 1000**: Changed default in [`config.py`](config.py), [`template.yaml`](template.yaml), and [`.env.example`](.env.example). The update prompt only inserts a link into an existing summary — input is truncated to 1000 chars, so output is ~1050 chars max. 1000 tokens (≈2000 chars) is more than sufficient. At `gpt-4.1-nano` pricing ($0.40/M output), this reduces worst-case update output cost by ~50%. Directly addresses the goal of keeping costs below gpt-4o-mini pricing.
+- **Quality — expanded `strip_meta_artifacts`**: Added "ясное дело", "стало быть", "по большому счёту", "по большому счету", "так или иначе" to both intro and outro patterns in [`_META_ARTIFACT_PATTERNS`](utils.py). Added "между тем", "тем временем", "как правило", "ввиду этого", "в силу этого", "надо сказать", "следует понимать" to [`_META_ARTIFACT_INTRO_ONLY`](utils.py) — these are meta-structural/filler phrases at the start of summaries but can appear legitimately in body text (e.g., "Модель между тем использует attention", "Модели как правило требуют много данных").
+- **Tests added**: 26 new tests (total 620, up from 594):
+  - `test_strips_ясное_дело_intro`: verifies "Ясное дело" stripped from summary start
+  - `test_strips_ясное_дело_outro`: verifies "Ясное дело" stripped from summary end
+  - `test_strips_стало_быть_intro`: verifies "Стало быть" stripped from summary start
+  - `test_strips_стало_быть_outro`: verifies "Стало быть" stripped from summary end
+  - `test_strips_по_большому_счёту_intro`: verifies "По большому счёту" stripped from summary start
+  - `test_strips_по_большому_счёту_outro`: verifies "По большому счёту" stripped from summary end
+  - `test_strips_по_большому_счету_intro`: verifies "По большому счету" stripped (ё/е variant)
+  - `test_strips_так_или_иначе_intro`: verifies "Так или иначе" stripped from summary start
+  - `test_strips_так_или_иначе_outro`: verifies "Так или иначе" stripped from summary end
+  - `test_strips_между_тем_intro`: verifies "Между тем" stripped from summary start
+  - `test_preserves_между_тем_in_body`: verifies "между тем" in body preserved
+  - `test_strips_тем_тем_временем_intro`: verifies "Тем временем" stripped from summary start
+  - `test_preserves_тем_временем_in_body`: verifies "тем временем" in body preserved
+  - `test_strips_как_правило_intro`: verifies "Как правило" stripped from summary start
+  - `test_preserves_как_правило_in_body`: verifies "как правило" in body preserved
+  - `test_strips_надо_сказать_intro`: verifies "Надо сказать" stripped from summary start
+  - `test_preserves_надо_сказать_in_body`: verifies "надо сказать" in body preserved
+  - `test_strips_ввиду_этого_intro`: verifies "Ввиду этого" stripped from summary start
+  - `test_preserves_ввиду_этого_in_body`: verifies "ввиду этого" in body preserved
+  - `test_strips_в_силу_этого_intro`: verifies "В силу этого" stripped from summary start
+  - `test_preserves_в_силу_этого_in_body`: verifies "в силу этого" in body preserved
+  - `test_strips_следует_понимать_intro`: verifies "Следует понимать" stripped from summary start
+  - `test_preserves_следует_понимать_in_body`: verifies "следует понимать" in body preserved
+  - `test_config_update_summary_max_tokens_default_is_1000`: verifies config default
+  - `test_template_update_summary_max_tokens_default_is_1000`: verifies SAM template default
+  - `test_env_example_update_summary_max_tokens_is_1000`: verifies `.env.example` value
+- Updated `test_config_update_summary_max_tokens_default` — now asserts `1000` (was `2000`).
+- Updated `test_update_existing_summary_uses_update_max_tokens` — now asserts `max_tokens=1000` (was `2000`).
+- All 620 tests pass without errors.
 
 ## Completed in 2026-07-05 round 3 (meta-artifacts expansion, None-date guard, coverage prompt compaction)
 

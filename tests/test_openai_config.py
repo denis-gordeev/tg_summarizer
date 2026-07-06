@@ -131,7 +131,7 @@ class ConfigTests(unittest.TestCase):
     def test_config_update_summary_max_tokens_default(self):
         with patch.dict(os.environ, REQUIRED_ENV, clear=True):
             config = _reload_module("config")
-        self.assertEqual(config.UPDATE_SUMMARY_MAX_TOKENS, 2000)
+        self.assertEqual(config.UPDATE_SUMMARY_MAX_TOKENS, 1000)
 
     def test_config_reads_summary_temperature_from_env(self):
         env = {

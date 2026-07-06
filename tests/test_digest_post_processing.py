@@ -1969,5 +1969,219 @@ class RestoreNoneDateGuardTests(unittest.TestCase):
         self.assertIn("msg.date is None", source)
 
 
+class NewMetaArtifactRound2Tests(unittest.TestCase):
+    """Tests for expanded strip_meta_artifacts — ясное дело, стало быть, по большому счёту, etc."""
+
+    def _import_utils(self):
+        import importlib
+        import sys
+        import types
+        from unittest.mock import patch
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_openai = types.ModuleType("openai")
+
+        class FakeOpenAIError(Exception):
+            pass
+
+        fake_openai.OpenAI = type("OpenAI", (), {"__init__": lambda self, *a, **k: None})
+        fake_openai.AsyncOpenAI = type("AsyncOpenAI", (), {"__init__": lambda self, *a, **k: None})
+        fake_openai.APIError = FakeOpenAIError
+        fake_openai.RateLimitError = type("RateLimitError", (FakeOpenAIError,), {"status_code": None})
+        fake_openai.APIConnectionError = type("APIConnectionError", (FakeOpenAIError,), {})
+
+        REQUIRED_ENV = {
+            "TELEGRAM_API_ID": "1",
+            "TELEGRAM_API_HASH": "hash",
+            "TELEGRAM_BOT_TOKEN": "token",
+            "TARGET_CHANNEL": "@target",
+            "OPENAI_API_KEY": "test-key",
+        }
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv, "openai": fake_openai}):
+            with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+                sys.modules.pop("config", None)
+                sys.modules.pop("utils", None)
+                return importlib.import_module("utils")
+
+    def test_strips_ясное_дело_intro(self):
+        utils = self._import_utils()
+        text = "Ясное дело\n<b>AI</b> новости"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Ясное дело", result)
+
+    def test_strips_ясное_дело_outro(self):
+        utils = self._import_utils()
+        text = "<b>AI</b> новости\nЯсное дело"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Ясное дело", result)
+
+    def test_strips_стало_быть_intro(self):
+        utils = self._import_utils()
+        text = "Стало быть\n<b>AI</b> новости"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Стало быть", result)
+
+    def test_strips_стало_быть_outro(self):
+        utils = self._import_utils()
+        text = "<b>AI</b> новости\nСтало быть"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Стало быть", result)
+
+    def test_strips_по_большому_счёту_intro(self):
+        utils = self._import_utils()
+        text = "По большому счёту\n<b>AI</b> новости"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("По большому счёту", result)
+
+    def test_strips_по_большому_счёту_outro(self):
+        utils = self._import_utils()
+        text = "<b>AI</b> новости\nПо большому счёту"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("По большому счёту", result)
+
+    def test_strips_по_большому_счету_intro(self):
+        utils = self._import_utils()
+        text = "По большому счету\n<b>AI</b> новости"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("По большому счету", result)
+
+    def test_strips_так_или_иначе_intro(self):
+        utils = self._import_utils()
+        text = "Так или иначе\n<b>AI</b> новости"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Так или иначе", result)
+
+    def test_strips_так_или_иначе_outro(self):
+        utils = self._import_utils()
+        text = "<b>AI</b> новости\nТак или иначе"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Так или иначе", result)
+
+    def test_strips_между_тем_intro(self):
+        utils = self._import_utils()
+        text = "Между тем\n<b>AI</b> новости"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Между тем", result)
+
+    def test_preserves_между_тем_in_body(self):
+        utils = self._import_utils()
+        text = "<b>AI</b>\nМодель между тем использует attention"
+        result = utils.strip_meta_artifacts(text)
+        self.assertIn("между тем", result.lower())
+
+    def test_strips_тем_тем_временем_intro(self):
+        utils = self._import_utils()
+        text = "Тем временем\n<b>AI</b> новости"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Тем временем", result)
+
+    def test_preserves_тем_временем_in_body(self):
+        utils = self._import_utils()
+        text = "<b>AI</b>\nТем временем вышла новая модель"
+        result = utils.strip_meta_artifacts(text)
+        self.assertIn("тем временем", result.lower())
+
+    def test_strips_как_правило_intro(self):
+        utils = self._import_utils()
+        text = "Как правило\n<b>AI</b> новости"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Как правило", result)
+
+    def test_preserves_как_правило_in_body(self):
+        utils = self._import_utils()
+        text = "<b>AI</b>\nМодели как правило требуют много данных"
+        result = utils.strip_meta_artifacts(text)
+        self.assertIn("как правило", result.lower())
+
+    def test_strips_надо_сказать_intro(self):
+        utils = self._import_utils()
+        text = "Надо сказать\n<b>AI</b> новости"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Надо сказать", result)
+
+    def test_preserves_надо_сказать_in_body(self):
+        utils = self._import_utils()
+        text = "<b>AI</b>\nОб этом надо сказать отдельно"
+        result = utils.strip_meta_artifacts(text)
+        self.assertIn("надо сказать", result.lower())
+
+    def test_strips_ввиду_этого_intro(self):
+        utils = self._import_utils()
+        text = "Ввиду этого\n<b>AI</b> новости"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Ввиду этого", result)
+
+    def test_preserves_ввиду_этого_in_body(self):
+        utils = self._import_utils()
+        text = "<b>AI</b>\nОграничения ввиду этого подхода значительны"
+        result = utils.strip_meta_artifacts(text)
+        self.assertIn("ввиду этого", result.lower())
+
+    def test_strips_в_силу_этого_intro(self):
+        utils = self._import_utils()
+        text = "В силу этого\n<b>AI</b> новости"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("В силу этого", result)
+
+    def test_preserves_в_силу_этого_in_body(self):
+        utils = self._import_utils()
+        text = "<b>AI</b>\nВ силу этого ограничения модель медленнее"
+        result = utils.strip_meta_artifacts(text)
+        self.assertIn("в силу этого", result.lower())
+
+    def test_strips_следует_понимать_intro(self):
+        utils = self._import_utils()
+        text = "Следует понимать\n<b>AI</b> новости"
+        result = utils.strip_meta_artifacts(text)
+        self.assertNotIn("Следует понимать", result)
+
+    def test_preserves_следует_понимать_in_body(self):
+        utils = self._import_utils()
+        text = "<b>AI</b>\nЭто следует понимать как ограничение"
+        result = utils.strip_meta_artifacts(text)
+        self.assertIn("следует понимать", result.lower())
+
+
+class UpdateSummaryMaxTokensConfigTests(unittest.TestCase):
+    """Tests for UPDATE_SUMMARY_MAX_TOKENS reduced from 2000 to 1000."""
+
+    def test_config_update_summary_max_tokens_default_is_1000(self):
+        import importlib
+        import sys
+        import types
+        from unittest.mock import patch
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        REQUIRED_ENV = {
+            "TELEGRAM_API_ID": "1",
+            "TELEGRAM_API_HASH": "hash",
+            "TELEGRAM_BOT_TOKEN": "token",
+            "TARGET_CHANNEL": "@target",
+            "OPENAI_API_KEY": "test-key",
+        }
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+                sys.modules.pop("config", None)
+                config = importlib.import_module("config")
+                self.assertEqual(config.UPDATE_SUMMARY_MAX_TOKENS, 1000)
+
+    def test_template_update_summary_max_tokens_default_is_1000(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        idx = content.index("UpdateSummaryMaxTokens:")
+        section = content[idx:]
+        self.assertIn('"1000"', section[:500])
+
+    def test_env_example_update_summary_max_tokens_is_1000(self):
+        with open(".env.example") as f:
+            content = f.read()
+        self.assertIn("UPDATE_SUMMARY_MAX_TOKENS=1000", content)
+
+
 if __name__ == "__main__":
     unittest.main()

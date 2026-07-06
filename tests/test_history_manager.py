@@ -1089,7 +1089,7 @@ class UpdateExistingSummaryLLMTests(unittest.TestCase):
                 asyncio.run(_test())
 
                 call_kwargs = fake_utils.call_openai.call_args
-                self.assertEqual(call_kwargs.kwargs.get("max_tokens"), 2000)
+                self.assertEqual(call_kwargs.kwargs.get("max_tokens"), 1000)
 
     def test_update_existing_summary_fallback_on_llm_failure(self):
         """update_existing_summary should fall back to append on LLM failure."""

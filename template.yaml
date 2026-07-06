@@ -139,7 +139,7 @@ Parameters:
   UpdateSummaryMaxTokens:
     Type: String
     Description: Max tokens for summary update LLM calls (link insertion)
-    Default: "2000"
+    Default: "1000"
    
   UpdateSummaryMaxInputChars:
     Type: String

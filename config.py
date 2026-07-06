@@ -182,7 +182,7 @@ TEXT_PREVIEW_LENGTH = 50
 # Coverage+match context limits (used by _check_coverage_and_match)
 UPDATE_MATCH_MAX_SUMMARIES = _get_int_env("UPDATE_MATCH_MAX_SUMMARIES", 5)
 UPDATE_MATCH_MAX_CHARS_PER_SUMMARY = _get_int_env("UPDATE_MATCH_MAX_CHARS_PER_SUMMARY", 500)
-UPDATE_SUMMARY_MAX_TOKENS = _get_int_env("UPDATE_SUMMARY_MAX_TOKENS", 2000)
+UPDATE_SUMMARY_MAX_TOKENS = _get_int_env("UPDATE_SUMMARY_MAX_TOKENS", 1000)
 MAX_COVERED_MESSAGE_UPDATES = _get_int_env("MAX_COVERED_MESSAGE_UPDATES", 5)
 
 # Debug mode (set DEBUG=1 in environment to enable verbose logging)
