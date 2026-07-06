@@ -490,7 +490,7 @@ class NewConfigConstantsTests(unittest.TestCase):
             with patch.dict(os.environ, REQUIRED_ENV, clear=True):
                 sys.modules.pop("config", None)
                 config = importlib.import_module("config")
-                self.assertEqual(config.SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE, 3000)
+                self.assertEqual(config.SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE, 2000)
 
     def test_config_reads_nlp_concurrent_checks_from_env(self):
         import importlib

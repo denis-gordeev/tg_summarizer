@@ -88,7 +88,7 @@ def _setup_stubs():
     fake_config.NLP_CHECK_MAX_INPUT_CHARS = 500
     fake_config.COVERAGE_CHECK_MAX_INPUT_CHARS = 2000
     fake_config.NLP_MIN_TEXT_LENGTH = 100
-    fake_config.SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE = 3000
+    fake_config.SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE = 2000
     fake_config.NLP_CONCURRENT_CHECKS = 5
     fake_config.NLP_AD_KEYWORDS = [
         "курс", "вебинар", "регистраци", "скидк", "промокод",
@@ -1941,7 +1941,7 @@ class DedupCoveredMessagesExtractionTests(unittest.TestCase):
         fake_config.NLP_CHECK_MAX_INPUT_CHARS = 500
         fake_config.COVERAGE_CHECK_MAX_INPUT_CHARS = 500
         fake_config.NLP_MIN_TEXT_LENGTH = 100
-        fake_config.SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE = 3000
+        fake_config.SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE = 2000
         fake_config.NLP_CONCURRENT_CHECKS = 5
         fake_config.NLP_AD_KEYWORDS = ["курс"]
         fake_config.UPDATE_MATCH_MAX_SUMMARIES = 5

@@ -184,7 +184,7 @@ Parameters:
   SummaryMaxInputCharsPerMessage:
     Type: String
     Description: Max chars of each message sent to summary LLM
-    Default: "3000"
+    Default: "2000"
    
   NlpConcurrentChecks:
     Type: String
@@ -625,6 +625,23 @@ Resources:
       Namespace: AWS/SQS
       Period: 300
       Statistic: Sum
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt SummarizerDLQ.QueueName
+      TreatMissingData: notBreaching
+
+  DLQAgeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-dlq-age"
+      AlarmDescription: "Alarm for messages sitting in the dead-letter queue for over 1 hour"
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 1
+      Threshold: 3600
+      MetricName: ApproximateAgeOfOldestMessage
+      Namespace: AWS/SQS
+      Period: 300
+      Statistic: Maximum
       Dimensions:
         - Name: QueueName
           Value: !GetAtt SummarizerDLQ.QueueName

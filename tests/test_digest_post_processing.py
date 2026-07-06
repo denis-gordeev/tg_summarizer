@@ -2183,5 +2183,168 @@ class UpdateSummaryMaxTokensConfigTests(unittest.TestCase):
         self.assertIn("UPDATE_SUMMARY_MAX_TOKENS=1000", content)
 
 
+class SummaryMaxInputCharsDefaultTests(unittest.TestCase):
+    """Tests for SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE default value (2000)."""
+
+    def test_config_summary_max_input_chars_per_message_default_is_2000(self):
+        import importlib
+        import sys
+        import types
+        from unittest.mock import patch
+
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv}):
+            with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+                sys.modules.pop("config", None)
+                config = importlib.import_module("config")
+                self.assertEqual(config.SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE, 2000)
+
+    def test_template_summary_max_input_chars_per_message_default_is_2000(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        param_idx = content.index("  SummaryMaxInputCharsPerMessage:")
+        section = content[param_idx:]
+        self.assertIn('"2000"', section[:500])
+
+    def test_env_example_summary_max_input_chars_per_message_is_2000(self):
+        with open(".env.example") as f:
+            content = f.read()
+        self.assertIn("SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE=2000", content)
+
+
+class DLQAgeAlarmTests(unittest.TestCase):
+    """Tests for DLQ age alarm in template."""
+
+    def test_template_contains_dlq_age_alarm(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        self.assertIn("DLQAgeAlarm", content)
+
+    def test_dlq_age_alarm_uses_approximate_age_metric(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        alarm_section = content[content.index("DLQAgeAlarm"):]
+        self.assertIn("ApproximateAgeOfOldestMessage", alarm_section[:500])
+
+    def test_dlq_age_alarm_threshold_is_3600(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        alarm_section = content[content.index("DLQAgeAlarm"):]
+        self.assertIn("Threshold: 3600", alarm_section[:500])
+
+    def test_dlq_age_alarm_uses_sqs_namespace(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        alarm_section = content[content.index("DLQAgeAlarm"):]
+        self.assertIn("AWS/SQS", alarm_section[:500])
+
+    def test_dlq_age_alarm_uses_maximum_statistic(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        alarm_section = content[content.index("DLQAgeAlarm"):]
+        self.assertIn("Statistic: Maximum", alarm_section[:500])
+
+
+class NlpPromptCompactTests(unittest.TestCase):
+    """Tests for compact NLP_RELEVANCE_PROMPT."""
+
+    def test_nlp_prompt_no_blank_lines_between_sections(self):
+        with open("prompts.py") as f:
+            content = f.read()
+        start = content.index("NLP_RELEVANCE_PROMPT")
+        section = content[start:start + 1000]
+        self.assertNotIn("\n\nПРИНИМАЙ", section)
+        self.assertNotIn("\n\nОТКЛОНЯЙ", section)
+        self.assertNotIn("\n\nОтветь", section)
+
+    def test_nlp_prompt_has_accept_and_reject_sections(self):
+        with open("prompts.py") as f:
+            content = f.read()
+        start = content.index("NLP_RELEVANCE_PROMPT")
+        section = content[start:start + 1000]
+        self.assertIn("ПРИНИМАЙ", section)
+        self.assertIn("ОТКЛОНЯЙ", section)
+
+    def test_nlp_prompt_still_has_yes_no_response(self):
+        with open("prompts.py") as f:
+            content = f.read()
+        start = content.index("NLP_RELEVANCE_PROMPT")
+        section = content[start:start + 1000]
+        self.assertIn("Ответь только 'да' или 'нет'", section)
+
+
+class NewMetaArtifactPatterns20260707Tests(unittest.TestCase):
+    """Tests for new meta-artifact patterns added in 2026-07-07 round."""
+
+    def _import_utils(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_openai = types.ModuleType("openai")
+
+        class FakeOpenAI:
+            def __init__(self, api_key, **kwargs):
+                pass
+
+        class FakeOpenAIError(Exception):
+            pass
+
+        fake_openai.OpenAI = FakeOpenAI
+        fake_openai.AsyncOpenAI = FakeOpenAI
+        fake_openai.APIError = FakeOpenAIError
+        fake_openai.RateLimitError = type("RateLimitError", (FakeOpenAIError,), {"status_code": None})
+        fake_openai.APIConnectionError = type("APIConnectionError", (FakeOpenAIError,), {})
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv, "openai": fake_openai}):
+            with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+                sys.modules.pop("config", None)
+                sys.modules.pop("utils", None)
+                import importlib
+                return importlib.import_module("utils")
+
+    def _strip(self, text):
+        utils = self._import_utils()
+        return utils.strip_meta_artifacts(text)
+
+    def test_strips_как_видим_intro(self):
+        self.assertEqual(self._strip("Как видим, модель показала\n<b>Тема</b>"), "<b>Тема</b>")
+
+    def test_strips_как_можно_видеть_intro(self):
+        self.assertEqual(self._strip("Как можно видеть, результаты\n<b>Тема</b>"), "<b>Тема</b>")
+
+    def test_strips_отсюда_следует_intro(self):
+        self.assertEqual(self._strip("Отсюда следует, что модель\n<b>Тема</b>"), "<b>Тема</b>")
+
+    def test_strips_из_этого_следует_intro(self):
+        self.assertEqual(self._strip("Из этого следует вывод\n<b>Тема</b>"), "<b>Тема</b>")
+
+    def test_strips_как_бы_то_ни_было_intro(self):
+        self.assertEqual(self._strip("Как бы то ни было, данные\n<b>Тема</b>"), "<b>Тема</b>")
+
+    def test_strips_как_бы_то_ни_было_outro(self):
+        self.assertEqual(self._strip("<b>Тема</b>\nКак бы то ни было, данные"), "<b>Тема</b>")
+
+    def test_strips_в_любом_случае_intro(self):
+        self.assertEqual(self._strip("В любом случае, результат\n<b>Тема</b>"), "<b>Тема</b>")
+
+    def test_strips_в_любом_случае_outro(self):
+        self.assertEqual(self._strip("<b>Тема</b>\nВ любом случае, результат"), "<b>Тема</b>")
+
+    def test_strips_что_ж_intro(self):
+        self.assertEqual(self._strip("Что ж, результаты\n<b>Тема</b>"), "<b>Тема</b>")
+
+    def test_strips_что_ж_outro(self):
+        self.assertEqual(self._strip("<b>Тема</b>\nЧто ж, подведём итоги"), "<b>Тема</b>")
+
+    def test_preserves_как_видим_in_body(self):
+        text = "<b>Модель</b>\nМодель, как видим из тестов, превосходит"
+        self.assertIn("как видим", self._strip(text))
+
+    def test_preserves_отсюда_следует_in_body(self):
+        text = "<b>Вывод</b>\nОтсюда следует уравнение"
+        self.assertIn("Отсюда следует", self._strip(text))
+
+
 if __name__ == "__main__":
     unittest.main()
