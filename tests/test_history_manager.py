@@ -1806,11 +1806,10 @@ class UpdateSummaryInputTruncationTests(unittest.TestCase):
             pass
 
         async def fake_call_openai(system_prompt, user_content, **kwargs):
-            self.assertLessEqual(
-                user_content.find("Саммари:\n") + len("Саммари:\n") + 2001,
-                user_content.find("\n\nНовое сообщение:"),
-            )
-            return SummaryInfo.__module__  # return something truthy
+            summary_start = user_content.find("Саммари:\n") + len("Саммари:\n")
+            separator_pos = user_content.find("\n---\n")
+            self.assertLessEqual(separator_pos - summary_start, 1001)
+            return SummaryInfo.__module__
 
         fake_openai.AsyncOpenAI = type("AsyncOpenAI", (), {"__init__": lambda self, **kw: None})
         fake_openai.APIError = FakeOpenAIError
@@ -1850,8 +1849,8 @@ class UpdateSummaryInputTruncationTests(unittest.TestCase):
                     hm = importlib.import_module("history_manager")
                     result = asyncio.run(hm.update_existing_summary(long_summary, new_msg))
                     user_content = mock_openai.call_args[0][1]
-                    summary_part = user_content.split("Саммари:\n")[1].split("\n\nНовое сообщение:")[0]
-                    self.assertLessEqual(len(summary_part), 2001)
+                    summary_part = user_content.split("Саммари:\n")[1].split("\n---\n")[0]
+                    self.assertLessEqual(len(summary_part), 2000)
 
 
 class UpdateSummaryEnforcesLengthTests(unittest.TestCase):

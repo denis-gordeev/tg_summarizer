@@ -2346,5 +2346,148 @@ class NewMetaArtifactPatterns20260707Tests(unittest.TestCase):
         self.assertIn("Отсюда следует", self._strip(text))
 
 
+class NewMetaArtifactPatterns20260708Tests(unittest.TestCase):
+    """Tests for new meta-artifact patterns added in 2026-07-08 round."""
+
+    def _import_utils(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_openai = types.ModuleType("openai")
+
+        class FakeOpenAI:
+            def __init__(self, api_key, **kwargs):
+                pass
+
+        class FakeOpenAIError(Exception):
+            pass
+
+        fake_openai.OpenAI = FakeOpenAI
+        fake_openai.AsyncOpenAI = FakeOpenAI
+        fake_openai.APIError = FakeOpenAIError
+        fake_openai.RateLimitError = type("RateLimitError", (FakeOpenAIError,), {"status_code": None})
+        fake_openai.APIConnectionError = type("APIConnectionError", (FakeOpenAIError,), {})
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv, "openai": fake_openai}):
+            with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+                sys.modules.pop("config", None)
+                sys.modules.pop("utils", None)
+                import importlib
+                return importlib.import_module("utils")
+
+    def _strip(self, text):
+        utils = self._import_utils()
+        return utils.strip_meta_artifacts(text)
+
+    def test_strips_к_тому_же_intro(self):
+        self.assertEqual(self._strip("К тому же, данные\n<b>Тема</b>"), "<b>Тема</b>")
+
+    def test_strips_к_тому_же_outro(self):
+        self.assertEqual(self._strip("<b>Тема</b>\nК тому же, данные"), "<b>Тема</b>")
+
+    def test_strips_другими_словами_intro(self):
+        self.assertEqual(self._strip("Другими словами, модель\n<b>Тема</b>"), "<b>Тема</b>")
+
+    def test_strips_другими_словами_outro(self):
+        self.assertEqual(self._strip("<b>Тема</b>\nДругими словами, вывод"), "<b>Тема</b>")
+
+    def test_strips_словом_intro(self):
+        self.assertEqual(self._strip("Словом, результаты\n<b>Тема</b>"), "<b>Тема</b>")
+
+    def test_strips_словом_outro(self):
+        self.assertEqual(self._strip("<b>Тема</b>\nСловом, итог"), "<b>Тема</b>")
+
+    def test_strips_в_общем_то_intro(self):
+        self.assertEqual(self._strip("В общем-то, данные\n<b>Тема</b>"), "<b>Тема</b>")
+
+    def test_strips_стоит_заметить_intro(self):
+        self.assertEqual(self._strip("Стоит заметить, что модель\n<b>Тема</b>"), "<b>Тема</b>")
+
+    def test_preserves_стоит_заметить_in_body(self):
+        text = "<b>Модель</b>\nЗдесь стоит заметить улучшение"
+        self.assertIn("стоит заметить", self._strip(text))
+
+    def test_strips_надо_заметить_intro(self):
+        self.assertEqual(self._strip("Надо заметить, подход\n<b>Тема</b>"), "<b>Тема</b>")
+
+    def test_preserves_надо_заметить_in_body(self):
+        text = "<b>Модель</b>\nЗдесь надо заметить разницу"
+        self.assertIn("надо заметить", self._strip(text))
+
+    def test_strips_хочется_добавить_intro(self):
+        self.assertEqual(self._strip("Хочется добавить, что\n<b>Тема</b>"), "<b>Тема</b>")
+
+    def test_preserves_хочется_добавить_in_body(self):
+        text = "<b>Модель</b>\nМне хочется добавить детали"
+        self.assertIn("хочется добавить", self._strip(text))
+
+    def test_strips_стоит_добавить_intro(self):
+        self.assertEqual(self._strip("Стоит добавить, что\n<b>Тема</b>"), "<b>Тема</b>")
+
+    def test_preserves_стоит_добавить_in_body(self):
+        text = "<b>Модель</b>\nЗдесь стоит добавить контекст"
+        self.assertIn("стоит добавить", self._strip(text))
+
+
+class PromptCompaction20260708Tests(unittest.TestCase):
+    """Tests for prompt compaction in 2026-07-08 round."""
+
+    def test_coverage_prompt_no_trailing_newline(self):
+        with open("prompts.py") as f:
+            source = f.read()
+        start = source.index("COVERAGE_AND_MATCH_PROMPT")
+        section = source[start:start + 500]
+        self.assertNotIn('"""\n",', section)
+
+    def test_nlp_prompt_no_trailing_newline(self):
+        with open("prompts.py") as f:
+            source = f.read()
+        start = source.index("NLP_RELEVANCE_PROMPT")
+        section = source[start:start + 1000]
+        self.assertNotIn("Ответь только 'да' или 'нет'.\n\"\"\"", section)
+
+    def test_channel_prompt_no_blank_lines(self):
+        with open("prompts.py") as f:
+            source = f.read()
+        start = source.index("CHANNEL_SUMMARY_PROMPT")
+        section = source[start:start + 1500]
+        self.assertNotIn("\n\nГруппируй", section)
+        self.assertNotIn("\n\n- Без", section)
+
+    def test_group_prompt_no_blank_lines(self):
+        with open("prompts.py") as f:
+            source = f.read()
+        start = source.index("GROUP_SUMMARY_PROMPT")
+        section = source[start:start + 1500]
+        self.assertNotIn("\n\nГруппируй", section)
+        self.assertNotIn("\n\n- Без", section)
+
+
+class CoverageContextCompactTests(unittest.TestCase):
+    """Tests for compact coverage/update context labels."""
+
+    def test_coverage_uses_short_digest_label(self):
+        with open("message_processor.py") as f:
+            source = f.read()
+        self.assertNotIn("Дайджест {i}", source)
+        self.assertIn('f"{i}:', source)
+
+    def test_coverage_uses_short_new_label(self):
+        with open("message_processor.py") as f:
+            source = f.read()
+        self.assertNotIn("Новое сообщение:", source)
+
+    def test_summary_uses_arrow_links_label(self):
+        with open("message_processor.py") as f:
+            source = f.read()
+        self.assertNotIn("Ссылки:", source)
+        self.assertIn("→", source)
+
+    def test_update_uses_separator_not_double_newline(self):
+        with open("history_manager.py") as f:
+            source = f.read()
+        self.assertNotIn("Новое сообщение:", source)
+        self.assertIn("---", source)
+
+
 if __name__ == "__main__":
     unittest.main()

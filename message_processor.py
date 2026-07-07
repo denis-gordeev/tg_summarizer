@@ -120,9 +120,9 @@ async def _check_coverage_and_match(
     context_parts = []
     for i, s in enumerate(recent, 1):
         truncated = s.content[:UPDATE_MATCH_MAX_CHARS_PER_SUMMARY]
-        context_parts.append(f"Дайджест {i}:\n{truncated}\n")
+        context_parts.append(f"{i}:\n{truncated}\n")
 
-    user_content = f"""{"".join(context_parts)}Новое сообщение:
+    user_content = f"""{"".join(context_parts)}Новое:
 {msg.text[:COVERAGE_CHECK_MAX_INPUT_CHARS]}"""
 
     try:
@@ -251,7 +251,7 @@ def _prepare_messages_text(messages: List[MessageInfo]) -> tuple[str, int, dict[
         truncated_text = msg.text[:SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE]
         source_info = f"[{i}] {truncated_text}"
         if links:
-            source_info += f" (Ссылки: {', '.join(links)})"
+            source_info += f" (→ {', '.join(links)})"
         messages_with_sources.append(source_info)
         total_original_length += count_characters(truncated_text)
     return "\n\n".join(messages_with_sources), total_original_length, msg_links

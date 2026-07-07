@@ -361,7 +361,7 @@ async def update_existing_summary(
 
     truncated_summary = summary.content[:UPDATE_SUMMARY_MAX_INPUT_CHARS]
     truncated_msg = new_message.text[:UPDATE_SUMMARY_MAX_INPUT_CHARS]
-    user_content = f"Саммари:\n{truncated_summary}\n\nНовое сообщение:\n{truncated_msg}"
+    user_content = f"Саммари:\n{truncated_summary}\n---\n{truncated_msg}"
 
     def _append_link():
         if "Доп. источники:" in summary.content:

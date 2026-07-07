@@ -1375,6 +1375,25 @@ class DashboardCostByCallTypeWidgetTests(unittest.TestCase):
         widget_section = content[max(0, widget_idx - 3000):widget_idx + 300]
         self.assertIn("EstimatedCostUSD", widget_section)
 
+    def test_template_dashboard_contains_dlq_age_widget(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        self.assertIn("DLQ Age & Depth", content)
+
+    def test_template_dashboard_dlq_widget_has_age_metric(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        widget_idx = content.index("DLQ Age & Depth")
+        widget_section = content[max(0, widget_idx - 500):widget_idx + 500]
+        self.assertIn("ApproximateAgeOfOldestMessage", widget_section)
+
+    def test_template_dashboard_dlq_widget_has_depth_metric(self):
+        with open("template.yaml") as f:
+            content = f.read()
+        widget_idx = content.index("DLQ Age & Depth")
+        widget_section = content[max(0, widget_idx - 500):widget_idx + 500]
+        self.assertIn("ApproximateNumberOfMessagesVisible", widget_section)
+
 
 if __name__ == "__main__":
     unittest.main()

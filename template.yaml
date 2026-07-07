@@ -879,6 +879,21 @@ Resources:
                 "yAxis": { "left": { "label": "USD" } }
               },
               "width": 12, "height": 6
+            },
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
+                  ["AWS/SQS", "ApproximateAgeOfOldestMessage", "QueueName", "${SummarizerDLQ.QueueName}"],
+                  ["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", "${SummarizerDLQ.QueueName}"]
+                ],
+                "period": 300,
+                "stat": "Maximum",
+                "region": "${AWS::Region}",
+                "title": "DLQ Age & Depth",
+                "yAxis": { "left": { "label": "seconds" }, "right": { "label": "messages" } }
+              },
+              "width": 12, "height": 6
             }
           ]
         }

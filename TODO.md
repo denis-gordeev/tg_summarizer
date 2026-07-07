@@ -8,7 +8,46 @@
 - Consider tuning warmup schedule frequency for cost-effectiveness
 - Consider adding Lambda provisioned concurrency for more predictable cold starts
 - Consider adding CloudWatch alarm on Lambda IteratorAge for stream-based event sources (if added in future)
-- Consider adding DLQ age alarm dashboard widget for visual monitoring
+- Consider further merging summary prompt bullets (e.g., combine non-repetition + single-heading rules, combine HTML header + body formatting rules)
+
+## Completed in 2026-07-08 round (DLQ age widget, prompt compaction, meta-artifacts expansion, context label compaction)
+
+- **Observability — DLQ Age & Depth dashboard widget**: Added "DLQ Age & Depth" widget to [`SummarizerDashboard`](template.yaml) showing `ApproximateAgeOfOldestMessage` (Maximum, seconds) and `ApproximateNumberOfMessagesVisible` (Maximum, messages) from `AWS/SQS` namespace with `QueueName` dimension. Enables visual monitoring of DLQ backlog alongside the existing `DLQAgeAlarm` and `DLQDepthAlarm`. Directly addresses the TODO item "Consider adding DLQ age alarm dashboard widget for visual monitoring".
+- **Cost optimization — removed trailing newlines from prompts**: Removed trailing `\n` from [`COVERAGE_AND_MATCH_PROMPT`](prompts.py) and [`NLP_RELEVANCE_PROMPT`](prompts.py). Each trailing newline wasted 1 input token per call. Saves ~1 token per coverage check and ~1 token per NLP check.
+- **Cost optimization — removed blank lines from summary prompts**: Removed unnecessary blank lines between sections in [`CHANNEL_SUMMARY_PROMPT`](prompts.py) and [`GROUP_SUMMARY_PROMPT`](prompts.py). Each blank line cost ~1 input token. Saves 2 tokens per channel/group summary call.
+- **Cost optimization — compact coverage check context**: Shortened digest label `"Дайджест {i}:"` → `"{i}:"` and message label `"Новое сообщение:"` → `"Новое:"` in [`_check_coverage_and_match()`](message_processor.py). Saves ~4-6 input tokens per coverage check call (2 per digest × UPDATE_MATCH_MAX_SUMMARIES digests + 2 for message label).
+- **Cost optimization — compact summary links annotation**: Shortened link annotation from `"Ссылки:"` → `"→"` in [`_prepare_messages_text()`](message_processor.py). Saves ~5 chars (~1-2 tokens) per linked message in the summary context.
+- **Cost optimization — compact update context separator**: Changed update prompt context from `f"Саммари:\n{truncated_summary}\n\nНовое сообщение:\n{truncated_msg}"` to `f"Саммари:\n{truncated_summary}\n---\n{truncated_msg}"` in [`update_existing_summary()`](history_manager.py). Saves ~3 input tokens per update call (shorter label + single newline + `---` separator instead of `\n\n`).
+- **Quality — expanded `strip_meta_artifacts`**: Added "к тому же", "другими словами", "словом" to both intro and outro patterns in [`_META_ARTIFACT_PATTERNS`](utils.py). Added "в общем-то", "стоит заметить", "надо заметить", "хочется добавить", "стоит добавить" to [`_META_ARTIFACT_INTRO_ONLY`](utils.py) — these are common LLM filler/transition phrases that violate the "Без введения, заключения и мета-комментариев" prompt rule but can appear legitimately in body text (e.g., "Здесь стоит добавить контекст", "Модель к тому же превосходит конкурентов").
+- **Tests added**: 26 new tests (total 669, up from 643):
+  - `test_strips_к_тому_же_intro`: verifies "К тому же" stripped from summary start
+  - `test_strips_к_тому_же_outro`: verifies "К тому же" stripped from summary end
+  - `test_strips_другими_словами_intro`: verifies "Другими словами" stripped from summary start
+  - `test_strips_другими_словами_outro`: verifies "Другими словами" stripped from summary end
+  - `test_strips_словом_intro`: verifies "Словом" stripped from summary start
+  - `test_strips_словом_outro`: verifies "Словом" stripped from summary end
+  - `test_strips_в_общем_то_intro`: verifies "В общем-то" stripped from summary start
+  - `test_strips_стоит_заметить_intro`: verifies "Стоит заметить" stripped from summary start
+  - `test_preserves_стоит_заметить_in_body`: verifies "стоит заметить" in body preserved
+  - `test_strips_надо_заметить_intro`: verifies "Надо заметить" stripped from summary start
+  - `test_preserves_надо_заметить_in_body`: verifies "надо заметить" in body preserved
+  - `test_strips_хочется_добавить_intro`: verifies "Хочется добавить" stripped from summary start
+  - `test_preserves_хочется_добавить_in_body`: verifies "хочется добавить" in body preserved
+  - `test_strips_стоит_добавить_intro`: verifies "Стоит добавить" stripped from summary start
+  - `test_preserves_стоит_добавить_in_body`: verifies "стоит добавить" in body preserved
+  - `test_coverage_prompt_no_trailing_newline`: verifies no trailing `\n` in COVERAGE_AND_MATCH_PROMPT
+  - `test_nlp_prompt_no_trailing_newline`: verifies no trailing `\n` in NLP_RELEVANCE_PROMPT
+  - `test_channel_prompt_no_blank_lines`: verifies no blank lines in CHANNEL_SUMMARY_PROMPT
+  - `test_group_prompt_no_blank_lines`: verifies no blank lines in GROUP_SUMMARY_PROMPT
+  - `test_coverage_uses_short_digest_label`: verifies `"Дайджест {i}"` removed from coverage context
+  - `test_coverage_uses_short_new_label`: verifies `"Новое сообщение:"` removed from coverage context
+  - `test_summary_uses_arrow_links_label`: verifies `"Ссылки:"` replaced with `"→"`
+  - `test_update_uses_separator_not_double_newline`: verifies `"---"` separator in update context
+  - `test_template_dashboard_contains_dlq_age_widget`: verifies "DLQ Age & Depth" in template
+  - `test_template_dashboard_dlq_widget_has_age_metric`: verifies `ApproximateAgeOfOldestMessage` in widget
+  - `test_template_dashboard_dlq_widget_has_depth_metric`: verifies `ApproximateNumberOfMessagesVisible` in widget
+- Updated `test_truncates_summary_in_update_prompt` — adapted to new `---` separator format.
+- All 669 tests pass without errors.
 
 ## Completed in 2026-07-07 round (SUMMARY_MAX_INPUT_CHARS_PER_MESSAGE reduction, DLQ age alarm, NLP prompt compaction, meta-artifacts expansion)
 
