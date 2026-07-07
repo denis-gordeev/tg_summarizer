@@ -808,13 +808,13 @@ class PromptAntiListTests(unittest.TestCase):
 
         with open("prompts.py") as f:
             source = f.read()
-        self.assertIn("Без списков — сплошной текст с абзацами", source)
+        self.assertIn("Без списков и подзаголовков", source)
 
     def test_channel_summary_prompt_prohibits_subheaders(self):
         """CHANNEL_SUMMARY_PROMPT should contain anti-subheader rule."""
         with open("prompts.py") as f:
             source = f.read()
-        self.assertIn("Один заголовок на тему, без подзаголовков", source)
+        self.assertIn("один заголовок на тему", source)
 
 
 class PromptBrevityTests(unittest.TestCase):
@@ -1753,13 +1753,13 @@ class PromptCompactnessTests(unittest.TestCase):
     def test_channel_prompt_has_compact_list_rule(self):
         with open("prompts.py") as f:
             source = f.read()
-        self.assertIn("Без списков — сплошной текст с абзацами", source)
+        self.assertIn("Без списков и подзаголовков", source)
         self.assertNotIn("Без нумерованных и маркированных списков", source)
 
     def test_channel_prompt_has_compact_subheading_rule(self):
         with open("prompts.py") as f:
             source = f.read()
-        self.assertIn("Один заголовок на тему, без подзаголовков", source)
+        self.assertIn("один заголовок на тему", source)
         self.assertNotIn("Без подзаголовков внутри раздела", source)
 
     def test_channel_prompt_has_compact_html_rule(self):
@@ -2487,6 +2487,89 @@ class CoverageContextCompactTests(unittest.TestCase):
             source = f.read()
         self.assertNotIn("Новое сообщение:", source)
         self.assertIn("---", source)
+
+
+class PromptMergeBullets20260709Tests(unittest.TestCase):
+    """Tests for further prompt bullet merging in 2026-07-09 round."""
+
+    def test_channel_prompt_has_merged_no_repeats_rule(self):
+        with open("prompts.py") as f:
+            source = f.read()
+        self.assertIn("Без повторов, воды и пояснений", source)
+        self.assertNotIn("Не повторяй одну и ту же информацию", source)
+
+    def test_channel_prompt_has_merged_structure_rule(self):
+        with open("prompts.py") as f:
+            source = f.read()
+        self.assertIn("Сплошной текст с абзацами, один заголовок на тему", source)
+        self.assertNotIn("Без списков — сплошной текст с абзацами", source)
+
+    def test_group_prompt_has_merged_no_repeats_rule(self):
+        with open("prompts.py") as f:
+            source = f.read()
+        start = source.index("GROUP_SUMMARY_PROMPT")
+        section = source[start:start + 1500]
+        self.assertIn("Без повторов, воды и пояснений", section)
+        self.assertNotIn("Не повторяй одну и ту же информацию", section)
+
+    def test_group_prompt_has_merged_structure_rule(self):
+        with open("prompts.py") as f:
+            source = f.read()
+        start = source.index("GROUP_SUMMARY_PROMPT")
+        section = source[start:start + 1500]
+        self.assertIn("Сплошной текст с абзацами, один заголовок на тему", section)
+        self.assertNotIn("Без списков — сплошной текст с абзацами", section)
+
+
+class MetaArtifact20260709Tests(unittest.TestCase):
+    """Tests for new meta-artifact patterns added in 2026-07-09 round."""
+
+    def _import_utils(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_openai = types.ModuleType("openai")
+
+        class FakeOpenAI:
+            def __init__(self, api_key, **kwargs):
+                pass
+
+        class FakeOpenAIError(Exception):
+            pass
+
+        fake_openai.OpenAI = FakeOpenAI
+        fake_openai.AsyncOpenAI = FakeOpenAI
+        fake_openai.APIError = FakeOpenAIError
+        fake_openai.RateLimitError = type("RateLimitError", (FakeOpenAIError,), {"status_code": None})
+        fake_openai.APIConnectionError = type("APIConnectionError", (FakeOpenAIError,), {})
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv, "openai": fake_openai}):
+            with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+                sys.modules.pop("config", None)
+                sys.modules.pop("utils", None)
+                import importlib
+                return importlib.import_module("utils")
+
+    def _strip(self, text):
+        utils = self._import_utils()
+        return utils.strip_meta_artifacts(text)
+
+    def test_strips_подводя_черту_intro(self):
+        self.assertEqual(self._strip("Подводя черту, итог\n<b>Тема</b>"), "<b>Тема</b>")
+
+    def test_strips_подводя_черту_outro(self):
+        self.assertEqual(self._strip("<b>Тема</b>\nПодводя черту, итог"), "<b>Тема</b>")
+
+    def test_strips_как_было_сказано_intro(self):
+        self.assertEqual(self._strip("Как было сказано выше, модель\n<b>Тема</b>"), "<b>Тема</b>")
+
+    def test_strips_как_было_отмечено_intro(self):
+        self.assertEqual(self._strip("Как было отмечено ранее, LLM\n<b>Тема</b>"), "<b>Тема</b>")
+
+    def test_strips_всё_вышесказанное_intro(self):
+        self.assertEqual(self._strip("Всё вышесказанное подтверждает\n<b>Тема</b>"), "<b>Тема</b>")
+
+    def test_strips_из_вышесказанного_intro(self):
+        self.assertEqual(self._strip("Из вышесказанного следует\n<b>Тема</b>"), "<b>Тема</b>")
 
 
 if __name__ == "__main__":

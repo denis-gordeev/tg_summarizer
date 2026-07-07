@@ -8,7 +8,28 @@
 - Consider tuning warmup schedule frequency for cost-effectiveness
 - Consider adding Lambda provisioned concurrency for more predictable cold starts
 - Consider adding CloudWatch alarm on Lambda IteratorAge for stream-based event sources (if added in future)
-- Consider further merging summary prompt bullets (e.g., combine non-repetition + single-heading rules, combine HTML header + body formatting rules)
+- Consider further merging summary prompt bullets (e.g., combine HTML header + body formatting rules)
+
+## Completed in 2026-07-09 round (prompt bullet merging, meta-artifacts expansion)
+
+- **Cost optimization — merged summary prompt bullets**: Merged "Не повторяй одну и ту же информацию в разных разделах" into "Один факт на предложение, одна мысль на абзац. Без повторов, воды и пояснений" and merged "Без списков — сплошной текст с абзацами" + "Один заголовок на тему, без подзаголовков" into "Сплошной текст с абзацами, один заголовок на тему. Без списков и подзаголовков" in both [`CHANNEL_SUMMARY_PROMPT`](prompts.py) and [`GROUP_SUMMARY_PROMPT`](prompts.py). Reduced from 10 to 8 bullets per prompt, saving ~20-30 input tokens per channel/group summary call. Directly addresses the TODO item "Consider further merging summary prompt bullets (e.g., combine non-repetition + single-heading rules)".
+- **Quality — expanded `strip_meta_artifacts`**: Added "подводя черту" to both intro and outro patterns in [`_META_ARTIFACT_PATTERNS`](utils.py). Added "как было сказано", "как было отмечено", "всё вышесказанное", "из вышесказанного" to [`_META_ARTIFACT_INTRO_ONLY`](utils.py) — these are meta-structural/filler phrases at the start of summaries but can appear legitimately in body text (e.g., "Модель как было отмечено ранее превосходит конкурентов").
+- **Tests added**: 10 new tests (total 679, up from 669):
+  - `test_channel_prompt_has_merged_no_repeats_rule`: verifies "Без повторов, воды и пояснений" in channel prompt
+  - `test_channel_prompt_has_merged_structure_rule`: verifies "Сплошной текст с абзацами, один заголовок на тему" in channel prompt
+  - `test_group_prompt_has_merged_no_repeats_rule`: verifies merged rule in group prompt
+  - `test_group_prompt_has_merged_structure_rule`: verifies merged structure rule in group prompt
+  - `test_strips_подводя_черту_intro`: verifies "Подводя черту" stripped from summary start
+  - `test_strips_подводя_черту_outro`: verifies "Подводя черту" stripped from summary end
+  - `test_strips_как_было_сказано_intro`: verifies "Как было сказано" stripped from summary start
+  - `test_strips_как_было_отмечено_intro`: verifies "Как было отмечено" stripped from summary start
+  - `test_strips_всё_вышесказанное_intro`: verifies "Всё вышесказанное" stripped from summary start
+  - `test_strips_из_вышесказанного_intro`: verifies "Из вышесказанного" stripped from summary start
+- Updated `test_channel_summary_prompt_prohibits_lists` — now asserts "Без списков и подзаголовков" (merged rule wording).
+- Updated `test_channel_summary_prompt_prohibits_subheaders` — now asserts "один заголовок на тему" (merged rule wording).
+- Updated `test_channel_prompt_has_compact_list_rule` — now asserts merged "Без списков и подзаголовков" wording.
+- Updated `test_channel_prompt_has_compact_subheading_rule` — now asserts merged "один заголовок на тему" wording.
+- All 679 tests pass without errors.
 
 ## Completed in 2026-07-08 round (DLQ age widget, prompt compaction, meta-artifacts expansion, context label compaction)
 
