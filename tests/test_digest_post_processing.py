@@ -1762,10 +1762,11 @@ class PromptCompactnessTests(unittest.TestCase):
         self.assertIn("один заголовок на тему", source)
         self.assertNotIn("Без подзаголовков внутри раздела", source)
 
-    def test_channel_prompt_has_compact_html_rule(self):
+    def test_channel_prompt_has_merged_html_rule(self):
         with open("prompts.py") as f:
             source = f.read()
-        self.assertIn("HTML: <b>текст</b>, не Markdown", source)
+        self.assertIn("HTML <b>текст</b>, не Markdown", source)
+        self.assertNotIn("HTML: <b>текст</b>", source)
         self.assertNotIn("Только HTML:", source)
 
     def test_channel_prompt_has_compact_source_rule(self):
@@ -2570,6 +2571,134 @@ class MetaArtifact20260709Tests(unittest.TestCase):
 
     def test_strips_из_вышесказанного_intro(self):
         self.assertEqual(self._strip("Из вышесказанного следует\n<b>Тема</b>"), "<b>Тема</b>")
+
+
+class PromptMergeHtmlHeader20260710Tests(unittest.TestCase):
+    """Tests for merged HTML header + body formatting rules in 2026-07-10 round."""
+
+    def _get_prompt_section(self, key):
+        with open("prompts.py") as f:
+            source = f.read()
+        idx = source.index(f'"{key}": """')
+        return source[idx:idx + 1500]
+
+    def test_channel_prompt_has_merged_header_html_rule(self):
+        section = self._get_prompt_section("CHANNEL_SUMMARY_PROMPT")
+        self.assertIn("Заголовки: короткие, 1–3 эмодзи, HTML <b>текст</b>, не Markdown", section)
+        self.assertNotIn("с 1–3 несинонимичных эмодзи", section)
+
+    def test_group_prompt_has_merged_header_html_rule(self):
+        section = self._get_prompt_section("GROUP_SUMMARY_PROMPT")
+        self.assertIn("Заголовки: короткие, 1–3 эмодзи, HTML <b>текст</b>, не Markdown", section)
+        self.assertNotIn("с 1–3 несинонимичных эмодзи", section)
+
+    def test_channel_prompt_no_separate_html_bullet(self):
+        section = self._get_prompt_section("CHANNEL_SUMMARY_PROMPT")
+        end = section.index('"""', 10)
+        prompt_text = section[:end]
+        lines = [l for l in prompt_text.split("\n") if l.strip().startswith("-")]
+        for line in lines:
+            self.assertNotIn("HTML:", line.strip().lstrip("- "))
+
+    def test_group_prompt_no_separate_html_bullet(self):
+        section = self._get_prompt_section("GROUP_SUMMARY_PROMPT")
+        end = section.index('"""', 10)
+        prompt_text = section[:end]
+        lines = [l for l in prompt_text.split("\n") if l.strip().startswith("-")]
+        for line in lines:
+            self.assertNotIn("HTML:", line.strip().lstrip("- "))
+
+    def test_channel_prompt_has_compact_example(self):
+        section = self._get_prompt_section("CHANNEL_SUMMARY_PROMPT")
+        self.assertIn("Пример: '<b>🧠💧 Переходы</b>'", section)
+        self.assertNotIn("Переходы между AI-компаниями", section)
+
+    def test_group_prompt_has_compact_example(self):
+        section = self._get_prompt_section("GROUP_SUMMARY_PROMPT")
+        self.assertIn("Пример: '<b>🧠💧 Переходы</b>'", section)
+        self.assertNotIn("Переходы между AI-компаниями", section)
+
+
+class NewMetaArtifact20260710Tests(unittest.TestCase):
+    """Tests for new meta-artifact patterns added in 2026-07-10 round."""
+
+    def _import_utils(self):
+        fake_dotenv = types.ModuleType("dotenv")
+        fake_dotenv.load_dotenv = lambda: None
+        fake_openai = types.ModuleType("openai")
+
+        class FakeOpenAI:
+            def __init__(self, api_key, **kwargs):
+                pass
+
+        class FakeOpenAIError(Exception):
+            pass
+
+        fake_openai.OpenAI = FakeOpenAI
+        fake_openai.AsyncOpenAI = FakeOpenAI
+        fake_openai.APIError = FakeOpenAIError
+        fake_openai.RateLimitError = type("RateLimitError", (FakeOpenAIError,), {"status_code": None})
+        fake_openai.APIConnectionError = type("APIConnectionError", (FakeOpenAIError,), {})
+
+        with patch.dict(sys.modules, {"dotenv": fake_dotenv, "openai": fake_openai}):
+            with patch.dict(os.environ, REQUIRED_ENV, clear=True):
+                sys.modules.pop("config", None)
+                sys.modules.pop("utils", None)
+                import importlib
+                return importlib.import_module("utils")
+
+    def _strip(self, text):
+        utils = self._import_utils()
+        return utils.strip_meta_artifacts(text)
+
+    def test_strips_тем_не_менее_intro(self):
+        self.assertEqual(self._strip("Тем не менее, модель лучше\n<b>Тема</b>"), "<b>Тема</b>")
+
+    def test_strips_тем_не_менее_outro(self):
+        self.assertEqual(self._strip("<b>Тема</b>\nТем не менее, ограничения есть"), "<b>Тема</b>")
+
+    def test_strips_к_сожалению_intro(self):
+        self.assertEqual(self._strip("К сожалению, модель не справилась\n<b>Тема</b>"), "<b>Тема</b>")
+
+    def test_strips_к_сожалению_outro(self):
+        self.assertEqual(self._strip("<b>Тема</b>\nК сожалению, это не так"), "<b>Тема</b>")
+
+    def test_strips_неудивительно_intro(self):
+        self.assertEqual(self._strip("Неудивительно, что модель лучше\n<b>Тема</b>"), "<b>Тема</b>")
+
+    def test_strips_неудивительно_outro(self):
+        self.assertEqual(self._strip("<b>Тема</b>\nНеудивительно, результат ожидаемый"), "<b>Тема</b>")
+
+    def test_strips_что_примечательно_intro(self):
+        self.assertEqual(self._strip("Что примечательно, модель быстрая\n<b>Тема</b>"), "<b>Тема</b>")
+
+    def test_preserves_что_примечательно_in_body(self):
+        text = "<b>Модель</b>\nЭто что примечательно отличается от предшественников"
+        self.assertIn("что примечательно", self._strip(text))
+
+    def test_strips_примечательно_intro(self):
+        self.assertEqual(self._strip("Примечательно, что модель быстрее\n<b>Тема</b>"), "<b>Тема</b>")
+
+    def test_preserves_примечательно_in_body(self):
+        text = "<b>Модель</b>\nЭто примечательно отличается от предыдущей версии"
+        self.assertIn("примечательно", self._strip(text))
+
+    def test_strips_итоги_colon_intro(self):
+        self.assertEqual(self._strip("Итоги: модель GPT-5 вышла\n<b>Тема</b>"), "<b>Тема</b>")
+
+    def test_strips_выводы_colon_outro(self):
+        self.assertEqual(self._strip("<b>Тема</b>\nВыводы: модель превосходит"), "<b>Тема</b>")
+
+    def test_strips_результаты_colon_outro(self):
+        self.assertEqual(self._strip("<b>Тема</b>\nРезультаты: бенчмарки улучшены"), "<b>Тема</b>")
+
+    def test_preserves_итоги_without_colon(self):
+        text = "<b>Модель</b>\nОбсуждение итоги которого важны для анализа"
+        self.assertIn("итоги", self._strip(text).lower())
+
+    def test_preserves_результаты_without_colon(self):
+        text = "<b>Модель</b>\nРезультаты эксперимента подтверждают"
+        self.assertIn("Результаты", self._strip(text))
 
 
 if __name__ == "__main__":

@@ -8,7 +8,37 @@
 - Consider tuning warmup schedule frequency for cost-effectiveness
 - Consider adding Lambda provisioned concurrency for more predictable cold starts
 - Consider adding CloudWatch alarm on Lambda IteratorAge for stream-based event sources (if added in future)
-- Consider further merging summary prompt bullets (e.g., combine HTML header + body formatting rules)
+- Consider further compacting NLP_RELEVANCE_PROMPT accept/reject lists (e.g., merge overlapping categories)
+
+## Completed in 2026-07-10 round (HTML header+body merge, meta-artifacts expansion, colon section headers)
+
+- **Cost optimization — merged HTML header + body formatting rules**: Merged "Заголовки: короткие, с 1–3 несинонимичных эмодзи. Пример: '<b>🧠💧 Переходы между AI-компаниями</b>'" + "HTML: <b>текст</b>, не Markdown" into "Заголовки: короткие, 1–3 эмодзи, HTML <b>текст</b>, не Markdown. Пример: '<b>🧠💧 Переходы</b>'" in both [`CHANNEL_SUMMARY_PROMPT`](prompts.py) and [`GROUP_SUMMARY_PROMPT`](prompts.py). Reduced from 8 to 7 bullets per prompt. Removed verbose "несинонимичных" and shortened example. Saves ~15-20 input tokens per channel/group summary call. Directly addresses the TODO item "Consider further merging summary prompt bullets (e.g., combine HTML header + body formatting rules)".
+- **Quality — expanded `strip_meta_artifacts`**: Added "тем не менее", "к сожалению", "неудивительно" to both intro and outro patterns in [`_META_ARTIFACT_PATTERNS`](utils.py). Added "что примечательно", "примечательно" to [`_META_ARTIFACT_INTRO_ONLY`](utils.py). These are common LLM filler/transition phrases that violate the "Без введения, заключения и мета-комментариев" prompt rule. "к сожалению" and "неудивительно" are evaluative meta-comments; "тем не менее" is a contrastive transition filler; "что примечательно" and "примечательно" are evaluative meta-phrases at the start of summaries but can appear legitimately in body text (e.g., "Это примечательно отличается от предыдущей версии").
+- **Quality — added colon-terminated section headers**: Added "итоги", "выводы", "результаты" to the colon-terminated section header patterns in [`_META_ARTIFACT_PATTERNS`](utils.py). LLMs produce "Итоги:", "Выводы:", "Результаты:" as standalone section headers that violate the "один заголовок на тему" rule. The colon requirement preserves inline usage like "Результаты эксперимента подтверждают" in the body.
+- **Tests added**: 21 new tests (total 700, up from 679):
+  - `test_channel_prompt_has_merged_header_html_rule`: verifies merged Заголовки+HTML rule in channel prompt
+  - `test_group_prompt_has_merged_header_html_rule`: verifies merged rule in group prompt
+  - `test_channel_prompt_no_separate_html_bullet`: verifies no separate "HTML:" bullet in channel prompt
+  - `test_group_prompt_no_separate_html_bullet`: verifies no separate "HTML:" bullet in group prompt
+  - `test_channel_prompt_has_compact_example`: verifies shortened example in channel prompt
+  - `test_group_prompt_has_compact_example`: verifies shortened example in group prompt
+  - `test_strips_тем_не_менее_intro`: verifies "Тем не менее" stripped from summary start
+  - `test_strips_тем_не_менее_outro`: verifies "Тем не менее" stripped from summary end
+  - `test_strips_к_сожалению_intro`: verifies "К сожалению" stripped from summary start
+  - `test_strips_к_сожалению_outro`: verifies "К сожалению" stripped from summary end
+  - `test_strips_неудивительно_intro`: verifies "Неудивительно" stripped from summary start
+  - `test_strips_неудивительно_outro`: verifies "Неудивительно" stripped from summary end
+  - `test_strips_что_примечательно_intro`: verifies "Что примечательно" stripped from summary start
+  - `test_preserves_что_примечательно_in_body`: verifies "что примечательно" in body preserved
+  - `test_strips_примечательно_intro`: verifies "Примечательно" stripped from summary start
+  - `test_preserves_примечательно_in_body`: verifies "примечательно" in body preserved
+  - `test_strips_итоги_colon_intro`: verifies "Итоги:" section header stripped
+  - `test_strips_выводы_colon_outro`: verifies "Выводы:" section header stripped
+  - `test_strips_результаты_colon_outro`: verifies "Результаты:" section header stripped
+  - `test_preserves_итоги_without_colon`: verifies "итоги" without colon preserved in body
+  - `test_preserves_результаты_without_colon`: verifies "Результаты" without colon preserved in body
+- Updated `test_channel_prompt_has_compact_html_rule` → `test_channel_prompt_has_merged_html_rule` — now asserts merged "HTML <b>текст</b>, не Markdown" wording.
+- All 700 tests pass without errors.
 
 ## Completed in 2026-07-09 round (prompt bullet merging, meta-artifacts expansion)
 
