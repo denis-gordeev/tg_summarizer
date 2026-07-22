@@ -1,8 +1,11 @@
 import re
 from openai import OpenAI
-from config import OPENAI_API_KEY
+from config import LLM_API_KEY, LLM_MODEL, LLM_URL
 
-openai_client = OpenAI(api_key=OPENAI_API_KEY)
+client_options = {"api_key": LLM_API_KEY}
+if LLM_URL:
+    client_options["base_url"] = LLM_URL
+openai_client = OpenAI(**client_options)
 
 LINK_REGEX = re.compile(r"https?://\S+")
 TELEGRAM_CHANNEL_REGEX = re.compile(r"https://t\.me/([^/]+)/\d+")
@@ -66,14 +69,14 @@ def extract_all_channels(text: str) -> list[str]:
 
 
 async def call_openai(system_prompt: str, user_content: str, max_tokens: int = 300) -> str:
-    """Универсальная функция для вызова OpenAI API."""
+    """Универсальная функция для вызова OpenAI-совместимого API."""
     try:
         response = openai_client.chat.completions.create(
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content}
             ],
-            model="gpt-4o-mini",
+            model=LLM_MODEL,
             max_tokens=max_tokens,
         )
         result = response.choices[0].message.content
@@ -81,10 +84,10 @@ async def call_openai(system_prompt: str, user_content: str, max_tokens: int = 3
             return ""
         return result.strip()
     except Exception as e:
-        print(f"OpenAI API error: {e}")
+        print(f"LLM API error: {e}")
         return ""
 
 
 def extract_links(text: str) -> list[str]:
     """Return all URLs from a string."""
-    return LINK_REGEX.findall(text) 
+    return LINK_REGEX.findall(text)

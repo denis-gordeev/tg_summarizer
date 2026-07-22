@@ -1,5 +1,6 @@
 annotated-types==0.7.0 ; python_version >= "3.12"
 anyio==4.10.0 ; python_version >= "3.12"
+boto3>=1.40.0,<2.0.0 ; python_version >= "3.12"
 certifi==2025.8.3 ; python_version >= "3.12"
 colorama==0.4.6 ; python_version >= "3.12" and platform_system == "Windows"
 distro==1.9.0 ; python_version >= "3.12"
