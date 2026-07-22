@@ -26,10 +26,18 @@ TARGET_CHANNEL: int | str = target_channel
 if isinstance(TARGET_CHANNEL, str) and TARGET_CHANNEL.startswith("-"):
     TARGET_CHANNEL = int(TARGET_CHANNEL)
 
-openai_api_key = os.getenv('OPENAI_API_KEY')
-if not openai_api_key:
-    raise ValueError("OPENAI_API_KEY environment variable is required")
-OPENAI_API_KEY = openai_api_key
+llm_api_key = os.getenv('LLM_API_KEY') or os.getenv('OPENAI_API_KEY')
+if not llm_api_key:
+    raise ValueError("LLM_API_KEY or OPENAI_API_KEY environment variable is required")
+LLM_API_KEY = llm_api_key
+
+# Any OpenAI-compatible API can be used. When LLM_URL is not set, the OpenAI
+# SDK uses its standard endpoint, preserving the previous behaviour.
+LLM_URL = os.getenv('LLM_URL') or None
+LLM_MODEL = os.getenv('LLM_MODEL', 'gpt-4o-mini')
+
+# Backwards-compatible alias for integrations importing the old setting.
+OPENAI_API_KEY = LLM_API_KEY
 
 source_channels_str = os.getenv('SOURCE_CHANNELS', '')
 SOURCE_CHANNELS = set([c.strip() for c in source_channels_str.split(',') if c.strip()])

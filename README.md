@@ -172,9 +172,23 @@ SOURCE_CHANNELS=@nlp_channel,@ml_news,@ai_research
 SOURCE_GROUPS=@your_group1,@your_group2
 TARGET_GROUP_CHANNEL=@your_group_target_channel  # По умолчанию тот же TARGET_CHANNEL
 
-# OpenAI API key
+# LLM (OpenAI by default)
 OPENAI_API_KEY=sk-your_openai_api_key_here
+LLM_MODEL=gpt-4o-mini
 ```
+
+Для OpenRouter укажите совместимый endpoint, ключ и модель. В этом случае
+`OPENAI_API_KEY` можно не задавать:
+
+```env
+LLM_URL=https://openrouter.ai/api/v1
+LLM_API_KEY=sk-or-v1-your_openrouter_key
+LLM_MODEL=openai/gpt-4o-mini
+```
+
+`LLM_URL` опционален: без него используется стандартный endpoint OpenAI.
+`LLM_API_KEY` имеет приоритет над `OPENAI_API_KEY`, который оставлен для
+обратной совместимости.
 
 #### Настройка групп
 
@@ -284,6 +298,8 @@ TELEGRAM_BOT_TOKEN=...
 TARGET_CHANNEL=@your_target_channel
 OPENAI_API_KEY=...
 # Опционально
+LLM_URL=https://openrouter.ai/api/v1
+LLM_MODEL=openai/gpt-4o-mini
 SOURCE_CHANNELS=@a,@b
 SOURCE_GROUPS=@g1,@g2
 ```
